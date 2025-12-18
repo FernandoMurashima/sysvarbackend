@@ -1,0 +1,244 @@
+from rest_framework import serializers
+from django.db import transaction
+from django.utils import timezone
+from .models import (
+    ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
+    Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
+    TabelaprecoProduto, Pack, PackItem, Estoque
+)
+
+# ---------- Aux ----------
+def ean13_check_digit(base12: str) -> str:
+    s = 0
+    for i, ch in enumerate(base12):
+        n = int(ch)
+        if i % 2 == 0:
+            s += n
+        else:
+            s += 3 * n
+    return str((10 - (s % 10)) % 10)
+
+def _alocar_itemref_do_prefixo_ativo():
+    cfg = ConfigEan.objects.select_for_update().filter(ativo=True).order_by('id').first()
+    if not cfg:
+        raise serializers.ValidationError('Nenhum prefixo GS1 ativo encontrado. Cadastre/ative em ConfigEan.')
+    val = cfg.next_itemref or 1
+    if val > 99999:
+        raise serializers.ValidationError(f'Prefixo {cfg.company_prefix} esgotado (>= 100000). Cadastre/ative outro.')
+    item = f"{val:05d}"
+    cfg.next_itemref = val + 1
+    cfg.save(update_fields=['next_itemref'])
+    return cfg, item
+
+def _only_digits(s: str) -> str:
+    return ''.join(ch for ch in (s or '') if ch.isdigit())
+
+def _normalize_ncm_dotted(raw: str) -> str:
+    if not raw:
+        raise serializers.ValidationError({'ncm': 'Informe o NCM.'})
+    s = str(raw).strip()
+    if len(s) == 10 and s[4:5] == '.' and s[7:8] == '.' and s.replace('.', '').isdigit():
+        return s
+    d = _only_digits(s)
+    if len(d) == 8:
+        return f'{d[:4]}.{d[4:6]}.{d[6:8]}'
+    raise serializers.ValidationError({'ncm': 'Formato inválido. Use ####.##.## ou 8 dígitos.'})
+
+# ---------- Cadastros mestres ----------
+class ConfigEanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigEan
+        fields = '__all__'
+
+class NcmSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ncm
+        fields = '__all__'
+
+class GradeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Grade
+        fields = '__all__'
+
+class TamanhoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tamanho
+        fields = '__all__'
+
+class CorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cor
+        fields = '__all__'
+
+class MaterialSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Material
+        fields = '__all__'
+
+class ColecaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Colecao
+        fields = '__all__'
+
+class UnidadeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Unidade
+        fields = '__all__'
+
+class GrupoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Grupo
+        fields = '__all__'
+
+class SubgrupoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subgrupo
+        fields = '__all__'
+
+class TabelaprecoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tabelapreco
+        fields = '__all__'
+
+class CodigosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Codigos
+        fields = '__all__'
+
+class PackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Pack
+        fields = '__all__'
+
+class PackItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PackItem
+        fields = '__all__'
+
+class EstoqueSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Estoque
+        fields = '__all__'
+
+# ---------- Produto / SKU / Preço ----------
+class ProdutoSerializer(serializers.ModelSerializer):
+    referencia = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = Produto
+        fields = '__all__'
+
+    def validate(self, attrs):
+        tipo = attrs.get('tipo_produto', getattr(self.instance, 'tipo_produto', None))
+        grade = attrs.get('grade', getattr(self.instance, 'grade', None))
+        colecao = attrs.get('colecao', getattr(self.instance, 'colecao', None))
+        grupo = attrs.get('grupo', getattr(self.instance, 'grupo', None))
+        ncm_raw = attrs.get('ncm', getattr(self.instance, 'ncm', None))
+
+        if tipo == '1':  # Revenda
+            if 'referencia' in self.initial_data and self.initial_data.get('referencia'):
+                raise serializers.ValidationError({'referencia': 'Gerada automaticamente para produto de Revenda.'})
+            if not colecao or not getattr(colecao, 'Codigo', None) or not getattr(colecao, 'Estacao', None):
+                raise serializers.ValidationError({'colecao': 'Coleção com Código (2 dígitos) e Estação (2 dígitos) é obrigatória.'})
+            if not grupo or not getattr(grupo, 'CodigoRef', None):
+                raise serializers.ValidationError({'grupo': 'Grupo com CodigoRef (2 dígitos) é obrigatório.'})
+            if grade is None:
+                raise serializers.ValidationError({'grade': 'Obrigatória para produto de Revenda.'})
+            ncm_fmt = _normalize_ncm_dotted(ncm_raw)
+            if not Ncm.objects.filter(ncm=ncm_fmt).exists():
+                raise serializers.ValidationError({'ncm': f'NCM {ncm_fmt} não cadastrado.'})
+            attrs['ncm'] = ncm_fmt
+        elif tipo == '2':  # Uso/Consumo
+            if 'referencia' in self.initial_data and self.initial_data.get('referencia'):
+                raise serializers.ValidationError({'referencia': 'Não deve ser informada para Uso/Consumo.'})
+            if grade is not None:
+                raise serializers.ValidationError({'grade': 'Não deve ser informada para Uso/Consumo.'})
+            if ncm_raw:
+                ncm_fmt = _normalize_ncm_dotted(ncm_raw)
+                if not Ncm.objects.filter(ncm=ncm_fmt).exists():
+                    raise serializers.ValidationError({'ncm': f'NCM {ncm_fmt} não cadastrado.'})
+                attrs['ncm'] = ncm_fmt
+        else:
+            raise serializers.ValidationError({'tipo_produto': 'Tipo inválido.'})
+
+        return attrs
+
+class ProdutoDetalheSerializer(serializers.ModelSerializer):
+    ean13 = serializers.CharField(read_only=True)
+    config_ean = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = ProdutoDetalhe
+        fields = '__all__'
+        extra_kwargs = {
+            'codigo_item_ref': {'required': False},
+        }
+
+    def validate(self, attrs):
+        for f in ('codigo_item_ref', 'ean13', 'config_ean'):
+            if f in self.initial_data and self.initial_data.get(f):
+                raise serializers.ValidationError({f: 'É gerado automaticamente; não envie manualmente.'})
+
+        produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
+        tamanho = attrs.get('idtamanho') or getattr(self.instance, 'idtamanho', None)
+
+        if not produto or not tamanho:
+            return attrs
+
+        if produto.tipo_produto != '1':
+            raise serializers.ValidationError('ProdutoDetalhe só é permitido para produto de Revenda.')
+
+        if produto.grade_id and tamanho.idgrade_id != produto.grade_id:
+            raise serializers.ValidationError('Tamanho não pertence à grade do produto.')
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        cfg, item = _alocar_itemref_do_prefixo_ativo()
+        validated_data['config_ean'] = cfg
+        validated_data['codigo_item_ref'] = item
+
+        base12 = f"{cfg.country_prefix}{cfg.company_prefix}{item}"
+        if len(base12) != 12 or not base12.isdigit():
+            raise serializers.ValidationError('Base EAN inválida (verifique prefixos e o item de 5 dígitos).')
+
+        dv = ean13_check_digit(base12)
+        validated_data['ean13'] = base12 + dv
+
+        return super().create(validated_data)
+
+class TabelaprecoProdutoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TabelaprecoProduto
+        fields = '__all__'
+
+    def validate(self, attrs):
+        produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
+        if produto and produto.tipo_produto != '1':
+            raise serializers.ValidationError('Preço só é permitido para produto de Revenda.')
+        return attrs
+
+    # >>> FIX: garante date (não datetime) sem precisar migrar o Model
+    def create(self, validated_data):
+        if not validated_data.get('DataInicio'):
+            # localdate() retorna date já no fuso configurado
+            validated_data['DataInicio'] = timezone.localdate()
+        # Se vier acidentalmente datetime em DataFim, converte
+        df = validated_data.get('DataFim')
+        if hasattr(df, 'date'):
+            validated_data['DataFim'] = df.date()
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        di = validated_data.get('DataInicio', None)
+        if di is None:
+            # mantém como date caso model tenha recebido datetime antes de salvar
+            instance.DataInicio = getattr(instance, 'DataInicio', None) or timezone.localdate()
+        elif hasattr(di, 'date'):
+            validated_data['DataInicio'] = di.date()
+        df = validated_data.get('DataFim', None)
+        if hasattr(df, 'date'):
+            validated_data['DataFim'] = df.date()
+        return super().update(instance, validated_data)
+# <<< end serializer

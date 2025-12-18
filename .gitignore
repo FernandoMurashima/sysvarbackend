@@ -1,0 +1,51 @@
+cd C:\bolao2026\backend
+
+# apagar repo git antigo
+rmdir /S /Q .git
+
+# criar .gitignore do backend
+@"
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+.venv/
+env/
+ENV/
+
+db.sqlite3
+*.sqlite3
+
+staticfiles/
+media/
+
+build/
+dist/
+*.egg-info/
+
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+.env
+.env.*
+*.env
+"@ | Out-File -Encoding utf8 .gitignore
+
+# iniciar novo repo e primeiro commit
+git init
+git add .
+git commit -m "Backend bolao2026 - versao inicial"
+
+# apontar para o novo repo do backend
+git branch -M main
+git remote add origin https://github.com/SEU_USUARIO/REPO_BACKEND.git
+git push -u origin main

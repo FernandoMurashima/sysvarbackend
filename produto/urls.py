@@ -1,0 +1,31 @@
+from rest_framework.routers import DefaultRouter
+from .views import (
+    ConfigEanViewSet, NcmViewSet, GradeViewSet, TamanhoViewSet, CorViewSet, MaterialViewSet,
+    ColecaoViewSet, UnidadeViewSet, GrupoViewSet, SubgrupoViewSet, TabelaprecoViewSet,
+    CodigosViewSet, ProdutoViewSet, ProdutoDetalheViewSet, TabelaprecoProdutoViewSet,
+    PackViewSet, PackItemViewSet, EstoqueViewSet
+)
+
+router = DefaultRouter()
+router.register('config-ean', ConfigEanViewSet)
+router.register('ncm', NcmViewSet)
+router.register('grade', GradeViewSet)
+router.register('tamanho', TamanhoViewSet)
+router.register('cor', CorViewSet)
+router.register('material', MaterialViewSet)
+router.register('colecao', ColecaoViewSet)
+router.register('unidade', UnidadeViewSet)
+router.register('grupo', GrupoViewSet)
+router.register('subgrupo', SubgrupoViewSet)
+router.register('tabela-preco', TabelaprecoViewSet)
+router.register('codigos', CodigosViewSet)
+
+router.register('produto', ProdutoViewSet)
+router.register('produto-detalhe', ProdutoDetalheViewSet)
+router.register('produto-preco', TabelaprecoProdutoViewSet)
+
+router.register('pack', PackViewSet)
+router.register('pack-item', PackItemViewSet)
+router.register('estoque', EstoqueViewSet)
+
+urlpatterns = router.urls
