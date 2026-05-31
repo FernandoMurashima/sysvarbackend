@@ -5,16 +5,18 @@ from cadastros.models import Loja
 User = get_user_model()
 
 class LojaMiniSerializer(serializers.ModelSerializer):
+    Idloja = serializers.IntegerField(source="id", read_only=True)
+
     class Meta:
         model = Loja
         fields = ("Idloja", "nome_loja", "apelido_loja")
 
 class UserSerializer(serializers.ModelSerializer):
     # leitura amigável da loja
-    loja = LojaMiniSerializer(source="Idloja", read_only=True)
+    loja = LojaMiniSerializer(read_only=True)
     # gravação por PK
     Idloja = serializers.PrimaryKeyRelatedField(
-        queryset=Loja.objects.all(), allow_null=True, required=False
+        source="loja", queryset=Loja.objects.all(), allow_null=True, required=False
     )
     # permitir criar/alterar senha via API (write-only)
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)

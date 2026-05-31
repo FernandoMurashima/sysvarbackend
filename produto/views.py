@@ -1,7 +1,8 @@
 from rest_framework import viewsets, status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 try:
@@ -10,17 +11,20 @@ except Exception:  # auditoria opcionalmente ausente em dev
     AuditLog = None
 
 from .permissions import CanToggleProductFlags
+from accounts.permissions import HasModuleRole
 
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Pack, PackItem, Estoque
+    TabelaprecoProduto, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    InventarioEstoque, InventarioEstoqueItem
 )
 from .serializers import (
     ConfigEanSerializer, NcmSerializer, GradeSerializer, TamanhoSerializer, CorSerializer,
     MaterialSerializer, ColecaoSerializer, UnidadeSerializer, GrupoSerializer, SubgrupoSerializer,
     TabelaprecoSerializer, CodigosSerializer, ProdutoSerializer, ProdutoDetalheSerializer,
-    TabelaprecoProdutoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer
+    TabelaprecoProdutoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
+    EstoqueMovimentacaoSerializer, InventarioEstoqueSerializer, InventarioEstoqueItemSerializer
 )
 
 
@@ -47,7 +51,9 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str):
 
 
 class BaseViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "Auxiliar", "Assistente", "Regular"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
 
 
 class ConfigEanViewSet(BaseViewSet):
@@ -422,3 +428,163 @@ class PackItemViewSet(BaseViewSet):
 class EstoqueViewSet(BaseViewSet):
     queryset = Estoque.objects.all()
     serializer_class = EstoqueSerializer
+
+    def get_queryset(self):
+        qs = Estoque.objects.all().order_by('referencia', 'CodigodeBarra', 'Idloja_id')
+        loja = self.request.query_params.get('loja')
+        referencia = self.request.query_params.get('referencia')
+        ean = self.request.query_params.get('ean')
+        colecao = self.request.query_params.get('colecao')
+        estacao = self.request.query_params.get('estacao')
+        search = self.request.query_params.get('search')
+        if loja:
+            qs = qs.filter(Idloja_id=loja)
+        if referencia:
+            qs = qs.filter(referencia__icontains=referencia)
+        if ean:
+            qs = qs.filter(CodigodeBarra__icontains=ean)
+        if search:
+            qs = qs.filter(Q(referencia__icontains=search) | Q(CodigodeBarra__icontains=search))
+        if colecao or estacao:
+            produto_qs = Produto.objects.all()
+            if colecao:
+                produto_qs = produto_qs.filter(colecao__Codigo=colecao)
+            if estacao:
+                produto_qs = produto_qs.filter(colecao__Estacao=estacao)
+            refs = produto_qs.exclude(referencia__isnull=True).values_list('referencia', flat=True)
+            qs = qs.filter(referencia__in=refs)
+        return qs
+
+
+class EstoqueMovimentacaoViewSet(BaseViewSet):
+    queryset = EstoqueMovimentacao.objects.all()
+    serializer_class = EstoqueMovimentacaoSerializer
+
+    def get_queryset(self):
+        qs = EstoqueMovimentacao.objects.all()
+        loja = self.request.query_params.get('loja')
+        referencia = self.request.query_params.get('referencia')
+        ean = self.request.query_params.get('ean')
+        tipo = self.request.query_params.get('tipo')
+        if loja:
+            qs = qs.filter(Idloja_id=loja)
+        if referencia:
+            qs = qs.filter(referencia__icontains=referencia)
+        if ean:
+            qs = qs.filter(CodigodeBarra__icontains=ean)
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        return qs
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        ean = serializer.validated_data['CodigodeBarra']
+        loja = serializer.validated_data['Idloja']
+        tipo = serializer.validated_data['tipo']
+        qtd = serializer.validated_data['quantidade']
+        sku = ProdutoDetalhe.objects.select_related('produto').filter(ean13=ean).first()
+        referencia = serializer.validated_data.get('referencia') or (sku.produto.referencia if sku else '')
+
+        estoque, _ = Estoque.objects.select_for_update().get_or_create(
+            CodigodeBarra=ean,
+            Idloja=loja,
+            defaults={'referencia': referencia or '', 'Estoque': 0, 'reserva': 0},
+        )
+        anterior = estoque.Estoque or 0
+        reserva = estoque.reserva or 0
+        if tipo == EstoqueMovimentacao.TIPO_ENTRADA:
+            posterior = anterior + abs(qtd)
+        elif tipo == EstoqueMovimentacao.TIPO_SAIDA:
+            posterior = anterior - abs(qtd)
+        elif tipo == EstoqueMovimentacao.TIPO_RESERVA:
+            posterior = anterior
+            reserva = reserva + abs(qtd)
+        else:
+            posterior = qtd
+
+        estoque.referencia = referencia or estoque.referencia
+        estoque.Estoque = posterior
+        estoque.reserva = reserva
+        estoque.save(update_fields=['referencia', 'Estoque', 'reserva'])
+        serializer.save(referencia=referencia or '', saldo_anterior=anterior, saldo_posterior=posterior)
+
+
+class InventarioEstoqueViewSet(BaseViewSet):
+    queryset = InventarioEstoque.objects.all()
+    serializer_class = InventarioEstoqueSerializer
+
+    def get_queryset(self):
+        qs = InventarioEstoque.objects.all()
+        loja = self.request.query_params.get('loja')
+        status_q = self.request.query_params.get('status')
+        if loja:
+            qs = qs.filter(Idloja_id=loja)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='gerar-itens')
+    def gerar_itens(self, request, pk=None):
+        inv = self.get_object()
+        estoques = Estoque.objects.filter(Idloja=inv.Idloja).order_by('referencia', 'CodigodeBarra')
+        created = 0
+        for est in estoques:
+            _, was_created = InventarioEstoqueItem.objects.get_or_create(
+                inventario=inv,
+                CodigodeBarra=est.CodigodeBarra,
+                defaults={
+                    'referencia': est.referencia,
+                    'saldo_sistema': est.Estoque or 0,
+                    'saldo_contado': est.Estoque or 0,
+                },
+            )
+            if was_created:
+                created += 1
+        return Response({'created': created})
+
+    @action(detail=True, methods=['post'], url_path='fechar')
+    @transaction.atomic
+    def fechar(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Inventário não está aberto.'}, status=status.HTTP_400_BAD_REQUEST)
+        for item in inv.itens.all():
+            if item.diferenca == 0:
+                continue
+            mov_tipo = EstoqueMovimentacao.TIPO_AJUSTE
+            est, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=item.CodigodeBarra,
+                Idloja=inv.Idloja,
+                defaults={'referencia': item.referencia, 'Estoque': 0, 'reserva': 0},
+            )
+            anterior = est.Estoque or 0
+            est.Estoque = item.saldo_contado
+            est.referencia = item.referencia
+            est.save(update_fields=['Estoque', 'referencia'])
+            EstoqueMovimentacao.objects.create(
+                Idloja=inv.Idloja,
+                CodigodeBarra=item.CodigodeBarra,
+                referencia=item.referencia,
+                tipo=mov_tipo,
+                quantidade=item.saldo_contado,
+                saldo_anterior=anterior,
+                saldo_posterior=item.saldo_contado,
+                documento=f'INV-{inv.pk}',
+                observacao='Ajuste por inventário',
+            )
+        inv.status = InventarioEstoque.STATUS_FECHADO
+        inv.data_fechamento = timezone.localdate()
+        inv.save(update_fields=['status', 'data_fechamento'])
+        return Response(self.get_serializer(inv).data)
+
+
+class InventarioEstoqueItemViewSet(BaseViewSet):
+    queryset = InventarioEstoqueItem.objects.all()
+    serializer_class = InventarioEstoqueItemSerializer
+
+    def get_queryset(self):
+        qs = InventarioEstoqueItem.objects.all().order_by('referencia', 'CodigodeBarra')
+        inventario = self.request.query_params.get('inventario')
+        if inventario:
+            qs = qs.filter(inventario_id=inventario)
+        return qs

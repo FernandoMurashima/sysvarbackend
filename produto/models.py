@@ -488,3 +488,103 @@ class Estoque(models.Model):
 
     def __str__(self):
         return f'{self.CodigodeBarra} - {self.Estoque}'
+
+
+class EstoqueMovimentacao(models.Model):
+    TIPO_ENTRADA = 'ENTRADA'
+    TIPO_SAIDA = 'SAIDA'
+    TIPO_AJUSTE = 'AJUSTE'
+    TIPO_RESERVA = 'RESERVA'
+    TIPO_CHOICES = [
+        (TIPO_ENTRADA, 'Entrada'),
+        (TIPO_SAIDA, 'Saída'),
+        (TIPO_AJUSTE, 'Ajuste'),
+        (TIPO_RESERVA, 'Reserva'),
+    ]
+
+    Idmovimento = models.BigAutoField(primary_key=True)
+    Idloja = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, db_index=True)
+    CodigodeBarra = models.CharField(
+        max_length=13,
+        validators=[RegexValidator(r'^\d{13}$', 'EAN-13 deve ter exatamente 13 dígitos.')],
+        db_index=True,
+    )
+    referencia = models.CharField(max_length=30, default='', db_index=True)
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, db_index=True)
+    quantidade = models.IntegerField()
+    saldo_anterior = models.IntegerField(default=0)
+    saldo_posterior = models.IntegerField(default=0)
+    documento = models.CharField(max_length=50, null=True, blank=True)
+    observacao = models.CharField(max_length=255, null=True, blank=True)
+    data_movimento = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = 'produto_estoque_movimentacao'
+        indexes = [
+            models.Index(fields=['Idloja', 'CodigodeBarra']),
+            models.Index(fields=['referencia']),
+            models.Index(fields=['tipo', 'data_movimento']),
+        ]
+        ordering = ['-data_movimento', '-Idmovimento']
+
+    def __str__(self):
+        return f'{self.Idmovimento} - {self.tipo} - {self.CodigodeBarra}'
+
+
+class InventarioEstoque(models.Model):
+    STATUS_ABERTO = 'ABERTO'
+    STATUS_FECHADO = 'FECHADO'
+    STATUS_CANCELADO = 'CANCELADO'
+    STATUS_CHOICES = [
+        (STATUS_ABERTO, 'Aberto'),
+        (STATUS_FECHADO, 'Fechado'),
+        (STATUS_CANCELADO, 'Cancelado'),
+    ]
+
+    Idinventario = models.BigAutoField(primary_key=True)
+    Idloja = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, db_index=True)
+    descricao = models.CharField(max_length=120)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ABERTO, db_index=True)
+    data_abertura = models.DateField(default=timezone.now)
+    data_fechamento = models.DateField(null=True, blank=True)
+    observacao = models.CharField(max_length=255, null=True, blank=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'produto_inventario_estoque'
+        ordering = ['-data_abertura', '-Idinventario']
+
+    def __str__(self):
+        return f'{self.Idinventario} - {self.descricao}'
+
+
+class InventarioEstoqueItem(models.Model):
+    Idinventarioitem = models.BigAutoField(primary_key=True)
+    inventario = models.ForeignKey(InventarioEstoque, on_delete=models.CASCADE, related_name='itens')
+    CodigodeBarra = models.CharField(
+        max_length=13,
+        validators=[RegexValidator(r'^\d{13}$', 'EAN-13 deve ter exatamente 13 dígitos.')],
+    )
+    referencia = models.CharField(max_length=30, default='')
+    saldo_sistema = models.IntegerField(default=0)
+    saldo_contado = models.IntegerField(default=0)
+    diferenca = models.IntegerField(default=0)
+    observacao = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        db_table = 'produto_inventario_estoque_item'
+        constraints = [
+            models.UniqueConstraint(fields=['inventario', 'CodigodeBarra'], name='uq_inventario_item_ean')
+        ]
+        indexes = [
+            models.Index(fields=['inventario']),
+            models.Index(fields=['CodigodeBarra']),
+            models.Index(fields=['referencia']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.diferenca = (self.saldo_contado or 0) - (self.saldo_sistema or 0)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.inventario_id} - {self.CodigodeBarra}'

@@ -1,6 +1,6 @@
 from rest_framework import viewsets, permissions, filters
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import HasModuleRole
 
 from .models import Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
 from .serializers import (
@@ -13,7 +13,9 @@ from .serializers import (
 
 
 class BaseCadastroViewSet(viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "AssistenteReceber", "AssistentePagar", "Auxiliar", "Assistente", "Regular"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     # Em cada ViewSet definimos filterset_fields, search_fields, ordering_fields e ordering
 
@@ -61,7 +63,9 @@ class FuncionariosViewSet(BaseCadastroViewSet):
 class NatLancamentoViewSet(viewsets.ModelViewSet):
     queryset = Nat_Lancamento.objects.all().order_by("codigo")
     serializer_class = NatLancamentoSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor"]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "codigo", "categoria_principal", "subcategoria",

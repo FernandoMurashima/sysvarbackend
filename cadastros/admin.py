@@ -79,7 +79,7 @@ class FornecedorAdmin(admin.ModelAdmin):
 
 @admin.register(Funcionarios)
 class FuncionariosAdmin(admin.ModelAdmin):
-    list_display = ("id", "nomefuncionario", "apelido", "cpf", "categoria", "idloja", "meta", "ativo", "data_cadastro")
+    list_display = ("id", "nomefuncionario", "apelido", "cpf", "categoria", "idloja", "meta", "comissao_percentual", "ativo", "data_cadastro")
     list_filter = ("categoria", "ativo", "idloja")
     search_fields = ("nomefuncionario", "apelido", "cpf")
     ordering = ("nomefuncionario",)

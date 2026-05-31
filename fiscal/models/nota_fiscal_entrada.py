@@ -1,6 +1,12 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django.conf import settings
 from django.db import models
 from django.db.models import UniqueConstraint, Index
+
+
+def _money(value):
+    return Decimal(value or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class NotaFiscalEntrada(models.Model):
@@ -67,6 +73,15 @@ class NotaFiscalEntrada(models.Model):
 
     def __str__(self) -> str:
         return f"NFE {self.modelo}/{self.serie}/{self.numero} (Pedido {self.pedido_compra_id})"
+
+    def recalcular_totais(self):
+        itens = list(self.itens.all())
+        self.valor_produtos = _money(
+            sum(Decimal(item.qtd_recebida or 0) * Decimal(item.preco_unit_nf or 0) for item in itens)
+        )
+        self.valor_desconto = _money(sum((item.desconto_item or 0) for item in itens))
+        self.valor_total = _money((self.valor_produtos or 0) - (self.valor_desconto or 0) + (self.valor_frete or 0))
+        self.save(update_fields=["valor_produtos", "valor_desconto", "valor_total", "atualizado_em"])
 
 
 class NotaFiscalEntradaItem(models.Model):

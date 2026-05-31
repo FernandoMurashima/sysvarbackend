@@ -3,7 +3,8 @@ from .views import (
     ConfigEanViewSet, NcmViewSet, GradeViewSet, TamanhoViewSet, CorViewSet, MaterialViewSet,
     ColecaoViewSet, UnidadeViewSet, GrupoViewSet, SubgrupoViewSet, TabelaprecoViewSet,
     CodigosViewSet, ProdutoViewSet, ProdutoDetalheViewSet, TabelaprecoProdutoViewSet,
-    PackViewSet, PackItemViewSet, EstoqueViewSet
+    PackViewSet, PackItemViewSet, EstoqueViewSet, EstoqueMovimentacaoViewSet,
+    InventarioEstoqueViewSet, InventarioEstoqueItemViewSet
 )
 
 router = DefaultRouter()
@@ -27,5 +28,8 @@ router.register('produto-preco', TabelaprecoProdutoViewSet)
 router.register('pack', PackViewSet)
 router.register('pack-item', PackItemViewSet)
 router.register('estoque', EstoqueViewSet)
+router.register('estoque-movimentacao', EstoqueMovimentacaoViewSet)
+router.register('inventario-estoque', InventarioEstoqueViewSet)
+router.register('inventario-estoque-item', InventarioEstoqueItemViewSet)
 
 urlpatterns = router.urls

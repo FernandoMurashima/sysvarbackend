@@ -133,6 +133,7 @@ class Funcionarios(models.Model):
     fim = models.DateField(null=True, blank=True, db_index=True)
     categoria = models.CharField(max_length=15, null=True, blank=True, db_index=True)
     meta = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, db_index=True)
+    comissao_percentual = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     idloja = models.ForeignKey(Loja, on_delete=models.CASCADE, null=True, blank=True, related_name='funcionarios', db_index=True)
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)

@@ -4,7 +4,8 @@ from django.utils import timezone
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Pack, PackItem, Estoque
+    TabelaprecoProduto, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    InventarioEstoque, InventarioEstoqueItem
 )
 
 # ---------- Aux ----------
@@ -118,6 +119,28 @@ class PackItemSerializer(serializers.ModelSerializer):
 class EstoqueSerializer(serializers.ModelSerializer):
     class Meta:
         model = Estoque
+        fields = '__all__'
+
+
+class EstoqueMovimentacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EstoqueMovimentacao
+        fields = '__all__'
+        read_only_fields = ('saldo_anterior', 'saldo_posterior', 'data_movimento')
+
+
+class InventarioEstoqueItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventarioEstoqueItem
+        fields = '__all__'
+        read_only_fields = ('diferenca',)
+
+
+class InventarioEstoqueSerializer(serializers.ModelSerializer):
+    itens = InventarioEstoqueItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InventarioEstoque
         fields = '__all__'
 
 # ---------- Produto / SKU / Preço ----------

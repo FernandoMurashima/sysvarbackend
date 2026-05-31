@@ -1,6 +1,8 @@
 from django.contrib import admin
 from .models import (
+    Caixa, ContaBancaria, MovimentacaoFinanceira,
     Pagar, PagarItem, PagarRateio,
+    Receber, ReceberItem, ReceberRateio,
     FormaPagamento, FormaPagamentoParcela
 )
 
@@ -61,6 +63,78 @@ class PagarRateioAdmin(admin.ModelAdmin):
     list_display = ("Idrateio", "Idpagaritem", "Idnatureza", "valor", "centro_custo")
     list_filter = ("Idnatureza",)
     search_fields = ("Idrateio", "Idpagaritem__Idpagaritem")
+
+
+class ReceberRateioInline(admin.TabularInline):
+    model = ReceberRateio
+    extra = 0
+    fields = ("Idnatureza", "valor", "centro_custo")
+    show_change_link = True
+
+
+@admin.register(Caixa)
+class CaixaAdmin(admin.ModelAdmin):
+    list_display = ("Idcaixa", "tipo_caixa", "idloja", "codigo", "descricao", "saldo_atual", "ativo")
+    list_filter = ("idloja", "ativo")
+    search_fields = ("codigo", "descricao")
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(ContaBancaria)
+class ContaBancariaAdmin(admin.ModelAdmin):
+    list_display = ("Idconta", "idloja", "banco", "agencia", "conta", "tipo_conta", "saldo_atual", "ativo")
+    list_filter = ("idloja", "tipo_conta", "ativo")
+    search_fields = ("descricao", "banco", "agencia", "conta")
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(MovimentacaoFinanceira)
+class MovimentacaoFinanceiraAdmin(admin.ModelAdmin):
+    list_display = ("Idmovimentacao", "idloja", "data_movimento", "tipo", "status", "valor", "historico", "caixa", "conta_bancaria")
+    list_filter = ("idloja", "tipo", "status", "origem", "data_movimento")
+    search_fields = ("historico", "documento")
+    date_hierarchy = "data_movimento"
+    readonly_fields = ("data_cadastro",)
+
+
+class ReceberItemInline(admin.TabularInline):
+    model = ReceberItem
+    extra = 0
+    fields = (
+        "parcela_n", "status",
+        "Data_vencimento", "valor_parcela",
+        "FormaPagamento", "idconta",
+        "juros", "desconto",
+        "data_baixa", "valor_baixa",
+        "Previsao", "Idnatureza",
+    )
+    show_change_link = True
+
+
+@admin.register(Receber)
+class ReceberAdmin(admin.ModelAdmin):
+    list_display = ("Idreceber", "idloja", "idcliente", "Titulo", "Data_emissao", "Valor_total", "Previsao", "FormaPagamento")
+    list_filter = ("idloja", "idcliente", "Previsao", "Data_emissao", "FormaPagamento")
+    search_fields = ("Idreceber", "Titulo", "Documento")
+    date_hierarchy = "Data_emissao"
+    readonly_fields = ("data_cadastro",)
+    inlines = [ReceberItemInline]
+
+
+@admin.register(ReceberItem)
+class ReceberItemAdmin(admin.ModelAdmin):
+    list_display = ("Idreceberitem", "Idreceber", "parcela_n", "status", "Data_vencimento", "valor_parcela", "data_baixa", "valor_baixa")
+    list_filter = ("status", "Data_vencimento", "Idreceber__idloja", "Idreceber__idcliente")
+    search_fields = ("Idreceberitem", "Idreceber__Idreceber")
+    readonly_fields = ("data_cadastro",)
+    inlines = [ReceberRateioInline]
+
+
+@admin.register(ReceberRateio)
+class ReceberRateioAdmin(admin.ModelAdmin):
+    list_display = ("Idrateio", "Idreceberitem", "Idnatureza", "valor", "centro_custo")
+    list_filter = ("Idnatureza",)
+    search_fields = ("Idrateio", "Idreceberitem__Idreceberitem")
 
 class FormaPagamentoParcelaInline(admin.TabularInline):
     model = FormaPagamentoParcela

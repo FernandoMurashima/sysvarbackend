@@ -1,10 +1,10 @@
 from rest_framework import viewsets, status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from accounts.permissions import HasModuleRole
 
 try:
     from auditoria.models import AuditLog
@@ -72,7 +72,9 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "
 
 
 class BaseViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
 
 
 # ----------------- Pedido -----------------

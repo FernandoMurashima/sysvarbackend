@@ -10,13 +10,17 @@ from django.conf import settings
 class User(AbstractUser):
     class Type(models.TextChoices):
         REGULAR = 'Regular', 'Regular'
+        VENDEDOR = 'Vendedor', 'Vendedor'
         CAIXA = 'Caixa', 'Caixa'
         GERENTE = 'Gerente', 'Gerente'
+        DIRETOR = 'Diretor', 'Diretor'
         ADMIN = 'Admin', 'Admin'
         AUXILIAR = 'Auxiliar', 'Auxiliar'
         ASSISTENTE = 'Assistente', 'Assistente'
+        ASSISTENTE_RECEBER = 'AssistenteReceber', 'Assistente contas a receber'
+        ASSISTENTE_PAGAR = 'AssistentePagar', 'Assistente contas a pagar'
 
-    type = models.CharField(max_length=10, choices=Type.choices, default=Type.REGULAR)
+    type = models.CharField(max_length=20, choices=Type.choices, default=Type.REGULAR)
     # Loja do usuário (opcional, pode ficar vazia)
     loja = models.ForeignKey('cadastros.Loja', on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
 

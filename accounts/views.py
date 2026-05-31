@@ -39,7 +39,18 @@ class RegisterView(APIView):
         if not username or not password:
             return Response({"error": "username e password são obrigatórios."}, status=400)
 
-        allowed_types = {"Regular", "Caixa", "Gerente", "Admin", "Auxiliar", "Assistente"}
+        allowed_types = {
+            "Regular",
+            "Vendedor",
+            "Caixa",
+            "Gerente",
+            "Diretor",
+            "Admin",
+            "Auxiliar",
+            "Assistente",
+            "AssistenteReceber",
+            "AssistentePagar",
+        }
         if user_type not in allowed_types:
             user_type = "Regular"
 
@@ -67,9 +78,8 @@ class RegisterView(APIView):
             try:
                 from cadastros.models import Loja  # evita import circular
                 loja = Loja.objects.get(pk=int(loja_key))
-                if hasattr(user, "Idloja"):
-                    user.Idloja = loja
-                    user.save(update_fields=["Idloja"])
+                user.loja = loja
+                user.save(update_fields=["loja"])
             except Exception:
                 pass
 
@@ -100,10 +110,8 @@ class RegisterView(APIView):
                     "first_name": user.first_name,
                     "last_name": user.last_name,
                     "type": getattr(user, "type", "Regular"),
-                    "Idloja": getattr(user, "Idloja_id", None),
-                    "loja_nome": getattr(getattr(user, "Idloja", None), "nome_loja", None)
-                    if hasattr(user, "Idloja")
-                    else None,
+                    "Idloja": getattr(user, "loja_id", None),
+                    "loja_nome": getattr(getattr(user, "loja", None), "nome_loja", None),
                 },
                 "token": token.key,
             },
