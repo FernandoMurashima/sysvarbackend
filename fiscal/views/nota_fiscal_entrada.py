@@ -5,6 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
+from produto.models import Estoque, EstoqueMovimentacao, PackItem, ProdutoDetalhe
 
 try:
     from auditoria.models import AuditLog
@@ -94,10 +95,17 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         nota.status = NotaFiscalEntrada.Status.FECHADA
         nota.save(update_fields=["status", "atualizado_em"])
 
+        try:
+            estoque = self._movimentar_estoque_entrada(nota)
+        except ValueError as exc:
+            transaction.set_rollback(True)
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         financeiro = self._vincular_financeiro(nota)
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="fechar")
         data = self.get_serializer(nota).data
         data["financeiro"] = financeiro
+        data["estoque"] = estoque
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cancelar")
@@ -108,10 +116,20 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return Response(self.get_serializer(nota).data, status=status.HTTP_200_OK)
 
         before = nota.status
+        estoque = {"disponivel": True, "movimentos": 0}
+        if nota.status == NotaFiscalEntrada.Status.FECHADA:
+            try:
+                estoque = self._movimentar_estoque_cancelamento(nota)
+            except ValueError as exc:
+                transaction.set_rollback(True)
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         nota.status = NotaFiscalEntrada.Status.CANCELADA
         nota.save(update_fields=["status", "atualizado_em"])
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="cancelar")
-        return Response(self.get_serializer(nota).data, status=status.HTTP_200_OK)
+        data = self.get_serializer(nota).data
+        data["estoque"] = estoque
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="itens-pedido")
     def itens_pedido(self, request, pk=None):
@@ -153,6 +171,110 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             )
 
         return Response(payload, status=status.HTTP_200_OK)
+
+    def _documento_estoque(self, nota):
+        return f"NFE:{nota.pk}"
+
+    def _movimentar_estoque_entrada(self, nota):
+        if nota.pedido_compra.tipo != "1":
+            return {"disponivel": False, "motivo": "Pedido de uso/consumo não movimenta estoque de revenda.", "movimentos": 0}
+
+        documento = self._documento_estoque(nota)
+        if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists():
+            return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+
+        movimentos = 0
+        for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__cor", "pedido_item__pack"):
+            movimentos += self._movimentar_item_estoque(
+                nota=nota,
+                item_nf=item_nf,
+                tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                documento=documento,
+                sinal=1,
+            )
+
+        return {"disponivel": True, "movimentos": movimentos}
+
+    def _movimentar_estoque_cancelamento(self, nota):
+        documento = f"{self._documento_estoque(nota)}:CANCEL"
+        if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists():
+            return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+
+        movimentos = 0
+        for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__cor", "pedido_item__pack"):
+            movimentos += self._movimentar_item_estoque(
+                nota=nota,
+                item_nf=item_nf,
+                tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                documento=documento,
+                sinal=-1,
+            )
+
+        return {"disponivel": True, "movimentos": movimentos}
+
+    def _movimentar_item_estoque(self, nota, item_nf, tipo, documento, sinal):
+        pedido_item = item_nf.pedido_item
+        if not pedido_item.produto_id or not pedido_item.cor_id or not pedido_item.pack_id:
+            raise ValueError("Item de revenda sem produto, cor ou pack para movimentar estoque.")
+
+        qtd_recebida = Decimal(item_nf.qtd_recebida or 0)
+        qtd_pedido = Decimal(pedido_item.qtd or 0)
+        if qtd_recebida <= 0:
+            return 0
+        if qtd_pedido <= 0:
+            raise ValueError("Item do pedido sem quantidade calculada para movimentar estoque.")
+
+        fator_recebido = qtd_recebida / qtd_pedido
+        pack_itens = list(PackItem.objects.select_related("tamanho").filter(pack_id=pedido_item.pack_id))
+        if not pack_itens:
+            raise ValueError("Pack do item não possui tamanhos configurados.")
+
+        movimentos = 0
+        for pack_item in pack_itens:
+            qtd_decimal = Decimal(pack_item.qtd or 0) * Decimal(pedido_item.n_packs or 0) * fator_recebido
+            if qtd_decimal != qtd_decimal.to_integral_value():
+                raise ValueError("Quantidade recebida não fecha com a composição do pack.")
+
+            qtd = int(qtd_decimal)
+            if qtd <= 0:
+                continue
+
+            sku = ProdutoDetalhe.objects.select_related("produto").filter(
+                produto_id=pedido_item.produto_id,
+                idcor_id=pedido_item.cor_id,
+                idtamanho_id=pack_item.tamanho_id,
+            ).first()
+            if not sku:
+                raise ValueError(
+                    f"SKU não encontrado para produto {pedido_item.produto_id}, cor {pedido_item.cor_id}, tamanho {pack_item.tamanho_id}."
+                )
+
+            estoque, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=sku.ean13,
+                Idloja=nota.pedido_compra.loja,
+                defaults={"referencia": sku.produto.referencia or "", "Estoque": 0, "reserva": 0},
+            )
+            anterior = estoque.Estoque or 0
+            posterior = anterior + (qtd * sinal)
+            estoque.referencia = sku.produto.referencia or estoque.referencia
+            estoque.Estoque = posterior
+            estoque.reserva = estoque.reserva or 0
+            estoque.save(update_fields=["referencia", "Estoque", "reserva"])
+
+            EstoqueMovimentacao.objects.create(
+                Idloja=nota.pedido_compra.loja,
+                CodigodeBarra=sku.ean13,
+                referencia=sku.produto.referencia or "",
+                tipo=tipo,
+                quantidade=qtd,
+                saldo_anterior=anterior,
+                saldo_posterior=posterior,
+                documento=documento,
+                observacao=f"Nota fiscal de entrada {nota.numero}",
+            )
+            movimentos += 1
+
+        return movimentos
 
     def _vincular_financeiro(self, nota):
         if not FIN_OK:

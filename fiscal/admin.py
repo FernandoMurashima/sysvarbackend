@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import NFCe, NotaFiscalEntrada, NotaFiscalEntradaItem, VendaPdv, VendaPdvItem
+from .models import NFCe, NotaFiscalEntrada, NotaFiscalEntradaItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 
 
 class NotaFiscalEntradaItemInline(admin.TabularInline):
@@ -28,18 +28,30 @@ class VendaPdvItemInline(admin.TabularInline):
     readonly_fields = ("total_item",)
 
 
+class VendaPdvPagamentoInline(admin.TabularInline):
+    model = VendaPdvPagamento
+    extra = 0
+
+
 @admin.register(VendaPdv)
 class VendaPdvAdmin(admin.ModelAdmin):
     list_display = ("id", "documento", "loja", "cliente", "vendedor", "status", "total", "data_venda")
     list_filter = ("status", "loja", "forma_pagamento", "data_venda")
     search_fields = ("documento", "cliente__nome_cliente", "vendedor__nomefuncionario")
-    inlines = [VendaPdvItemInline]
+    inlines = [VendaPdvItemInline, VendaPdvPagamentoInline]
 
 
 @admin.register(VendaPdvItem)
 class VendaPdvItemAdmin(admin.ModelAdmin):
     list_display = ("id", "venda", "descricao", "ean", "quantidade", "preco_unitario", "total_item")
     search_fields = ("venda__documento", "descricao", "ean")
+
+
+@admin.register(VendaPdvPagamento)
+class VendaPdvPagamentoAdmin(admin.ModelAdmin):
+    list_display = ("id", "venda", "forma", "descricao", "valor", "autorizacao")
+    list_filter = ("forma",)
+    search_fields = ("venda__documento", "forma", "descricao", "autorizacao")
 
 
 @admin.register(NFCe)

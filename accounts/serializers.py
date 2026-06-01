@@ -4,6 +4,15 @@ from cadastros.models import Loja
 
 User = get_user_model()
 
+TIPOS_EXIGEM_LOJA = {
+    "Vendedor",
+    "Caixa",
+    "Gerente",
+    "Assistente",
+    "AssistenteReceber",
+    "AssistentePagar",
+}
+
 class LojaMiniSerializer(serializers.ModelSerializer):
     Idloja = serializers.IntegerField(source="id", read_only=True)
 
@@ -30,6 +39,15 @@ class UserSerializer(serializers.ModelSerializer):
             "password",
         )
         read_only_fields = ("id", "date_joined")
+
+    def validate(self, attrs):
+        tipo = attrs.get("type", getattr(self.instance, "type", User.Type.REGULAR))
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        if tipo in TIPOS_EXIGEM_LOJA and not loja:
+            raise serializers.ValidationError({
+                "Idloja": "Vincule este usuário a uma filial ou matriz."
+            })
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)

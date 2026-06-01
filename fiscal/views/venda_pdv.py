@@ -13,10 +13,11 @@ from accounts.permissions import HasModuleRole
 
 from cadastros.models import Nat_Lancamento
 from financeiro.models import Caixa, MovimentacaoFinanceira, Receber, ReceberItem
-from fiscal.models import NFCe, VendaPdv, VendaPdvItem
+from fiscal.models import NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaPdvSerializer
 from produto.models import Estoque, EstoqueMovimentacao, Produto, ProdutoDetalhe
+from cadastros.models import Funcionarios
 
 
 UF_CODIGO = {
@@ -68,7 +69,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     serializer_class = VendaPdvSerializer
     queryset = (
         VendaPdv.objects.select_related("loja", "caixa", "cliente", "vendedor", "criado_por")
-        .prefetch_related("itens")
+        .prefetch_related("itens", "pagamentos")
         .all()
     )
 
@@ -211,6 +212,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         forma_pagamento = data.get("forma_pagamento") or "AV"
         desconto_geral = money(data.get("desconto_geral"))
         valor_recebido = money(data.get("valor_recebido"))
+        pagamentos_payload = self._normalizar_pagamentos(data)
 
         if not loja_id or not caixa_id or not cliente_id or not vendedor_id:
             return Response({"detail": "Informe loja, caixa, cliente e vendedor."}, status=status.HTTP_400_BAD_REQUEST)
@@ -222,13 +224,20 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         )
         if not caixa:
             return Response({"detail": "O caixa informado não pertence à loja ou não está ativo."}, status=status.HTTP_400_BAD_REQUEST)
+        vendedor = (
+            Funcionarios.objects
+            .filter(pk=vendedor_id, idloja_id=loja_id, ativo=True, categoria__iexact="Vendedor")
+            .first()
+        )
+        if not vendedor:
+            return Response({"detail": "O vendedor informado não está vinculado a esta loja."}, status=status.HTTP_400_BAD_REQUEST)
 
         documento = data.get("documento") or f"PDV-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
         venda = VendaPdv.objects.create(
             loja_id=loja_id,
             caixa=caixa,
             cliente_id=cliente_id,
-            vendedor_id=vendedor_id,
+            vendedor=vendedor,
             documento=documento,
             forma_pagamento=forma_pagamento,
             desconto_geral=desconto_geral,
@@ -251,21 +260,58 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         total = money(subtotal - desconto_itens - desconto_geral)
-        if forma_pagamento == "AV" and valor_recebido < total:
+        total_pago = money(sum((pagamento["valor"] for pagamento in pagamentos_payload), Decimal("0")))
+        if total_pago <= 0:
             transaction.set_rollback(True)
-            return Response({"detail": "Valor recebido menor que o total da venda."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Informe o valor pago pelo cliente."}, status=status.HTTP_400_BAD_REQUEST)
+        if total_pago < total:
+            transaction.set_rollback(True)
+            return Response({"detail": "O total pago é menor que o total da venda."}, status=status.HTTP_400_BAD_REQUEST)
 
         venda.subtotal = money(subtotal)
         venda.desconto_itens = money(desconto_itens)
         venda.total = total
-        venda.troco = money(valor_recebido - total) if valor_recebido > total else Decimal("0.00")
-        venda.save(update_fields=["subtotal", "desconto_itens", "total", "troco", "atualizado_em"])
+        venda.valor_recebido = total_pago
+        venda.troco = money(total_pago - total) if total_pago > total else Decimal("0.00")
+        venda.forma_pagamento = self._forma_resumo(pagamentos_payload)
+        venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
+        self._registrar_pagamentos(venda, pagamentos_payload)
 
         self._registrar_financeiro(venda)
         nfce = self._autorizar_nfce(venda)
         payload = VendaPdvSerializer(venda, context={"request": request}).data
         payload["cupom"] = self._cupom(venda, nfce)
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    def _normalizar_pagamentos(self, data) -> list[dict]:
+        pagamentos = data.get("pagamentos") or []
+        if not pagamentos:
+            valor = money(data.get("valor_recebido"))
+            forma = data.get("forma_pagamento") or "DINHEIRO"
+            pagamentos = [{"forma": forma, "valor": valor}]
+
+        normalizados = []
+        for pagamento in pagamentos:
+            forma = str(pagamento.get("forma") or pagamento.get("codigo") or "").strip().upper()
+            valor = money(pagamento.get("valor"))
+            if not forma or valor <= 0:
+                continue
+            normalizados.append({
+                "forma": forma,
+                "descricao": str(pagamento.get("descricao") or forma).strip()[:80],
+                "valor": valor,
+                "autorizacao": str(pagamento.get("autorizacao") or "").strip()[:60],
+            })
+        return normalizados
+
+    def _forma_resumo(self, pagamentos: list[dict]) -> str:
+        if len(pagamentos) == 1:
+            return pagamentos[0]["forma"]
+        return "MULTIPLO"
+
+    def _registrar_pagamentos(self, venda: VendaPdv, pagamentos: list[dict]):
+        for pagamento in pagamentos:
+            VendaPdvPagamento.objects.create(venda=venda, **pagamento)
 
     def _registrar_item(self, venda: VendaPdv, item: dict) -> VendaPdvItem:
         ean = item.get("ean") or item.get("CodigodeBarra")
@@ -317,13 +363,19 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if not natureza:
             return
 
-        valor_caixa = money(min(money(venda.valor_recebido), money(venda.total)))
-        valor_receber = money(money(venda.total) - valor_caixa)
+        pagamentos = list(venda.pagamentos.all())
+        total_pago = money(sum((money(pagamento.valor) for pagamento in pagamentos), Decimal("0")))
+        valor_receber = money(money(venda.total) - total_pago)
 
-        if valor_caixa > 0:
+        saldo_para_caixa = money(venda.total)
+        for pagamento in pagamentos:
+            valor_caixa = money(min(money(pagamento.valor), saldo_para_caixa))
+            if valor_caixa <= 0:
+                continue
+            saldo_para_caixa = money(saldo_para_caixa - valor_caixa)
             caixa = venda.caixa
             if not caixa:
-                return
+                continue
             caixa.saldo_atual = money(caixa.saldo_atual) + valor_caixa
             caixa.save(update_fields=["saldo_atual"])
             MovimentacaoFinanceira.objects.create(
@@ -333,15 +385,15 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 status=MovimentacaoFinanceira.STATUS_EFETIVA,
                 origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
                 valor=valor_caixa,
-                historico=f"Venda PDV {venda.documento}",
+                historico=f"Venda PDV {venda.documento} - {pagamento.descricao or pagamento.forma}",
                 documento=venda.documento,
                 Idnatureza=natureza,
-                FormaPagamento=venda.forma_pagamento,
+                FormaPagamento=pagamento.forma,
                 caixa=caixa,
             )
             self._consolidar_caixa_master(venda, natureza, valor_caixa)
-            if valor_receber <= 0:
-                return
+        if valor_receber <= 0:
+            return
 
         receber = Receber.objects.create(
             idloja=venda.loja,
@@ -439,6 +491,15 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             "forma_pagamento": venda.forma_pagamento,
             "valor_recebido": str(money(venda.valor_recebido)),
             "troco": str(money(venda.troco)),
+            "pagamentos": [
+                {
+                    "forma": pagamento.forma,
+                    "descricao": pagamento.descricao,
+                    "valor": str(money(pagamento.valor)),
+                    "autorizacao": pagamento.autorizacao,
+                }
+                for pagamento in venda.pagamentos.all()
+            ],
             "nfce": NFCeSerializer(nfce).data,
         }
 

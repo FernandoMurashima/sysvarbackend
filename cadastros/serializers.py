@@ -143,6 +143,26 @@ class FuncionariosSerializer(serializers.ModelSerializer):
         model = Funcionarios
         fields = "__all__"
 
+    def validate(self, attrs):
+        categoria = (attrs.get("categoria", getattr(self.instance, "categoria", "")) or "").strip().lower()
+        loja = attrs.get("idloja", getattr(self.instance, "idloja", None))
+        categorias_exigem_loja = {
+            "vendedor",
+            "caixa",
+            "gerente",
+            "assistente",
+            "assistente receber",
+            "assistente pagar",
+            "assistentecontasareceber",
+            "assistentecontasapagar",
+        }
+        categoria_normalizada = categoria.replace(" ", "").replace("_", "").replace("-", "")
+        if (categoria in categorias_exigem_loja or categoria_normalizada in categorias_exigem_loja) and not loja:
+            raise serializers.ValidationError({
+                "idloja": "Vincule este funcionário a uma filial ou matriz."
+            })
+        return attrs
+
     def validate_cpf(self, value):
         if not value:
             return value

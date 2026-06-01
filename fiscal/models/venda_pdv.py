@@ -87,6 +87,26 @@ class VendaPdvItem(models.Model):
         return f"{self.venda_id} - {self.descricao}"
 
 
+class VendaPdvPagamento(models.Model):
+    venda = models.ForeignKey(VendaPdv, on_delete=models.CASCADE, related_name="pagamentos")
+    forma = models.CharField(max_length=30, db_index=True)
+    descricao = models.CharField(max_length=80, blank=True, default="")
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    autorizacao = models.CharField(max_length=60, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_venda_pdv_pagamento"
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["venda"], name="ix_venda_pdv_pag_venda"),
+            models.Index(fields=["forma"], name="ix_venda_pdv_pag_forma"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.venda_id} - {self.forma} - {self.valor}"
+
+
 class NFCe(models.Model):
     class Status(models.TextChoices):
         DIGITADA = "DIGITADA", "Digitada"

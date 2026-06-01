@@ -13,7 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from auditoria.models import AuditLog
-from .serializers import UserSerializer
+from .serializers import TIPOS_EXIGEM_LOJA, UserSerializer
 
 User = get_user_model()
 
@@ -57,6 +57,10 @@ class RegisterView(APIView):
         if User.objects.filter(username=username).exists():
             return Response({"error": "username já existe."}, status=400)
 
+        loja_key = data.get("Idloja") or data.get("loja") or data.get("loja_id")
+        if user_type in TIPOS_EXIGEM_LOJA and not loja_key:
+            return Response({"Idloja": ["Vincule este usuário a uma filial ou matriz."]}, status=400)
+
         user = User(
             username=username,
             email=email or None,
@@ -72,8 +76,7 @@ class RegisterView(APIView):
         user.set_password(password)
         user.save()
 
-        # vincular loja, se enviada e se o modelo tiver Idloja
-        loja_key = data.get("Idloja") or data.get("loja") or data.get("loja_id")
+        # vincular loja, se enviada
         if loja_key:
             try:
                 from cadastros.models import Loja  # evita import circular

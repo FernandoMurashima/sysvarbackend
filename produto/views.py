@@ -139,6 +139,20 @@ class ProdutoViewSet(BaseViewSet):
     # Usado por CanToggleProductFlags
     model_perm_codename = "produto.change_produto"
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tipo_produto = self.request.query_params.get('tipo_produto') or self.request.query_params.get('tipo')
+        if tipo_produto in ('1', '2'):
+            qs = qs.filter(tipo_produto=tipo_produto)
+
+        ativo = self.request.query_params.get('ativo')
+        if ativo in ('true', '1'):
+            qs = qs.filter(ativo=True)
+        elif ativo in ('false', '0'):
+            qs = qs.filter(ativo=False)
+
+        return qs
+
     @action(detail=True, methods=['post'], url_path='gerar-skus')
     def gerar_skus(self, request, pk=None):
         """
@@ -466,6 +480,7 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         referencia = self.request.query_params.get('referencia')
         ean = self.request.query_params.get('ean')
         tipo = self.request.query_params.get('tipo')
+        search = self.request.query_params.get('search')
         if loja:
             qs = qs.filter(Idloja_id=loja)
         if referencia:
@@ -474,6 +489,8 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
             qs = qs.filter(CodigodeBarra__icontains=ean)
         if tipo:
             qs = qs.filter(tipo=tipo)
+        if search:
+            qs = qs.filter(Q(referencia__icontains=search) | Q(CodigodeBarra__icontains=search) | Q(documento__icontains=search))
         return qs
 
     @transaction.atomic

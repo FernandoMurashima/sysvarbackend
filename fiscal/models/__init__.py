@@ -1,5 +1,5 @@
 from .nota_fiscal_entrada import NotaFiscalEntrada, NotaFiscalEntradaItem
-from .venda_pdv import NFCe, VendaPdv, VendaPdvItem
+from .venda_pdv import NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
 
 __all__ = [
     "NFCe",
@@ -7,4 +7,5 @@ __all__ = [
     "NotaFiscalEntradaItem",
     "VendaPdv",
     "VendaPdvItem",
+    "VendaPdvPagamento",
 ]

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from fiscal.models import NFCe, VendaPdv, VendaPdvItem
+from fiscal.models import NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
 
 
 class VendaPdvItemSerializer(serializers.ModelSerializer):
@@ -28,8 +28,16 @@ class NFCeSerializer(serializers.ModelSerializer):
         )
 
 
+class VendaPdvPagamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendaPdvPagamento
+        fields = "__all__"
+        read_only_fields = ("venda", "criado_em")
+
+
 class VendaPdvSerializer(serializers.ModelSerializer):
     itens = VendaPdvItemSerializer(many=True, read_only=True)
+    pagamentos = VendaPdvPagamentoSerializer(many=True, read_only=True)
     nfce = NFCeSerializer(read_only=True)
 
     class Meta:
