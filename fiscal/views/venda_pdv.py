@@ -365,7 +365,9 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         pagamentos = list(venda.pagamentos.all())
         total_pago = money(sum((money(pagamento.valor) for pagamento in pagamentos), Decimal("0")))
-        valor_receber = money(money(venda.total) - total_pago)
+        valor_venda = money(venda.total)
+        valor_baixado = money(min(total_pago, valor_venda))
+        valor_receber = money(valor_venda - valor_baixado)
 
         saldo_para_caixa = money(venda.total)
         for pagamento in pagamentos:
@@ -392,30 +394,36 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 caixa=caixa,
             )
             self._consolidar_caixa_master(venda, natureza, valor_caixa)
-        if valor_receber <= 0:
-            return
-
         receber = Receber.objects.create(
             idloja=venda.loja,
             idcliente=venda.cliente,
             Titulo=f"Venda PDV {venda.documento}",
             Documento=venda.documento,
             Data_emissao=timezone.localdate(),
-            Valor_total=valor_receber,
+            Valor_total=valor_venda,
             Previsao=False,
             FormaPagamento=venda.forma_pagamento,
             Idnatureza=natureza,
             pedido_venda=venda.pk,
         )
+        parcela_status = ReceberItem.STATUS_BAIXADO if valor_receber <= 0 else ReceberItem.STATUS_EFETIVO
+        baixa_fields = {}
+        if valor_baixado > 0:
+            baixa_fields = {
+                "data_baixa": timezone.localdate(),
+                "valor_baixa": valor_baixado,
+            }
+
         ReceberItem.objects.create(
             Idreceber=receber,
             parcela_n=1,
-            status=ReceberItem.STATUS_EFETIVO,
+            status=parcela_status,
             Data_vencimento=timezone.localdate(),
-            valor_parcela=valor_receber,
+            valor_parcela=valor_venda,
             FormaPagamento=venda.forma_pagamento,
             Previsao=False,
             Idnatureza=natureza,
+            **baixa_fields,
         )
 
     def _consolidar_caixa_master(self, venda: VendaPdv, natureza: Nat_Lancamento, valor: Decimal):
