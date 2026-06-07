@@ -8,12 +8,13 @@ from .validators import (
     cep_validator,
     only_digits,
 )
+from typing import Optional
 
 # Helpers de normalização
-def _norm_email(v: str | None) -> str | None:
+def _norm_email(v: Optional[str]) -> Optional[str]:
     return (v or "").strip().lower() or None
 
-def _norm_digits(v: str | None) -> str | None:
+def _norm_digits(v: Optional[str]) -> Optional[str]:
     d = only_digits(v or "")
     return d or None
 
