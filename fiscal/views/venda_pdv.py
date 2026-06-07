@@ -1,6 +1,7 @@
 from decimal import Decimal
 from collections import defaultdict
 from random import randint
+from typing import Dict, List
 
 from django.db import transaction
 from django.db.models import Max
@@ -283,7 +284,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         payload["cupom"] = self._cupom(venda, nfce)
         return Response(payload, status=status.HTTP_201_CREATED)
 
-    def _normalizar_pagamentos(self, data) -> list[dict]:
+    def _normalizar_pagamentos(self, data) -> List[Dict]:
         pagamentos = data.get("pagamentos") or []
         if not pagamentos:
             valor = money(data.get("valor_recebido"))
@@ -304,12 +305,12 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             })
         return normalizados
 
-    def _forma_resumo(self, pagamentos: list[dict]) -> str:
+    def _forma_resumo(self, pagamentos: List[Dict]) -> str:
         if len(pagamentos) == 1:
             return pagamentos[0]["forma"]
         return "MULTIPLO"
 
-    def _registrar_pagamentos(self, venda: VendaPdv, pagamentos: list[dict]):
+    def _registrar_pagamentos(self, venda: VendaPdv, pagamentos: List[Dict]):
         for pagamento in pagamentos:
             VendaPdvPagamento.objects.create(venda=venda, **pagamento)
 

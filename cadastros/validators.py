@@ -1,6 +1,7 @@
 # cadastros/validators.py
 import re
 from django.core.exceptions import ValidationError
+from typing import List
 
 # ---------------------------------
 # Helpers
@@ -42,7 +43,7 @@ def check_cnpj(value: str) -> bool:
     pesos1 = [5,4,3,2,9,8,7,6,5,4,3,2]
     pesos2 = [6] + pesos1
 
-    def dv(nums: str, pesos: list[int]) -> int:
+    def dv(nums: str, pesos: List[int]) -> int:
         s = sum(int(n) * p for n, p in zip(nums, pesos))
         r = s % 11
         return 0 if r < 2 else 11 - r
