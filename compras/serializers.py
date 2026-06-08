@@ -10,6 +10,9 @@ from .models import (
 
 # ----------------- Itens -----------------
 class PedidoCompraItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+
     class Meta:
         model = PedidoCompraItem
         fields = "__all__"

@@ -421,6 +421,85 @@ class TabelaprecoProduto(models.Model):
         return f'{self.produto_id} · {self.tabela_id} · {self.preco}'
 
 
+class Promocao(models.Model):
+    TIPO_DESCONTO_PERCENTUAL = 'DESCONTO_PERCENTUAL'
+    TIPO_DESCONTO_VALOR = 'DESCONTO_VALOR'
+    TIPO_PRECO_FIXO = 'PRECO_FIXO'
+    TIPO_CHOICES = [
+        (TIPO_DESCONTO_PERCENTUAL, 'Desconto percentual'),
+        (TIPO_DESCONTO_VALOR, 'Desconto em valor'),
+        (TIPO_PRECO_FIXO, 'Preço fixo'),
+    ]
+
+    ESCOPO_TODOS = 'TODOS'
+    ESCOPO_PRODUTO = 'PRODUTO'
+    ESCOPO_COLECAO = 'COLECAO'
+    ESCOPO_GRUPO = 'GRUPO'
+    ESCOPO_SUBGRUPO = 'SUBGRUPO'
+    ESCOPO_CHOICES = [
+        (ESCOPO_TODOS, 'Todos os produtos'),
+        (ESCOPO_PRODUTO, 'Produto'),
+        (ESCOPO_COLECAO, 'Coleção'),
+        (ESCOPO_GRUPO, 'Grupo'),
+        (ESCOPO_SUBGRUPO, 'Subgrupo'),
+    ]
+
+    Idpromocao = models.BigAutoField(primary_key=True)
+    nome = models.CharField(max_length=100)
+    ativo = models.BooleanField(default=True, db_index=True)
+    data_inicio = models.DateField(db_index=True)
+    data_fim = models.DateField(null=True, blank=True, db_index=True)
+    tipo = models.CharField(max_length=25, choices=TIPO_CHOICES)
+    valor = models.DecimalField(max_digits=18, decimal_places=4)
+    escopo = models.CharField(max_length=15, choices=ESCOPO_CHOICES, default=ESCOPO_TODOS)
+    prioridade = models.PositiveIntegerField(default=10)
+    acumula_cashback = models.BooleanField(default=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    lojas = models.ManyToManyField('cadastros.Loja', blank=True, related_name='promocoes')
+    produtos = models.ManyToManyField(Produto, blank=True, related_name='promocoes')
+    colecoes = models.ManyToManyField(Colecao, blank=True, related_name='promocoes')
+    grupos = models.ManyToManyField(Grupo, blank=True, related_name='promocoes')
+    subgrupos = models.ManyToManyField(Subgrupo, blank=True, related_name='promocoes')
+
+    class Meta:
+        db_table = 'produto_promocao'
+        ordering = ['-ativo', '-data_inicio', 'prioridade', 'nome']
+        indexes = [
+            models.Index(fields=['ativo', 'data_inicio', 'data_fim']),
+            models.Index(fields=['escopo', 'prioridade']),
+        ]
+
+    def __str__(self):
+        return self.nome
+
+    def aplica_produto(self, produto: Produto) -> bool:
+        if self.escopo == self.ESCOPO_TODOS:
+            return True
+        if self.escopo == self.ESCOPO_PRODUTO:
+            return self.produtos.filter(pk=produto.pk).exists()
+        if self.escopo == self.ESCOPO_COLECAO:
+            return bool(produto.colecao_id and self.colecoes.filter(pk=produto.colecao_id).exists())
+        if self.escopo == self.ESCOPO_GRUPO:
+            return bool(produto.grupo_id and self.grupos.filter(pk=produto.grupo_id).exists())
+        if self.escopo == self.ESCOPO_SUBGRUPO:
+            return bool(produto.subgrupo_id and self.subgrupos.filter(pk=produto.subgrupo_id).exists())
+        return False
+
+    def preco_promocional(self, preco_base):
+        base = Decimal(preco_base or 0)
+        valor = Decimal(self.valor or 0)
+        if self.tipo == self.TIPO_PRECO_FIXO:
+            return max(Decimal('0.00'), valor)
+        if self.tipo == self.TIPO_DESCONTO_PERCENTUAL:
+            return max(Decimal('0.00'), base - (base * valor / Decimal('100')))
+        if self.tipo == self.TIPO_DESCONTO_VALOR:
+            return max(Decimal('0.00'), base - valor)
+        return base
+
+
 # ===========================
 # Packs (compra por grade)
 # ===========================

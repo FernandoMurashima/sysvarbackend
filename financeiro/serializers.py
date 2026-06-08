@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     FormaPagamento, FormaPagamentoParcela,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
+    CashbackConfig, CashbackMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
 )
@@ -17,6 +18,48 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormaPagamento
         fields = '__all__'
+
+
+class CashbackConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CashbackConfig
+        fields = '__all__'
+
+    def validate_percentual(self, value):
+        if value < 0:
+            raise serializers.ValidationError('O percentual não pode ser negativo.')
+        if value > 100:
+            raise serializers.ValidationError('O percentual não pode ser maior que 100%.')
+        return value
+
+    def validate_limite_uso_percentual(self, value):
+        if value < 0:
+            raise serializers.ValidationError('O limite de uso não pode ser negativo.')
+        if value > 100:
+            raise serializers.ValidationError('O limite de uso não pode ser maior que 100%.')
+        return value
+
+    def save(self, **kwargs):
+        instance = super().save(**kwargs)
+        if instance.ativo:
+            CashbackConfig.objects.exclude(pk=instance.pk).update(ativo=False)
+        return instance
+
+
+class CashbackMovimentoSerializer(serializers.ModelSerializer):
+    cliente_nome = serializers.CharField(source='cliente.nome_cliente', read_only=True)
+    documento_origem = serializers.CharField(source='venda_origem.documento', read_only=True)
+    documento_uso = serializers.CharField(source='venda_uso.documento', read_only=True)
+
+    class Meta:
+        model = CashbackMovimento
+        fields = '__all__'
+        read_only_fields = ('criado_por', 'criado_em')
+
+    def validate_valor(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('O valor deve ser maior que zero.')
+        return value
 
 class PagarRateioSerializer(serializers.ModelSerializer):
     class Meta:

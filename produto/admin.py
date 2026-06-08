@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Pack, PackItem, Estoque
+    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque
 )
 
 @admin.register(ConfigEan)
@@ -67,6 +67,13 @@ class ProdutoDetalheAdmin(admin.ModelAdmin):
 @admin.register(TabelaprecoProduto)
 class TabelaprecoProdutoAdmin(admin.ModelAdmin):
     list_display = ('Idprodutopreco', 'produto', 'tabela', 'preco', 'preco_promocional', 'DataInicio', 'DataFim', 'ativo')
+
+@admin.register(Promocao)
+class PromocaoAdmin(admin.ModelAdmin):
+    list_display = ('Idpromocao', 'nome', 'ativo', 'escopo', 'tipo', 'valor', 'data_inicio', 'data_fim', 'prioridade')
+    list_filter = ('ativo', 'escopo', 'tipo', 'data_inicio')
+    search_fields = ('nome', 'observacao')
+    filter_horizontal = ('lojas', 'produtos', 'colecoes', 'grupos', 'subgrupos')
 
 @admin.register(Pack)
 class PackAdmin(admin.ModelAdmin):

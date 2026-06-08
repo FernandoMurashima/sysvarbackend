@@ -12,12 +12,14 @@ except Exception:
 
 from .models import (
     Caixa, ContaBancaria, MovimentacaoFinanceira,
+    CashbackConfig, CashbackMovimento, saldo_cashback_cliente,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     FormaPagamento, FormaPagamentoParcela
 )
 from .serializers import (
     CaixaSerializer, ContaBancariaSerializer, MovimentacaoFinanceiraSerializer,
+    CashbackConfigSerializer, CashbackMovimentoSerializer,
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     FormaPagamentoSerializer, FormaPagamentoParcelaSerializer
@@ -92,6 +94,56 @@ class FormaPagamentoParcelaViewSet(BaseViewSet):
         if codigo:
             qs = qs.filter(forma__codigo=codigo)
         return qs
+
+
+class CashbackConfigViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = CashbackConfig.objects.all()
+    serializer_class = CashbackConfigSerializer
+
+    @action(detail=False, methods=['get'], url_path='ativa')
+    def ativa(self, request):
+        config = CashbackConfig.regra_ativa() or CashbackConfig.objects.order_by('Idcashbackconfig').first()
+        if not config:
+            config = CashbackConfig.objects.create(nome='Regra padrão', ativo=False, percentual=0)
+        return Response(self.get_serializer(config).data)
+
+
+class CashbackMovimentoViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "AssistenteReceber"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = CashbackMovimento.objects.select_related('cliente', 'venda_origem', 'venda_uso').all()
+    serializer_class = CashbackMovimentoSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user if self.request.user.is_authenticated else None)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        cliente = self.request.query_params.get('cliente')
+        tipo = self.request.query_params.get('tipo')
+        status_q = self.request.query_params.get('status')
+        data_ini = self.request.query_params.get('data_ini')
+        data_fim = self.request.query_params.get('data_fim')
+        if cliente:
+            qs = qs.filter(cliente_id=cliente)
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if data_ini:
+            qs = qs.filter(criado_em__date__gte=data_ini)
+        if data_fim:
+            qs = qs.filter(criado_em__date__lte=data_fim)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='saldo')
+    def saldo(self, request):
+        cliente = request.query_params.get('cliente')
+        if not cliente:
+            return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'cliente': int(cliente), 'saldo': str(saldo_cashback_cliente(cliente))})
 
 
 class CaixaViewSet(BaseViewSet):

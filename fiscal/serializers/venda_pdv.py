@@ -1,6 +1,14 @@
 from rest_framework import serializers
 
-from fiscal.models import NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from fiscal.models import (
+    NFCe,
+    NFeDevolucao,
+    VendaDevolucao,
+    VendaDevolucaoItem,
+    VendaPdv,
+    VendaPdvItem,
+    VendaPdvPagamento,
+)
 
 
 class VendaPdvItemSerializer(serializers.ModelSerializer):
@@ -19,6 +27,23 @@ class NFCeSerializer(serializers.ModelSerializer):
             "chave_acesso",
             "protocolo",
             "qr_code_url",
+            "xml",
+            "retorno_codigo",
+            "retorno_mensagem",
+            "autorizada_em",
+            "criado_em",
+            "atualizado_em",
+        )
+
+
+class NFeDevolucaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NFeDevolucao
+        fields = "__all__"
+        read_only_fields = (
+            "status",
+            "chave_acesso",
+            "protocolo",
             "xml",
             "retorno_codigo",
             "retorno_mensagem",
@@ -50,6 +75,31 @@ class VendaPdvSerializer(serializers.ModelSerializer):
             "desconto_itens",
             "total",
             "troco",
+            "criado_por",
+            "criado_em",
+            "atualizado_em",
+        )
+
+
+class VendaDevolucaoItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendaDevolucaoItem
+        fields = "__all__"
+        read_only_fields = ("devolucao", "total_item")
+
+
+class VendaDevolucaoSerializer(serializers.ModelSerializer):
+    itens = VendaDevolucaoItemSerializer(many=True, read_only=True)
+    nfe_devolucao = NFeDevolucaoSerializer(read_only=True)
+
+    class Meta:
+        model = VendaDevolucao
+        fields = "__all__"
+        read_only_fields = (
+            "documento",
+            "status",
+            "subtotal",
+            "credito_cliente",
             "criado_por",
             "criado_em",
             "atualizado_em",

@@ -2,7 +2,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ConfigEanViewSet, NcmViewSet, GradeViewSet, TamanhoViewSet, CorViewSet, MaterialViewSet,
     ColecaoViewSet, UnidadeViewSet, GrupoViewSet, SubgrupoViewSet, TabelaprecoViewSet,
-    CodigosViewSet, ProdutoViewSet, ProdutoDetalheViewSet, TabelaprecoProdutoViewSet,
+    CodigosViewSet, ProdutoViewSet, ProdutoDetalheViewSet, TabelaprecoProdutoViewSet, PromocaoViewSet,
     PackViewSet, PackItemViewSet, EstoqueViewSet, EstoqueMovimentacaoViewSet,
     InventarioEstoqueViewSet, InventarioEstoqueItemViewSet
 )
@@ -24,6 +24,7 @@ router.register('codigos', CodigosViewSet)
 router.register('produto', ProdutoViewSet)
 router.register('produto-detalhe', ProdutoDetalheViewSet)
 router.register('produto-preco', TabelaprecoProdutoViewSet)
+router.register('promocao', PromocaoViewSet)
 
 router.register('pack', PackViewSet)
 router.register('pack-item', PackItemViewSet)

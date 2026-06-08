@@ -287,10 +287,11 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         for titulo in titulos:
             titulo.nfe_id = nota.pk
+            titulo.Titulo = f"{nota.numero}-1"[:60]
             titulo.Documento = documento
             titulo.Data_emissao = nota.dt_emissao
             titulo.Previsao = False
-            titulo.save(update_fields=["nfe_id", "Documento", "Data_emissao", "Previsao"])
+            titulo.save(update_fields=["nfe_id", "Titulo", "Documento", "Data_emissao", "Previsao"])
             titulos_atualizados += 1
 
             parcelas = PagarItem.objects.filter(Idpagar=titulo, status=PagarItem.STATUS_PREVISTO)

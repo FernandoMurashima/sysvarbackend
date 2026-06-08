@@ -4,7 +4,7 @@ from django.utils import timezone
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
 )
 
@@ -265,3 +265,22 @@ class TabelaprecoProdutoSerializer(serializers.ModelSerializer):
             validated_data['DataFim'] = df.date()
         return super().update(instance, validated_data)
 # <<< end serializer
+
+
+class PromocaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Promocao
+        fields = '__all__'
+
+    def validate(self, attrs):
+        data_inicio = attrs.get('data_inicio', getattr(self.instance, 'data_inicio', None))
+        data_fim = attrs.get('data_fim', getattr(self.instance, 'data_fim', None))
+        valor = attrs.get('valor', getattr(self.instance, 'valor', None))
+        tipo = attrs.get('tipo', getattr(self.instance, 'tipo', None))
+        if data_fim and data_inicio and data_fim < data_inicio:
+            raise serializers.ValidationError({'data_fim': 'Data final não pode ser menor que a inicial.'})
+        if valor is not None and valor < 0:
+            raise serializers.ValidationError({'valor': 'Valor da promoção não pode ser negativo.'})
+        if tipo == Promocao.TIPO_DESCONTO_PERCENTUAL and valor is not None and valor > 100:
+            raise serializers.ValidationError({'valor': 'Desconto percentual não pode ser maior que 100%.'})
+        return attrs

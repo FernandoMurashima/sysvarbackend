@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import (
     Caixa, ContaBancaria, MovimentacaoFinanceira,
+    CashbackConfig, CashbackMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     FormaPagamento, FormaPagamentoParcela
@@ -157,3 +158,19 @@ class FormaPagamentoParcelaAdmin(admin.ModelAdmin):
     list_filter = ("forma",)
     search_fields = ("forma__codigo", "forma__descricao")
     readonly_fields = ("data_cadastro",)
+
+
+@admin.register(CashbackConfig)
+class CashbackConfigAdmin(admin.ModelAdmin):
+    list_display = ("Idcashbackconfig", "nome", "ativo", "percentual", "validade_dias", "limite_uso_percentual")
+    list_filter = ("ativo", "consumidor_final_participa")
+    search_fields = ("nome",)
+    readonly_fields = ("criado_em", "atualizado_em")
+
+
+@admin.register(CashbackMovimento)
+class CashbackMovimentoAdmin(admin.ModelAdmin):
+    list_display = ("Idcashbackmovimento", "cliente", "tipo", "status", "valor", "validade", "criado_em")
+    list_filter = ("tipo", "status", "validade")
+    search_fields = ("cliente__nome_cliente", "observacao", "venda_origem__documento", "venda_uso__documento")
+    readonly_fields = ("criado_em",)

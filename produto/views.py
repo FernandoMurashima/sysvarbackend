@@ -16,14 +16,14 @@ from accounts.permissions import HasModuleRole
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
 )
 from .serializers import (
     ConfigEanSerializer, NcmSerializer, GradeSerializer, TamanhoSerializer, CorSerializer,
     MaterialSerializer, ColecaoSerializer, UnidadeSerializer, GrupoSerializer, SubgrupoSerializer,
     TabelaprecoSerializer, CodigosSerializer, ProdutoSerializer, ProdutoDetalheSerializer,
-    TabelaprecoProdutoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
+    TabelaprecoProdutoSerializer, PromocaoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
     EstoqueMovimentacaoSerializer, InventarioEstoqueSerializer, InventarioEstoqueItemSerializer
 )
 
@@ -150,6 +150,14 @@ class ProdutoViewSet(BaseViewSet):
             qs = qs.filter(ativo=True)
         elif ativo in ('false', '0'):
             qs = qs.filter(ativo=False)
+
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(descricao__icontains=search)
+                | Q(descricao_reduzida__icontains=search)
+                | Q(referencia__icontains=search)
+            )
 
         return qs
 
@@ -417,6 +425,66 @@ class ProdutoDetalheViewSet(BaseViewSet):
 class TabelaprecoProdutoViewSet(BaseViewSet):
     queryset = TabelaprecoProduto.objects.all().order_by('-DataInicio')
     serializer_class = TabelaprecoProdutoSerializer
+
+
+class PromocaoViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = (
+        Promocao.objects
+        .prefetch_related('lojas', 'produtos', 'colecoes', 'grupos', 'subgrupos')
+        .all()
+    )
+    serializer_class = PromocaoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        loja = self.request.query_params.get('loja')
+        hoje = timezone.localdate()
+        if ativo in ('true', '1'):
+            qs = qs.filter(ativo=True, data_inicio__lte=hoje).filter(Q(data_fim__isnull=True) | Q(data_fim__gte=hoje))
+        elif ativo in ('false', '0'):
+            qs = qs.filter(ativo=False)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='aplicaveis')
+    def aplicaveis(self, request):
+        loja_id = request.query_params.get('loja')
+        produto_ids = [
+            int(value)
+            for value in request.query_params.getlist('produto')
+            if str(value).isdigit()
+        ]
+        if not produto_ids:
+            raw = request.query_params.get('produtos') or ''
+            produto_ids = [int(value) for value in raw.split(',') if value.strip().isdigit()]
+        if not produto_ids:
+            return Response({'results': []})
+
+        produtos = Produto.objects.filter(pk__in=produto_ids).select_related('colecao', 'grupo', 'subgrupo')
+        promocoes = list(self.get_queryset().filter(ativo=True).order_by('prioridade', '-data_inicio', 'Idpromocao'))
+        payload = []
+        for produto in produtos:
+            melhor = None
+            for promocao in promocoes:
+                if loja_id and promocao.lojas.exists() and not promocao.lojas.filter(pk=loja_id).exists():
+                    continue
+                if promocao.aplica_produto(produto):
+                    melhor = promocao
+                    break
+            if not melhor:
+                continue
+            payload.append({
+                'produto': produto.pk,
+                'promocao': melhor.pk,
+                'nome': melhor.nome,
+                'tipo': melhor.tipo,
+                'valor': str(melhor.valor),
+                'prioridade': melhor.prioridade,
+                'acumula_cashback': melhor.acumula_cashback,
+            })
+        return Response({'results': payload})
 
 
 class PackViewSet(BaseViewSet):

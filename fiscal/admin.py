@@ -1,6 +1,16 @@
 from django.contrib import admin
 
-from .models import NFCe, NotaFiscalEntrada, NotaFiscalEntradaItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from .models import (
+    NFCe,
+    NFeDevolucao,
+    NotaFiscalEntrada,
+    NotaFiscalEntradaItem,
+    VendaDevolucao,
+    VendaDevolucaoItem,
+    VendaPdv,
+    VendaPdvItem,
+    VendaPdvPagamento,
+)
 
 
 class NotaFiscalEntradaItemInline(admin.TabularInline):
@@ -54,8 +64,35 @@ class VendaPdvPagamentoAdmin(admin.ModelAdmin):
     search_fields = ("venda__documento", "forma", "descricao", "autorizacao")
 
 
+class VendaDevolucaoItemInline(admin.TabularInline):
+    model = VendaDevolucaoItem
+    extra = 0
+    readonly_fields = ("total_item",)
+
+
+@admin.register(VendaDevolucao)
+class VendaDevolucaoAdmin(admin.ModelAdmin):
+    list_display = ("id", "documento", "venda", "loja", "cliente", "status", "credito_cliente", "criado_em")
+    list_filter = ("status", "loja", "criado_em")
+    search_fields = ("documento", "venda__documento", "cliente__nome_cliente")
+    inlines = [VendaDevolucaoItemInline]
+
+
+@admin.register(VendaDevolucaoItem)
+class VendaDevolucaoItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "devolucao", "descricao", "ean", "quantidade", "preco_unitario", "total_item")
+    search_fields = ("devolucao__documento", "descricao", "ean")
+
+
 @admin.register(NFCe)
 class NFCeAdmin(admin.ModelAdmin):
     list_display = ("id", "venda", "serie", "numero", "status", "retorno_codigo", "autorizada_em")
     list_filter = ("status", "ambiente", "serie")
     search_fields = ("venda__documento", "chave_acesso", "protocolo")
+
+
+@admin.register(NFeDevolucao)
+class NFeDevolucaoAdmin(admin.ModelAdmin):
+    list_display = ("id", "devolucao", "serie", "numero", "status", "retorno_codigo", "autorizada_em")
+    list_filter = ("status", "ambiente", "serie")
+    search_fields = ("devolucao__documento", "chave_acesso", "protocolo")

@@ -107,6 +107,117 @@ class VendaPdvPagamento(models.Model):
         return f"{self.venda_id} - {self.forma} - {self.valor}"
 
 
+class VendaDevolucao(models.Model):
+    class Status(models.TextChoices):
+        DIGITADA = "DIGITADA", "Digitada"
+        FINALIZADA = "FINALIZADA", "Finalizada"
+        CANCELADA = "CANCELADA", "Cancelada"
+
+    venda = models.ForeignKey(VendaPdv, on_delete=models.PROTECT, related_name="devolucoes")
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="devolucoes_venda")
+    cliente = models.ForeignKey("cadastros.Cliente", on_delete=models.PROTECT, related_name="devolucoes_venda")
+    documento = models.CharField(max_length=50, unique=True, db_index=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.FINALIZADA, db_index=True)
+    motivo = models.CharField(max_length=255, blank=True, default="")
+    subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    credito_cliente = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="devolucoes_venda_criadas",
+        null=True,
+        blank=True,
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_venda_devolucao"
+        ordering = ["-criado_em", "-id"]
+        indexes = [
+            models.Index(fields=["venda"], name="ix_devolucao_venda"),
+            models.Index(fields=["loja", "criado_em"], name="ix_devolucao_loja_data"),
+            models.Index(fields=["cliente", "criado_em"], name="ix_devolucao_cliente_data"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.documento} - {self.credito_cliente}"
+
+
+class VendaDevolucaoItem(models.Model):
+    devolucao = models.ForeignKey(VendaDevolucao, on_delete=models.CASCADE, related_name="itens")
+    venda_item = models.ForeignKey(VendaPdvItem, on_delete=models.PROTECT, related_name="devolucoes_itens")
+    produto = models.ForeignKey("produto.Produto", on_delete=models.PROTECT)
+    sku = models.ForeignKey("produto.ProdutoDetalhe", on_delete=models.PROTECT)
+    ean = models.CharField(max_length=13, db_index=True)
+    referencia = models.CharField(max_length=30, blank=True, default="")
+    descricao = models.CharField(max_length=120)
+    cor = models.CharField(max_length=80, blank=True, default="")
+    tamanho = models.CharField(max_length=30, blank=True, default="")
+    quantidade = models.PositiveIntegerField()
+    preco_unitario = models.DecimalField(max_digits=18, decimal_places=4)
+    desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "fiscal_venda_devolucao_item"
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["devolucao"], name="ix_devolucao_item_dev"),
+            models.Index(fields=["venda_item"], name="ix_devolucao_item_venda"),
+            models.Index(fields=["ean"], name="ix_devolucao_item_ean"),
+        ]
+
+    def save(self, *args, **kwargs):
+        valor_unitario_liquido = Decimal(self.preco_unitario or 0) - (
+            Decimal(self.desconto or 0) / Decimal(self.quantidade or 1)
+        )
+        self.total_item = money(Decimal(self.quantidade or 0) * valor_unitario_liquido)
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.devolucao_id} - {self.descricao}"
+
+
+class NFeDevolucao(models.Model):
+    class Status(models.TextChoices):
+        DIGITADA = "DIGITADA", "Digitada"
+        EMITINDO = "EMITINDO", "Emitindo"
+        AUTORIZADA = "AUTORIZADA", "Autorizada"
+        REJEITADA = "REJEITADA", "Rejeitada"
+        CANCELADA = "CANCELADA", "Cancelada"
+
+    devolucao = models.OneToOneField(VendaDevolucao, on_delete=models.PROTECT, related_name="nfe_devolucao")
+    nfce_origem = models.ForeignKey("fiscal.NFCe", on_delete=models.PROTECT, null=True, blank=True, related_name="nfes_devolucao")
+    ambiente = models.CharField(max_length=12, default="HOMOLOGACAO")
+    modelo = models.CharField(max_length=2, default="55")
+    serie = models.PositiveIntegerField(default=1)
+    numero = models.PositiveIntegerField(db_index=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DIGITADA, db_index=True)
+    chave_acesso = models.CharField(max_length=44, blank=True, default="", db_index=True)
+    protocolo = models.CharField(max_length=30, blank=True, default="")
+    xml = models.TextField(blank=True, default="")
+    retorno_codigo = models.CharField(max_length=10, blank=True, default="")
+    retorno_mensagem = models.CharField(max_length=255, blank=True, default="")
+    autorizada_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_nfe_devolucao"
+        ordering = ["-numero"]
+        constraints = [
+            models.UniqueConstraint(fields=["serie", "numero"], name="uq_nfe_devolucao_serie_numero"),
+        ]
+        indexes = [
+            models.Index(fields=["status"], name="ix_nfe_devolucao_status"),
+            models.Index(fields=["chave_acesso"], name="ix_nfe_devolucao_chave"),
+        ]
+
+    def __str__(self) -> str:
+        return f"NF-e devolucao {self.serie}/{self.numero} - {self.status}"
+
+
 class NFCe(models.Model):
     class Status(models.TextChoices):
         DIGITADA = "DIGITADA", "Digitada"

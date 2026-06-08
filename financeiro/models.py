@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from django.db import models
+from django.db.models import Case, DecimalField, Sum, Value, When
 from django.utils import timezone
 from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento
 
@@ -40,6 +43,99 @@ class FormaPagamentoParcela(models.Model):
 
     def __str__(self):
         return f"{self.forma.codigo} - Parcela {self.ordem} ({self.dias} dias)"
+
+
+# =========================
+# Cashback
+# =========================
+class CashbackConfig(models.Model):
+    Idcashbackconfig = models.BigAutoField(primary_key=True)
+    nome = models.CharField(max_length=80, default='Regra padrão')
+    ativo = models.BooleanField(default=False)
+    percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    validade_dias = models.PositiveIntegerField(default=180)
+    valor_minimo_geracao = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_minimo_uso = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    limite_uso_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=100)
+    consumidor_final_participa = models.BooleanField(default=False)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_config'
+        ordering = ['-ativo', 'Idcashbackconfig']
+
+    def __str__(self):
+        status = 'ativo' if self.ativo else 'inativo'
+        return f'{self.nome} - {self.percentual}% ({status})'
+
+    @classmethod
+    def regra_ativa(cls):
+        return cls.objects.filter(ativo=True).order_by('Idcashbackconfig').first()
+
+
+class CashbackMovimento(models.Model):
+    TIPO_CREDITO = 'CREDITO'
+    TIPO_DEBITO = 'DEBITO'
+    TIPO_ESTORNO = 'ESTORNO'
+    TIPO_EXPIRACAO = 'EXPIRACAO'
+    TIPO_CHOICES = [
+        (TIPO_CREDITO, 'Crédito'),
+        (TIPO_DEBITO, 'Uso em venda'),
+        (TIPO_ESTORNO, 'Estorno'),
+        (TIPO_EXPIRACAO, 'Expiração'),
+    ]
+
+    STATUS_ATIVO = 'ATIVO'
+    STATUS_CANCELADO = 'CANCELADO'
+    STATUS_CHOICES = [
+        (STATUS_ATIVO, 'Ativo'),
+        (STATUS_CANCELADO, 'Cancelado'),
+    ]
+
+    Idcashbackmovimento = models.BigAutoField(primary_key=True)
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='cashback_movimentos', db_index=True)
+    venda_origem = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_creditos')
+    venda_uso = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_usos')
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ATIVO, db_index=True)
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    validade = models.DateField(null=True, blank=True, db_index=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    criado_por = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_movimento'
+        ordering = ['-criado_em', '-Idcashbackmovimento']
+        indexes = [
+            models.Index(fields=['cliente', 'status'], name='ix_cashback_cliente_status'),
+            models.Index(fields=['tipo', 'status'], name='ix_cashback_tipo_status'),
+        ]
+
+    def __str__(self):
+        return f'{self.cliente_id} - {self.tipo} - {self.valor}'
+
+
+def saldo_cashback_cliente(cliente_id, ate=None):
+    hoje = ate or timezone.localdate()
+    saldo = (
+        CashbackMovimento.objects
+        .filter(cliente_id=cliente_id, status=CashbackMovimento.STATUS_ATIVO)
+        .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+        .aggregate(
+            saldo=Sum(
+                Case(
+                    When(tipo=CashbackMovimento.TIPO_CREDITO, then='valor'),
+                    When(tipo=CashbackMovimento.TIPO_ESTORNO, then='valor'),
+                    default=Value(Decimal('0.00')) - models.F('valor'),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+        )
+        .get('saldo')
+    )
+    return saldo or 0
 
 
 # =========================
