@@ -287,7 +287,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         for titulo in titulos:
             titulo.nfe_id = nota.pk
-            titulo.Titulo = f"{nota.numero}-1"[:60]
+            titulo.Titulo = str(nota.numero)[:60]
             titulo.Documento = documento
             titulo.Data_emissao = nota.dt_emissao
             titulo.Previsao = False
