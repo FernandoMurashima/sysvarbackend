@@ -1,0 +1,8437 @@
+[
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "admin",
+    "model": "logentry"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "auth",
+    "model": "permission"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "auth",
+    "model": "group"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "contenttypes",
+    "model": "contenttype"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "sessions",
+    "model": "session"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "authtoken",
+    "model": "token"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "authtoken",
+    "model": "tokenproxy"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "cadastros",
+    "model": "loja"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "cadastros",
+    "model": "cliente"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "cadastros",
+    "model": "fornecedor"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "cadastros",
+    "model": "funcionarios"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "cadastros",
+    "model": "nat_lancamento"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "accounts",
+    "model": "user"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "auditoria",
+    "model": "auditlog"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "configean"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "ncm"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "grade"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "tamanho"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "cor"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "material"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "colecao"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "unidade"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "grupo"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "subgrupo"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "tabelapreco"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "codigos"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "produto"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "produtodetalhe"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "tabelaprecoproduto"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "pack"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "packitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "estoque"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "estoquemovimentacao"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "inventarioestoque"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "produto",
+    "model": "inventarioestoqueitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "formapagamento"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "formapagamentoparcela"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "caixa"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "contabancaria"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "movimentacaofinanceira"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "pagar"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "pagaritem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "pagarrateio"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "receber"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "receberitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "financeiro",
+    "model": "receberrateio"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "compras",
+    "model": "pedidocompra"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "compras",
+    "model": "pedidocompraitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "compras",
+    "model": "pedidocompraentrega"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "compras",
+    "model": "pedidocompraparcela"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "notafiscalentrada"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "notafiscalentradaitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "vendapdv"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "vendapdvitem"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "vendapdvpagamento"
+  }
+},
+{
+  "model": "contenttypes.contenttype",
+  "fields": {
+    "app_label": "fiscal",
+    "model": "nfce"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 1,
+  "fields": {
+    "nome_loja": "Sysvar Moda Centro",
+    "apelido_loja": "CENTRO",
+    "cnpj": "11222333000181",
+    "logradouro": "Rua",
+    "endereco": "Avenida Paulista",
+    "numero": "1000",
+    "complemento": null,
+    "cep": "01310100",
+    "bairro": "Bela Vista",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11988887777",
+    "telefone2": null,
+    "email": "centro@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2024-01-10",
+    "ContaContabil": "1.1.01",
+    "DataEnceramento": null,
+    "Matriz": "SIM",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.405Z"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 2,
+  "fields": {
+    "nome_loja": "Sysvar Moda Shopping",
+    "apelido_loja": "SHOPPING",
+    "cnpj": "12345678000195",
+    "logradouro": "Rua",
+    "endereco": "Avenida Paulista",
+    "numero": "1000",
+    "complemento": null,
+    "cep": "01310100",
+    "bairro": "Bela Vista",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11977776666",
+    "telefone2": null,
+    "email": "shopping@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2024-01-10",
+    "ContaContabil": "1.1.01",
+    "DataEnceramento": null,
+    "Matriz": "NAO",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.408Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 1,
+  "fields": {
+    "nome_cliente": "Consumidor Final",
+    "apelido": "CONSUMIDOR",
+    "cpf": "00000000000",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "consumidor@cliente.test",
+    "categoria": "Sem cadastro",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.411Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 2,
+  "fields": {
+    "nome_cliente": "Mariana Alves",
+    "apelido": "MARI",
+    "cpf": "52998224725",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "mari@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.413Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 3,
+  "fields": {
+    "nome_cliente": "Rafael Costa",
+    "apelido": "RAFA",
+    "cpf": "11144477735",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "rafa@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.415Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 4,
+  "fields": {
+    "nome_cliente": "Bianca Lima",
+    "apelido": "BIANCA",
+    "cpf": "93541134780",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "bianca@cliente.test",
+    "categoria": "VIP",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": true,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.417Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 1,
+  "fields": {
+    "nome_fornecedor": "Textil Aurora Ltda",
+    "apelido": "AURORA",
+    "cnpj": "19131243000197",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133334444",
+    "telefone2": null,
+    "email": "aurora@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.420Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 2,
+  "fields": {
+    "nome_fornecedor": "Malharia Horizonte Ltda",
+    "apelido": "HORIZONTE",
+    "cnpj": "04252011000110",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133334444",
+    "telefone2": null,
+    "email": "horizonte@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.422Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 3,
+  "fields": {
+    "nome_fornecedor": "Insumos Office Ltda",
+    "apelido": "OFFICE",
+    "cnpj": "40432123000188",
+    "logradouro": null,
+    "endereco": null,
+    "numero": null,
+    "complemento": null,
+    "cep": null,
+    "bairro": null,
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133334444",
+    "telefone2": null,
+    "email": "office@fornecedor.test",
+    "categoria": "Uso/Consumo",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.424Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 1,
+  "fields": {
+    "nomefuncionario": "Ana Souza",
+    "apelido": "ANA",
+    "cpf": "39053344705",
+    "inicio": "2025-01-02",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "25000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.427Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 2,
+  "fields": {
+    "nomefuncionario": "Carlos Pereira",
+    "apelido": "CARLOS",
+    "cpf": "98765432100",
+    "inicio": "2025-01-02",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "18000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.428Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 3,
+  "fields": {
+    "nomefuncionario": "Julia Martins",
+    "apelido": "JULIA",
+    "cpf": "12345678909",
+    "inicio": "2025-01-02",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "18000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.430Z"
+  }
+},
+{
+  "model": "cadastros.nat_lancamento",
+  "pk": 1,
+  "fields": {
+    "codigo": "1.01",
+    "categoria_principal": "Vendas",
+    "subcategoria": "Mercadorias",
+    "descricao": "Receita de venda de mercadorias",
+    "tipo": "RECEITA",
+    "status": "ATIVO",
+    "tipo_natureza": "CREDITO"
+  }
+},
+{
+  "model": "cadastros.nat_lancamento",
+  "pk": 2,
+  "fields": {
+    "codigo": "2.01",
+    "categoria_principal": "Compras",
+    "subcategoria": "Mercadorias",
+    "descricao": "Compra de mercadorias para revenda",
+    "tipo": "DESPESA",
+    "status": "ATIVO",
+    "tipo_natureza": "DEBITO"
+  }
+},
+{
+  "model": "cadastros.nat_lancamento",
+  "pk": 3,
+  "fields": {
+    "codigo": "2.02",
+    "categoria_principal": "Administrativo",
+    "subcategoria": "Uso e consumo",
+    "descricao": "Compra de materiais de uso e consumo",
+    "tipo": "DESPESA",
+    "status": "ATIVO",
+    "tipo_natureza": "DEBITO"
+  }
+},
+{
+  "model": "produto.configean",
+  "pk": 1,
+  "fields": {
+    "country_prefix": "789",
+    "company_prefix": "1234",
+    "next_itemref": 26,
+    "ativo": true,
+    "atualizado_em": "2026-06-03T17:44:31.481Z"
+  }
+},
+{
+  "model": "produto.ncm",
+  "pk": 1,
+  "fields": {
+    "ncm": "6204.42.00",
+    "descricao": "Vestidos femininos de algodao",
+    "aliquota": "18.00",
+    "campo1": null
+  }
+},
+{
+  "model": "produto.ncm",
+  "pk": 2,
+  "fields": {
+    "ncm": "6203.42.00",
+    "descricao": "Calcas de algodao",
+    "aliquota": "18.00",
+    "campo1": null
+  }
+},
+{
+  "model": "produto.grade",
+  "pk": 1,
+  "fields": {
+    "Descricao": "Grade PP ao GG",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.492Z"
+  }
+},
+{
+  "model": "produto.tamanho",
+  "pk": 1,
+  "fields": {
+    "idgrade": 1,
+    "Tamanho": "PP",
+    "Descricao": "Tamanho PP",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.494Z"
+  }
+},
+{
+  "model": "produto.tamanho",
+  "pk": 2,
+  "fields": {
+    "idgrade": 1,
+    "Tamanho": "P",
+    "Descricao": "Tamanho P",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.497Z"
+  }
+},
+{
+  "model": "produto.tamanho",
+  "pk": 3,
+  "fields": {
+    "idgrade": 1,
+    "Tamanho": "M",
+    "Descricao": "Tamanho M",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.499Z"
+  }
+},
+{
+  "model": "produto.tamanho",
+  "pk": 4,
+  "fields": {
+    "idgrade": 1,
+    "Tamanho": "G",
+    "Descricao": "Tamanho G",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.500Z"
+  }
+},
+{
+  "model": "produto.tamanho",
+  "pk": 5,
+  "fields": {
+    "idgrade": 1,
+    "Tamanho": "GG",
+    "Descricao": "Tamanho GG",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.502Z"
+  }
+},
+{
+  "model": "produto.cor",
+  "pk": 1,
+  "fields": {
+    "Descricao": "Preto",
+    "Codigo": "PR",
+    "Cor": "Preto",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.504Z"
+  }
+},
+{
+  "model": "produto.cor",
+  "pk": 2,
+  "fields": {
+    "Descricao": "Azul",
+    "Codigo": "AZ",
+    "Cor": "Azul",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.507Z"
+  }
+},
+{
+  "model": "produto.cor",
+  "pk": 3,
+  "fields": {
+    "Descricao": "Branco",
+    "Codigo": "BR",
+    "Cor": "Branco",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.508Z"
+  }
+},
+{
+  "model": "produto.material",
+  "pk": 1,
+  "fields": {
+    "Descricao": "Algodao",
+    "Codigo": "ALG",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.511Z"
+  }
+},
+{
+  "model": "produto.material",
+  "pk": 2,
+  "fields": {
+    "Descricao": "Jeans",
+    "Codigo": "JNS",
+    "Status": "ATIVO",
+    "data_cadastro": "2026-06-03T17:44:31.515Z"
+  }
+},
+{
+  "model": "produto.colecao",
+  "pk": 1,
+  "fields": {
+    "Descricao": "Verao 2026",
+    "Codigo": "26",
+    "Estacao": "01",
+    "Status": "AT",
+    "Contador": 0,
+    "data_cadastro": "2026-06-03T17:44:31.518Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 1,
+  "fields": {
+    "Descricao": "Unidade",
+    "Codigo": "UN",
+    "data_cadastro": "2026-06-03T17:44:31.488Z"
+  }
+},
+{
+  "model": "produto.grupo",
+  "pk": 1,
+  "fields": {
+    "Codigo": "01",
+    "CodigoRef": "01",
+    "Descricao": "Feminino",
+    "Margem": "120.00",
+    "data_cadastro": "2026-06-03T17:44:31.522Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 1,
+  "fields": {
+    "Idgrupo": 1,
+    "Descricao": "Vestidos",
+    "Margem": "120.00",
+    "data_cadastro": "2026-06-03T17:44:31.527Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 2,
+  "fields": {
+    "Idgrupo": 1,
+    "Descricao": "Calcas",
+    "Margem": "110.00",
+    "data_cadastro": "2026-06-03T17:44:31.529Z"
+  }
+},
+{
+  "model": "produto.tabelapreco",
+  "pk": 1,
+  "fields": {
+    "NomeTabela": "Tabela Padrao",
+    "DataInicio": "2026-06-03",
+    "Promocao": false,
+    "DataFim": null,
+    "data_cadastro": "2026-06-03T17:44:31.532Z"
+  }
+},
+{
+  "model": "produto.codigos",
+  "pk": 1,
+  "fields": {
+    "colecao": "26",
+    "estacao": "01",
+    "valor_var": 3
+  }
+},
+{
+  "model": "produto.produto",
+  "pk": 1,
+  "fields": {
+    "tipo_produto": "1",
+    "referencia": "26-01-01001",
+    "descricao": "Vestido Midi Floral",
+    "descricao_reduzida": "Vestido Floral",
+    "unidade": 1,
+    "grupo": 1,
+    "subgrupo": 1,
+    "colecao": 1,
+    "material": 1,
+    "grade": 1,
+    "ncm": "6204.42.00",
+    "origem_mercadoria": 0,
+    "csosn_ou_cst_icms": "102",
+    "aliquota_icms": "18.00",
+    "cfop_venda_dentro": "5102",
+    "cfop_venda_fora": "6102",
+    "cst_pis": null,
+    "aliq_pis": null,
+    "cst_cofins": null,
+    "aliq_cofins": null,
+    "ipi_situacao": null,
+    "aliq_ipi": null,
+    "ativo": true,
+    "bloqueado_venda": false,
+    "observacoes": null,
+    "data_cadastro": "2026-06-03T17:44:31.550Z",
+    "data_inativo": null
+  }
+},
+{
+  "model": "produto.produto",
+  "pk": 2,
+  "fields": {
+    "tipo_produto": "1",
+    "referencia": "26-01-01002",
+    "descricao": "Calca Jeans Reta",
+    "descricao_reduzida": "Jeans Reta",
+    "unidade": 1,
+    "grupo": 1,
+    "subgrupo": 2,
+    "colecao": 1,
+    "material": 2,
+    "grade": 1,
+    "ncm": "6203.42.00",
+    "origem_mercadoria": 0,
+    "csosn_ou_cst_icms": "102",
+    "aliquota_icms": "18.00",
+    "cfop_venda_dentro": "5102",
+    "cfop_venda_fora": "6102",
+    "cst_pis": null,
+    "aliq_pis": null,
+    "cst_cofins": null,
+    "aliq_cofins": null,
+    "ipi_situacao": null,
+    "aliq_ipi": null,
+    "ativo": true,
+    "bloqueado_venda": false,
+    "observacoes": null,
+    "data_cadastro": "2026-06-03T17:44:31.622Z",
+    "data_inativo": null
+  }
+},
+{
+  "model": "produto.produto",
+  "pk": 3,
+  "fields": {
+    "tipo_produto": "2",
+    "referencia": null,
+    "descricao": "Sacola Kraft Media",
+    "descricao_reduzida": "Sacola Kraft",
+    "unidade": 1,
+    "grupo": null,
+    "subgrupo": null,
+    "colecao": null,
+    "material": null,
+    "grade": null,
+    "ncm": "4819.40.00",
+    "origem_mercadoria": 0,
+    "csosn_ou_cst_icms": null,
+    "aliquota_icms": null,
+    "cfop_venda_dentro": null,
+    "cfop_venda_fora": null,
+    "cst_pis": null,
+    "aliq_pis": null,
+    "cst_cofins": null,
+    "aliq_cofins": null,
+    "ipi_situacao": null,
+    "aliq_ipi": null,
+    "ativo": true,
+    "bloqueado_venda": false,
+    "observacoes": null,
+    "data_cadastro": "2026-06-03T17:44:31.659Z",
+    "data_inativo": null
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 1,
+  "fields": {
+    "produto": 1,
+    "idcor": 1,
+    "idtamanho": 1,
+    "config_ean": 1,
+    "codigo_item_ref": "00001",
+    "ean13": "7891234000019",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 2,
+  "fields": {
+    "produto": 1,
+    "idcor": 1,
+    "idtamanho": 2,
+    "config_ean": 1,
+    "codigo_item_ref": "00002",
+    "ean13": "7891234000026",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 3,
+  "fields": {
+    "produto": 1,
+    "idcor": 1,
+    "idtamanho": 3,
+    "config_ean": 1,
+    "codigo_item_ref": "00003",
+    "ean13": "7891234000033",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 4,
+  "fields": {
+    "produto": 1,
+    "idcor": 1,
+    "idtamanho": 4,
+    "config_ean": 1,
+    "codigo_item_ref": "00004",
+    "ean13": "7891234000040",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 5,
+  "fields": {
+    "produto": 1,
+    "idcor": 1,
+    "idtamanho": 5,
+    "config_ean": 1,
+    "codigo_item_ref": "00005",
+    "ean13": "7891234000057",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 6,
+  "fields": {
+    "produto": 1,
+    "idcor": 2,
+    "idtamanho": 1,
+    "config_ean": 1,
+    "codigo_item_ref": "00006",
+    "ean13": "7891234000064",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 7,
+  "fields": {
+    "produto": 1,
+    "idcor": 2,
+    "idtamanho": 2,
+    "config_ean": 1,
+    "codigo_item_ref": "00007",
+    "ean13": "7891234000071",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 8,
+  "fields": {
+    "produto": 1,
+    "idcor": 2,
+    "idtamanho": 3,
+    "config_ean": 1,
+    "codigo_item_ref": "00008",
+    "ean13": "7891234000088",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 9,
+  "fields": {
+    "produto": 1,
+    "idcor": 2,
+    "idtamanho": 4,
+    "config_ean": 1,
+    "codigo_item_ref": "00009",
+    "ean13": "7891234000095",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 10,
+  "fields": {
+    "produto": 1,
+    "idcor": 2,
+    "idtamanho": 5,
+    "config_ean": 1,
+    "codigo_item_ref": "00010",
+    "ean13": "7891234000101",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 11,
+  "fields": {
+    "produto": 1,
+    "idcor": 3,
+    "idtamanho": 1,
+    "config_ean": 1,
+    "codigo_item_ref": "00011",
+    "ean13": "7891234000118",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 12,
+  "fields": {
+    "produto": 1,
+    "idcor": 3,
+    "idtamanho": 2,
+    "config_ean": 1,
+    "codigo_item_ref": "00012",
+    "ean13": "7891234000125",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 13,
+  "fields": {
+    "produto": 1,
+    "idcor": 3,
+    "idtamanho": 3,
+    "config_ean": 1,
+    "codigo_item_ref": "00013",
+    "ean13": "7891234000132",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 14,
+  "fields": {
+    "produto": 1,
+    "idcor": 3,
+    "idtamanho": 4,
+    "config_ean": 1,
+    "codigo_item_ref": "00014",
+    "ean13": "7891234000149",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 15,
+  "fields": {
+    "produto": 1,
+    "idcor": 3,
+    "idtamanho": 5,
+    "config_ean": 1,
+    "codigo_item_ref": "00015",
+    "ean13": "7891234000156",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 16,
+  "fields": {
+    "produto": 2,
+    "idcor": 1,
+    "idtamanho": 1,
+    "config_ean": 1,
+    "codigo_item_ref": "00016",
+    "ean13": "7891234000163",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 17,
+  "fields": {
+    "produto": 2,
+    "idcor": 1,
+    "idtamanho": 2,
+    "config_ean": 1,
+    "codigo_item_ref": "00017",
+    "ean13": "7891234000170",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 18,
+  "fields": {
+    "produto": 2,
+    "idcor": 1,
+    "idtamanho": 3,
+    "config_ean": 1,
+    "codigo_item_ref": "00018",
+    "ean13": "7891234000187",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 19,
+  "fields": {
+    "produto": 2,
+    "idcor": 1,
+    "idtamanho": 4,
+    "config_ean": 1,
+    "codigo_item_ref": "00019",
+    "ean13": "7891234000194",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 20,
+  "fields": {
+    "produto": 2,
+    "idcor": 1,
+    "idtamanho": 5,
+    "config_ean": 1,
+    "codigo_item_ref": "00020",
+    "ean13": "7891234000200",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 21,
+  "fields": {
+    "produto": 2,
+    "idcor": 2,
+    "idtamanho": 1,
+    "config_ean": 1,
+    "codigo_item_ref": "00021",
+    "ean13": "7891234000217",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 22,
+  "fields": {
+    "produto": 2,
+    "idcor": 2,
+    "idtamanho": 2,
+    "config_ean": 1,
+    "codigo_item_ref": "00022",
+    "ean13": "7891234000224",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 23,
+  "fields": {
+    "produto": 2,
+    "idcor": 2,
+    "idtamanho": 3,
+    "config_ean": 1,
+    "codigo_item_ref": "00023",
+    "ean13": "7891234000231",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 24,
+  "fields": {
+    "produto": 2,
+    "idcor": 2,
+    "idtamanho": 4,
+    "config_ean": 1,
+    "codigo_item_ref": "00024",
+    "ean13": "7891234000248",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.produtodetalhe",
+  "pk": 25,
+  "fields": {
+    "produto": 2,
+    "idcor": 2,
+    "idtamanho": 5,
+    "config_ean": 1,
+    "codigo_item_ref": "00025",
+    "ean13": "7891234000255",
+    "ativo": true,
+    "bloqueado_venda": false
+  }
+},
+{
+  "model": "produto.tabelaprecoproduto",
+  "pk": 1,
+  "fields": {
+    "produto": 1,
+    "tabela": 1,
+    "preco": "189.9000",
+    "preco_promocional": null,
+    "DataInicio": "2026-06-03",
+    "DataFim": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.558Z"
+  }
+},
+{
+  "model": "produto.tabelaprecoproduto",
+  "pk": 2,
+  "fields": {
+    "produto": 2,
+    "tabela": 1,
+    "preco": "159.9000",
+    "preco_promocional": null,
+    "DataInicio": "2026-06-03",
+    "DataFim": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.626Z"
+  }
+},
+{
+  "model": "produto.pack",
+  "pk": 1,
+  "fields": {
+    "nome": "Pack Basico 1-2-2-1",
+    "grade": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.536Z",
+    "atualizado_em": "2026-06-03T17:44:31.536Z"
+  }
+},
+{
+  "model": "produto.packitem",
+  "pk": 1,
+  "fields": {
+    "pack": 1,
+    "tamanho": 1,
+    "qtd": 1
+  }
+},
+{
+  "model": "produto.packitem",
+  "pk": 2,
+  "fields": {
+    "pack": 1,
+    "tamanho": 2,
+    "qtd": 2
+  }
+},
+{
+  "model": "produto.packitem",
+  "pk": 3,
+  "fields": {
+    "pack": 1,
+    "tamanho": 3,
+    "qtd": 2
+  }
+},
+{
+  "model": "produto.packitem",
+  "pk": 4,
+  "fields": {
+    "pack": 1,
+    "tamanho": 4,
+    "qtd": 1
+  }
+},
+{
+  "model": "produto.packitem",
+  "pk": 5,
+  "fields": {
+    "pack": 1,
+    "tamanho": 5,
+    "qtd": 1
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 1,
+  "fields": {
+    "CodigodeBarra": "7891234000019",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 2,
+  "fields": {
+    "CodigodeBarra": "7891234000019",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 3,
+  "fields": {
+    "CodigodeBarra": "7891234000026",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 4,
+  "fields": {
+    "CodigodeBarra": "7891234000026",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 5,
+  "fields": {
+    "CodigodeBarra": "7891234000033",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 6,
+  "fields": {
+    "CodigodeBarra": "7891234000033",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 7,
+  "fields": {
+    "CodigodeBarra": "7891234000040",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 8,
+  "fields": {
+    "CodigodeBarra": "7891234000040",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 9,
+  "fields": {
+    "CodigodeBarra": "7891234000057",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 10,
+  "fields": {
+    "CodigodeBarra": "7891234000057",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 11,
+  "fields": {
+    "CodigodeBarra": "7891234000064",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 12,
+  "fields": {
+    "CodigodeBarra": "7891234000064",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 13,
+  "fields": {
+    "CodigodeBarra": "7891234000071",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 14,
+  "fields": {
+    "CodigodeBarra": "7891234000071",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 15,
+  "fields": {
+    "CodigodeBarra": "7891234000088",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 16,
+  "fields": {
+    "CodigodeBarra": "7891234000088",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 17,
+  "fields": {
+    "CodigodeBarra": "7891234000095",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 18,
+  "fields": {
+    "CodigodeBarra": "7891234000095",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 19,
+  "fields": {
+    "CodigodeBarra": "7891234000101",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 20,
+  "fields": {
+    "CodigodeBarra": "7891234000101",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 21,
+  "fields": {
+    "CodigodeBarra": "7891234000118",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 22,
+  "fields": {
+    "CodigodeBarra": "7891234000118",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 23,
+  "fields": {
+    "CodigodeBarra": "7891234000125",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 24,
+  "fields": {
+    "CodigodeBarra": "7891234000125",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 25,
+  "fields": {
+    "CodigodeBarra": "7891234000132",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 26,
+  "fields": {
+    "CodigodeBarra": "7891234000132",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 27,
+  "fields": {
+    "CodigodeBarra": "7891234000149",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 28,
+  "fields": {
+    "CodigodeBarra": "7891234000149",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 29,
+  "fields": {
+    "CodigodeBarra": "7891234000156",
+    "referencia": "26-01-01001",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 30,
+  "fields": {
+    "CodigodeBarra": "7891234000156",
+    "referencia": "26-01-01001",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 31,
+  "fields": {
+    "CodigodeBarra": "7891234000163",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 32,
+  "fields": {
+    "CodigodeBarra": "7891234000163",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 33,
+  "fields": {
+    "CodigodeBarra": "7891234000170",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 34,
+  "fields": {
+    "CodigodeBarra": "7891234000170",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 35,
+  "fields": {
+    "CodigodeBarra": "7891234000187",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 36,
+  "fields": {
+    "CodigodeBarra": "7891234000187",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 37,
+  "fields": {
+    "CodigodeBarra": "7891234000194",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 38,
+  "fields": {
+    "CodigodeBarra": "7891234000194",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 39,
+  "fields": {
+    "CodigodeBarra": "7891234000200",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 40,
+  "fields": {
+    "CodigodeBarra": "7891234000200",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 41,
+  "fields": {
+    "CodigodeBarra": "7891234000217",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 42,
+  "fields": {
+    "CodigodeBarra": "7891234000217",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 43,
+  "fields": {
+    "CodigodeBarra": "7891234000224",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 44,
+  "fields": {
+    "CodigodeBarra": "7891234000224",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 45,
+  "fields": {
+    "CodigodeBarra": "7891234000231",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 46,
+  "fields": {
+    "CodigodeBarra": "7891234000231",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 47,
+  "fields": {
+    "CodigodeBarra": "7891234000248",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 48,
+  "fields": {
+    "CodigodeBarra": "7891234000248",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 49,
+  "fields": {
+    "CodigodeBarra": "7891234000255",
+    "referencia": "26-01-01002",
+    "Idloja": 1,
+    "Estoque": 12,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoque",
+  "pk": 50,
+  "fields": {
+    "CodigodeBarra": "7891234000255",
+    "referencia": "26-01-01002",
+    "Idloja": 2,
+    "Estoque": 6,
+    "reserva": 0
+  }
+},
+{
+  "model": "produto.estoquemovimentacao",
+  "pk": 1,
+  "fields": {
+    "Idloja": 1,
+    "CodigodeBarra": "7891234000019",
+    "referencia": "26-01-01001",
+    "tipo": "ENTRADA",
+    "quantidade": 12,
+    "saldo_anterior": 0,
+    "saldo_posterior": 12,
+    "documento": "INI-001",
+    "observacao": "Carga inicial de teste",
+    "data_movimento": "2026-06-03T17:44:31.733Z"
+  }
+},
+{
+  "model": "produto.inventarioestoque",
+  "pk": 1,
+  "fields": {
+    "Idloja": 1,
+    "descricao": "Inventário de Teste",
+    "status": "ABERTO",
+    "data_abertura": "2026-06-03",
+    "data_fechamento": null,
+    "observacao": "Inventário inicial para homologação",
+    "data_cadastro": "2026-06-03T17:44:31.737Z"
+  }
+},
+{
+  "model": "produto.inventarioestoqueitem",
+  "pk": 1,
+  "fields": {
+    "inventario": 1,
+    "CodigodeBarra": "7891234000019",
+    "referencia": "26-01-01001",
+    "saldo_sistema": 12,
+    "saldo_contado": 12,
+    "diferenca": 0,
+    "observacao": null
+  }
+},
+{
+  "model": "financeiro.formapagamento",
+  "pk": 1,
+  "fields": {
+    "codigo": "AV",
+    "descricao": "A vista",
+    "num_parcelas": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.439Z"
+  }
+},
+{
+  "model": "financeiro.formapagamento",
+  "pk": 2,
+  "fields": {
+    "codigo": "30",
+    "descricao": "30 dias",
+    "num_parcelas": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.442Z"
+  }
+},
+{
+  "model": "financeiro.formapagamento",
+  "pk": 3,
+  "fields": {
+    "codigo": "30/60",
+    "descricao": "30/60 dias",
+    "num_parcelas": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.444Z"
+  }
+},
+{
+  "model": "financeiro.formapagamento",
+  "pk": 4,
+  "fields": {
+    "codigo": "CC",
+    "descricao": "Cartao de credito",
+    "num_parcelas": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.448Z"
+  }
+},
+{
+  "model": "financeiro.formapagamentoparcela",
+  "pk": 1,
+  "fields": {
+    "forma": 1,
+    "ordem": 1,
+    "dias": 0,
+    "percentual": "1.000000",
+    "valor_fixo": null,
+    "data_cadastro": "2026-06-03T17:44:31.441Z"
+  }
+},
+{
+  "model": "financeiro.formapagamentoparcela",
+  "pk": 2,
+  "fields": {
+    "forma": 2,
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "1.000000",
+    "valor_fixo": null,
+    "data_cadastro": "2026-06-03T17:44:31.443Z"
+  }
+},
+{
+  "model": "financeiro.formapagamentoparcela",
+  "pk": 3,
+  "fields": {
+    "forma": 3,
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "0.500000",
+    "valor_fixo": null,
+    "data_cadastro": "2026-06-03T17:44:31.446Z"
+  }
+},
+{
+  "model": "financeiro.formapagamentoparcela",
+  "pk": 4,
+  "fields": {
+    "forma": 3,
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "0.500000",
+    "valor_fixo": null,
+    "data_cadastro": "2026-06-03T17:44:31.447Z"
+  }
+},
+{
+  "model": "financeiro.formapagamentoparcela",
+  "pk": 5,
+  "fields": {
+    "forma": 4,
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "1.000000",
+    "valor_fixo": null,
+    "data_cadastro": "2026-06-03T17:44:31.450Z"
+  }
+},
+{
+  "model": "financeiro.caixa",
+  "pk": 1,
+  "fields": {
+    "idloja": 1,
+    "tipo_caixa": "LOJA",
+    "codigo": "CX01",
+    "descricao": "Caixa Principal Sysvar Moda Centro",
+    "saldo_inicial": "500.00",
+    "saldo_atual": "879.80",
+    "ativo": true,
+    "data_abertura": "2026-06-03",
+    "data_cadastro": "2026-06-03T17:44:31.455Z"
+  }
+},
+{
+  "model": "financeiro.caixa",
+  "pk": 2,
+  "fields": {
+    "idloja": 2,
+    "tipo_caixa": "LOJA",
+    "codigo": "CX02",
+    "descricao": "Caixa Principal Sysvar Moda Shopping",
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "ativo": true,
+    "data_abertura": "2026-06-03",
+    "data_cadastro": "2026-06-03T17:44:31.456Z"
+  }
+},
+{
+  "model": "financeiro.caixa",
+  "pk": 3,
+  "fields": {
+    "idloja": null,
+    "tipo_caixa": "MASTER",
+    "codigo": "MASTER",
+    "descricao": "Caixa Master do Grupo",
+    "saldo_inicial": "0.00",
+    "saldo_atual": "879.80",
+    "ativo": true,
+    "data_abertura": "2026-06-03",
+    "data_cadastro": "2026-06-03T17:44:31.457Z"
+  }
+},
+{
+  "model": "financeiro.contabancaria",
+  "pk": 1,
+  "fields": {
+    "idloja": 1,
+    "descricao": "Conta Corrente Principal",
+    "banco": "Banco Teste",
+    "agencia": "0001",
+    "conta": "12345-6",
+    "tipo_conta": "CORRENTE",
+    "pix_chave": "financeiro@sysvar.test",
+    "saldo_inicial": "2500.00",
+    "saldo_atual": "2075.00",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T17:44:31.460Z"
+  }
+},
+{
+  "model": "financeiro.movimentacaofinanceira",
+  "pk": 1,
+  "fields": {
+    "idloja": 1,
+    "data_movimento": "2026-06-03",
+    "tipo": "ENTRADA",
+    "status": "EFETIVA",
+    "origem": "MANUAL",
+    "valor": "379.80",
+    "historico": "Recebimento venda balcão Mariana",
+    "documento": "PV-2001",
+    "Idnatureza": 1,
+    "FormaPagamento": "CC",
+    "caixa": 1,
+    "conta_bancaria": null,
+    "pagar_item": null,
+    "receber_item": null,
+    "data_cadastro": "2026-06-03T17:44:31.462Z"
+  }
+},
+{
+  "model": "financeiro.movimentacaofinanceira",
+  "pk": 2,
+  "fields": {
+    "idloja": 1,
+    "data_movimento": "2026-06-03",
+    "tipo": "SAIDA",
+    "status": "EFETIVA",
+    "origem": "MANUAL",
+    "valor": "425.00",
+    "historico": "Pagamento parcial fornecedor Aurora",
+    "documento": "NF-1001",
+    "Idnatureza": 2,
+    "FormaPagamento": "30/60",
+    "caixa": null,
+    "conta_bancaria": 1,
+    "pagar_item": null,
+    "receber_item": null,
+    "data_cadastro": "2026-06-03T17:44:31.464Z"
+  }
+},
+{
+  "model": "financeiro.pagar",
+  "pk": 1,
+  "fields": {
+    "idloja": 1,
+    "idfornecedor": 1,
+    "Titulo": "Compra Textil Aurora",
+    "Documento": "NF-1001",
+    "Data_emissao": "2026-06-03",
+    "Valor_total": "850.00",
+    "Previsao": false,
+    "FormaPagamento": "30/60",
+    "Idnatureza": 2,
+    "conta_contabil": "2.1.01",
+    "pedido_compra": null,
+    "nfe_id": null,
+    "data_cadastro": "2026-06-03T17:44:31.469Z"
+  }
+},
+{
+  "model": "financeiro.pagaritem",
+  "pk": 1,
+  "fields": {
+    "Idpagar": 1,
+    "parcela_n": 1,
+    "status": "EFETIVO",
+    "Data_vencimento": "2026-07-03",
+    "valor_parcela": "425.00",
+    "FormaPagamento": "30/60",
+    "idconta": null,
+    "juros": "0.00",
+    "desconto": "0.00",
+    "data_baixa": null,
+    "valor_baixa": null,
+    "Previsao": false,
+    "Idnatureza": 2,
+    "data_cadastro": "2026-06-03T17:44:31.473Z"
+  }
+},
+{
+  "model": "financeiro.pagaritem",
+  "pk": 2,
+  "fields": {
+    "Idpagar": 1,
+    "parcela_n": 2,
+    "status": "EFETIVO",
+    "Data_vencimento": "2026-08-02",
+    "valor_parcela": "425.00",
+    "FormaPagamento": "30/60",
+    "idconta": null,
+    "juros": "0.00",
+    "desconto": "0.00",
+    "data_baixa": null,
+    "valor_baixa": null,
+    "Previsao": false,
+    "Idnatureza": 2,
+    "data_cadastro": "2026-06-03T17:44:31.474Z"
+  }
+},
+{
+  "model": "financeiro.receber",
+  "pk": 1,
+  "fields": {
+    "idloja": 1,
+    "idcliente": 2,
+    "Titulo": "Venda Balcao Mariana",
+    "Documento": "PV-2001",
+    "Data_emissao": "2026-06-03",
+    "Valor_total": "379.80",
+    "Previsao": false,
+    "FormaPagamento": "CC",
+    "Idnatureza": 1,
+    "conta_contabil": "1.1.02",
+    "pedido_venda": null,
+    "nfe_id": null,
+    "data_cadastro": "2026-06-03T17:44:31.477Z"
+  }
+},
+{
+  "model": "financeiro.receberitem",
+  "pk": 1,
+  "fields": {
+    "Idreceber": 1,
+    "parcela_n": 1,
+    "status": "EFETIVO",
+    "Data_vencimento": "2026-07-03",
+    "valor_parcela": "379.80",
+    "FormaPagamento": "CC",
+    "idconta": null,
+    "juros": "0.00",
+    "desconto": "0.00",
+    "data_baixa": null,
+    "valor_baixa": null,
+    "Previsao": false,
+    "Idnatureza": 1,
+    "data_cadastro": "2026-06-03T17:44:31.479Z"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add log entry",
+    "content_type": [
+      "admin",
+      "logentry"
+    ],
+    "codename": "add_logentry"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change log entry",
+    "content_type": [
+      "admin",
+      "logentry"
+    ],
+    "codename": "change_logentry"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete log entry",
+    "content_type": [
+      "admin",
+      "logentry"
+    ],
+    "codename": "delete_logentry"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view log entry",
+    "content_type": [
+      "admin",
+      "logentry"
+    ],
+    "codename": "view_logentry"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add permission",
+    "content_type": [
+      "auth",
+      "permission"
+    ],
+    "codename": "add_permission"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change permission",
+    "content_type": [
+      "auth",
+      "permission"
+    ],
+    "codename": "change_permission"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete permission",
+    "content_type": [
+      "auth",
+      "permission"
+    ],
+    "codename": "delete_permission"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view permission",
+    "content_type": [
+      "auth",
+      "permission"
+    ],
+    "codename": "view_permission"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add group",
+    "content_type": [
+      "auth",
+      "group"
+    ],
+    "codename": "add_group"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change group",
+    "content_type": [
+      "auth",
+      "group"
+    ],
+    "codename": "change_group"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete group",
+    "content_type": [
+      "auth",
+      "group"
+    ],
+    "codename": "delete_group"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view group",
+    "content_type": [
+      "auth",
+      "group"
+    ],
+    "codename": "view_group"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add content type",
+    "content_type": [
+      "contenttypes",
+      "contenttype"
+    ],
+    "codename": "add_contenttype"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change content type",
+    "content_type": [
+      "contenttypes",
+      "contenttype"
+    ],
+    "codename": "change_contenttype"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete content type",
+    "content_type": [
+      "contenttypes",
+      "contenttype"
+    ],
+    "codename": "delete_contenttype"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view content type",
+    "content_type": [
+      "contenttypes",
+      "contenttype"
+    ],
+    "codename": "view_contenttype"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add session",
+    "content_type": [
+      "sessions",
+      "session"
+    ],
+    "codename": "add_session"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change session",
+    "content_type": [
+      "sessions",
+      "session"
+    ],
+    "codename": "change_session"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete session",
+    "content_type": [
+      "sessions",
+      "session"
+    ],
+    "codename": "delete_session"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view session",
+    "content_type": [
+      "sessions",
+      "session"
+    ],
+    "codename": "view_session"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add Token",
+    "content_type": [
+      "authtoken",
+      "token"
+    ],
+    "codename": "add_token"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change Token",
+    "content_type": [
+      "authtoken",
+      "token"
+    ],
+    "codename": "change_token"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete Token",
+    "content_type": [
+      "authtoken",
+      "token"
+    ],
+    "codename": "delete_token"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view Token",
+    "content_type": [
+      "authtoken",
+      "token"
+    ],
+    "codename": "view_token"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add token",
+    "content_type": [
+      "authtoken",
+      "tokenproxy"
+    ],
+    "codename": "add_tokenproxy"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change token",
+    "content_type": [
+      "authtoken",
+      "tokenproxy"
+    ],
+    "codename": "change_tokenproxy"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete token",
+    "content_type": [
+      "authtoken",
+      "tokenproxy"
+    ],
+    "codename": "delete_tokenproxy"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view token",
+    "content_type": [
+      "authtoken",
+      "tokenproxy"
+    ],
+    "codename": "view_tokenproxy"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add loja",
+    "content_type": [
+      "cadastros",
+      "loja"
+    ],
+    "codename": "add_loja"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change loja",
+    "content_type": [
+      "cadastros",
+      "loja"
+    ],
+    "codename": "change_loja"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete loja",
+    "content_type": [
+      "cadastros",
+      "loja"
+    ],
+    "codename": "delete_loja"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view loja",
+    "content_type": [
+      "cadastros",
+      "loja"
+    ],
+    "codename": "view_loja"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add cliente",
+    "content_type": [
+      "cadastros",
+      "cliente"
+    ],
+    "codename": "add_cliente"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change cliente",
+    "content_type": [
+      "cadastros",
+      "cliente"
+    ],
+    "codename": "change_cliente"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete cliente",
+    "content_type": [
+      "cadastros",
+      "cliente"
+    ],
+    "codename": "delete_cliente"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view cliente",
+    "content_type": [
+      "cadastros",
+      "cliente"
+    ],
+    "codename": "view_cliente"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add fornecedor",
+    "content_type": [
+      "cadastros",
+      "fornecedor"
+    ],
+    "codename": "add_fornecedor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change fornecedor",
+    "content_type": [
+      "cadastros",
+      "fornecedor"
+    ],
+    "codename": "change_fornecedor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete fornecedor",
+    "content_type": [
+      "cadastros",
+      "fornecedor"
+    ],
+    "codename": "delete_fornecedor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view fornecedor",
+    "content_type": [
+      "cadastros",
+      "fornecedor"
+    ],
+    "codename": "view_fornecedor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add funcionarios",
+    "content_type": [
+      "cadastros",
+      "funcionarios"
+    ],
+    "codename": "add_funcionarios"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change funcionarios",
+    "content_type": [
+      "cadastros",
+      "funcionarios"
+    ],
+    "codename": "change_funcionarios"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete funcionarios",
+    "content_type": [
+      "cadastros",
+      "funcionarios"
+    ],
+    "codename": "delete_funcionarios"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view funcionarios",
+    "content_type": [
+      "cadastros",
+      "funcionarios"
+    ],
+    "codename": "view_funcionarios"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add nat_ lancamento",
+    "content_type": [
+      "cadastros",
+      "nat_lancamento"
+    ],
+    "codename": "add_nat_lancamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change nat_ lancamento",
+    "content_type": [
+      "cadastros",
+      "nat_lancamento"
+    ],
+    "codename": "change_nat_lancamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete nat_ lancamento",
+    "content_type": [
+      "cadastros",
+      "nat_lancamento"
+    ],
+    "codename": "delete_nat_lancamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view nat_ lancamento",
+    "content_type": [
+      "cadastros",
+      "nat_lancamento"
+    ],
+    "codename": "view_nat_lancamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add user",
+    "content_type": [
+      "accounts",
+      "user"
+    ],
+    "codename": "add_user"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change user",
+    "content_type": [
+      "accounts",
+      "user"
+    ],
+    "codename": "change_user"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete user",
+    "content_type": [
+      "accounts",
+      "user"
+    ],
+    "codename": "delete_user"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view user",
+    "content_type": [
+      "accounts",
+      "user"
+    ],
+    "codename": "view_user"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add audit log",
+    "content_type": [
+      "auditoria",
+      "auditlog"
+    ],
+    "codename": "add_auditlog"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change audit log",
+    "content_type": [
+      "auditoria",
+      "auditlog"
+    ],
+    "codename": "change_auditlog"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete audit log",
+    "content_type": [
+      "auditoria",
+      "auditlog"
+    ],
+    "codename": "delete_auditlog"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view audit log",
+    "content_type": [
+      "auditoria",
+      "auditlog"
+    ],
+    "codename": "view_auditlog"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add Configuração EAN",
+    "content_type": [
+      "produto",
+      "configean"
+    ],
+    "codename": "add_configean"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change Configuração EAN",
+    "content_type": [
+      "produto",
+      "configean"
+    ],
+    "codename": "change_configean"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete Configuração EAN",
+    "content_type": [
+      "produto",
+      "configean"
+    ],
+    "codename": "delete_configean"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view Configuração EAN",
+    "content_type": [
+      "produto",
+      "configean"
+    ],
+    "codename": "view_configean"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add ncm",
+    "content_type": [
+      "produto",
+      "ncm"
+    ],
+    "codename": "add_ncm"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change ncm",
+    "content_type": [
+      "produto",
+      "ncm"
+    ],
+    "codename": "change_ncm"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete ncm",
+    "content_type": [
+      "produto",
+      "ncm"
+    ],
+    "codename": "delete_ncm"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view ncm",
+    "content_type": [
+      "produto",
+      "ncm"
+    ],
+    "codename": "view_ncm"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add grade",
+    "content_type": [
+      "produto",
+      "grade"
+    ],
+    "codename": "add_grade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change grade",
+    "content_type": [
+      "produto",
+      "grade"
+    ],
+    "codename": "change_grade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete grade",
+    "content_type": [
+      "produto",
+      "grade"
+    ],
+    "codename": "delete_grade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view grade",
+    "content_type": [
+      "produto",
+      "grade"
+    ],
+    "codename": "view_grade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add tamanho",
+    "content_type": [
+      "produto",
+      "tamanho"
+    ],
+    "codename": "add_tamanho"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change tamanho",
+    "content_type": [
+      "produto",
+      "tamanho"
+    ],
+    "codename": "change_tamanho"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete tamanho",
+    "content_type": [
+      "produto",
+      "tamanho"
+    ],
+    "codename": "delete_tamanho"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view tamanho",
+    "content_type": [
+      "produto",
+      "tamanho"
+    ],
+    "codename": "view_tamanho"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add cor",
+    "content_type": [
+      "produto",
+      "cor"
+    ],
+    "codename": "add_cor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change cor",
+    "content_type": [
+      "produto",
+      "cor"
+    ],
+    "codename": "change_cor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete cor",
+    "content_type": [
+      "produto",
+      "cor"
+    ],
+    "codename": "delete_cor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view cor",
+    "content_type": [
+      "produto",
+      "cor"
+    ],
+    "codename": "view_cor"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add material",
+    "content_type": [
+      "produto",
+      "material"
+    ],
+    "codename": "add_material"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change material",
+    "content_type": [
+      "produto",
+      "material"
+    ],
+    "codename": "change_material"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete material",
+    "content_type": [
+      "produto",
+      "material"
+    ],
+    "codename": "delete_material"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view material",
+    "content_type": [
+      "produto",
+      "material"
+    ],
+    "codename": "view_material"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add colecao",
+    "content_type": [
+      "produto",
+      "colecao"
+    ],
+    "codename": "add_colecao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change colecao",
+    "content_type": [
+      "produto",
+      "colecao"
+    ],
+    "codename": "change_colecao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete colecao",
+    "content_type": [
+      "produto",
+      "colecao"
+    ],
+    "codename": "delete_colecao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view colecao",
+    "content_type": [
+      "produto",
+      "colecao"
+    ],
+    "codename": "view_colecao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add unidade",
+    "content_type": [
+      "produto",
+      "unidade"
+    ],
+    "codename": "add_unidade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change unidade",
+    "content_type": [
+      "produto",
+      "unidade"
+    ],
+    "codename": "change_unidade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete unidade",
+    "content_type": [
+      "produto",
+      "unidade"
+    ],
+    "codename": "delete_unidade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view unidade",
+    "content_type": [
+      "produto",
+      "unidade"
+    ],
+    "codename": "view_unidade"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add grupo",
+    "content_type": [
+      "produto",
+      "grupo"
+    ],
+    "codename": "add_grupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change grupo",
+    "content_type": [
+      "produto",
+      "grupo"
+    ],
+    "codename": "change_grupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete grupo",
+    "content_type": [
+      "produto",
+      "grupo"
+    ],
+    "codename": "delete_grupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view grupo",
+    "content_type": [
+      "produto",
+      "grupo"
+    ],
+    "codename": "view_grupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add subgrupo",
+    "content_type": [
+      "produto",
+      "subgrupo"
+    ],
+    "codename": "add_subgrupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change subgrupo",
+    "content_type": [
+      "produto",
+      "subgrupo"
+    ],
+    "codename": "change_subgrupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete subgrupo",
+    "content_type": [
+      "produto",
+      "subgrupo"
+    ],
+    "codename": "delete_subgrupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view subgrupo",
+    "content_type": [
+      "produto",
+      "subgrupo"
+    ],
+    "codename": "view_subgrupo"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add tabelapreco",
+    "content_type": [
+      "produto",
+      "tabelapreco"
+    ],
+    "codename": "add_tabelapreco"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change tabelapreco",
+    "content_type": [
+      "produto",
+      "tabelapreco"
+    ],
+    "codename": "change_tabelapreco"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete tabelapreco",
+    "content_type": [
+      "produto",
+      "tabelapreco"
+    ],
+    "codename": "delete_tabelapreco"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view tabelapreco",
+    "content_type": [
+      "produto",
+      "tabelapreco"
+    ],
+    "codename": "view_tabelapreco"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add codigos",
+    "content_type": [
+      "produto",
+      "codigos"
+    ],
+    "codename": "add_codigos"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change codigos",
+    "content_type": [
+      "produto",
+      "codigos"
+    ],
+    "codename": "change_codigos"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete codigos",
+    "content_type": [
+      "produto",
+      "codigos"
+    ],
+    "codename": "delete_codigos"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view codigos",
+    "content_type": [
+      "produto",
+      "codigos"
+    ],
+    "codename": "view_codigos"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add produto",
+    "content_type": [
+      "produto",
+      "produto"
+    ],
+    "codename": "add_produto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change produto",
+    "content_type": [
+      "produto",
+      "produto"
+    ],
+    "codename": "change_produto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete produto",
+    "content_type": [
+      "produto",
+      "produto"
+    ],
+    "codename": "delete_produto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view produto",
+    "content_type": [
+      "produto",
+      "produto"
+    ],
+    "codename": "view_produto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add produto detalhe",
+    "content_type": [
+      "produto",
+      "produtodetalhe"
+    ],
+    "codename": "add_produtodetalhe"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change produto detalhe",
+    "content_type": [
+      "produto",
+      "produtodetalhe"
+    ],
+    "codename": "change_produtodetalhe"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete produto detalhe",
+    "content_type": [
+      "produto",
+      "produtodetalhe"
+    ],
+    "codename": "delete_produtodetalhe"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view produto detalhe",
+    "content_type": [
+      "produto",
+      "produtodetalhe"
+    ],
+    "codename": "view_produtodetalhe"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add tabelapreco produto",
+    "content_type": [
+      "produto",
+      "tabelaprecoproduto"
+    ],
+    "codename": "add_tabelaprecoproduto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change tabelapreco produto",
+    "content_type": [
+      "produto",
+      "tabelaprecoproduto"
+    ],
+    "codename": "change_tabelaprecoproduto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete tabelapreco produto",
+    "content_type": [
+      "produto",
+      "tabelaprecoproduto"
+    ],
+    "codename": "delete_tabelaprecoproduto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view tabelapreco produto",
+    "content_type": [
+      "produto",
+      "tabelaprecoproduto"
+    ],
+    "codename": "view_tabelaprecoproduto"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pack",
+    "content_type": [
+      "produto",
+      "pack"
+    ],
+    "codename": "add_pack"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pack",
+    "content_type": [
+      "produto",
+      "pack"
+    ],
+    "codename": "change_pack"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pack",
+    "content_type": [
+      "produto",
+      "pack"
+    ],
+    "codename": "delete_pack"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pack",
+    "content_type": [
+      "produto",
+      "pack"
+    ],
+    "codename": "view_pack"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pack item",
+    "content_type": [
+      "produto",
+      "packitem"
+    ],
+    "codename": "add_packitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pack item",
+    "content_type": [
+      "produto",
+      "packitem"
+    ],
+    "codename": "change_packitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pack item",
+    "content_type": [
+      "produto",
+      "packitem"
+    ],
+    "codename": "delete_packitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pack item",
+    "content_type": [
+      "produto",
+      "packitem"
+    ],
+    "codename": "view_packitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add estoque",
+    "content_type": [
+      "produto",
+      "estoque"
+    ],
+    "codename": "add_estoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change estoque",
+    "content_type": [
+      "produto",
+      "estoque"
+    ],
+    "codename": "change_estoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete estoque",
+    "content_type": [
+      "produto",
+      "estoque"
+    ],
+    "codename": "delete_estoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view estoque",
+    "content_type": [
+      "produto",
+      "estoque"
+    ],
+    "codename": "view_estoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add estoque movimentacao",
+    "content_type": [
+      "produto",
+      "estoquemovimentacao"
+    ],
+    "codename": "add_estoquemovimentacao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change estoque movimentacao",
+    "content_type": [
+      "produto",
+      "estoquemovimentacao"
+    ],
+    "codename": "change_estoquemovimentacao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete estoque movimentacao",
+    "content_type": [
+      "produto",
+      "estoquemovimentacao"
+    ],
+    "codename": "delete_estoquemovimentacao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view estoque movimentacao",
+    "content_type": [
+      "produto",
+      "estoquemovimentacao"
+    ],
+    "codename": "view_estoquemovimentacao"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add inventario estoque",
+    "content_type": [
+      "produto",
+      "inventarioestoque"
+    ],
+    "codename": "add_inventarioestoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change inventario estoque",
+    "content_type": [
+      "produto",
+      "inventarioestoque"
+    ],
+    "codename": "change_inventarioestoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete inventario estoque",
+    "content_type": [
+      "produto",
+      "inventarioestoque"
+    ],
+    "codename": "delete_inventarioestoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view inventario estoque",
+    "content_type": [
+      "produto",
+      "inventarioestoque"
+    ],
+    "codename": "view_inventarioestoque"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add inventario estoque item",
+    "content_type": [
+      "produto",
+      "inventarioestoqueitem"
+    ],
+    "codename": "add_inventarioestoqueitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change inventario estoque item",
+    "content_type": [
+      "produto",
+      "inventarioestoqueitem"
+    ],
+    "codename": "change_inventarioestoqueitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete inventario estoque item",
+    "content_type": [
+      "produto",
+      "inventarioestoqueitem"
+    ],
+    "codename": "delete_inventarioestoqueitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view inventario estoque item",
+    "content_type": [
+      "produto",
+      "inventarioestoqueitem"
+    ],
+    "codename": "view_inventarioestoqueitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add forma pagamento",
+    "content_type": [
+      "financeiro",
+      "formapagamento"
+    ],
+    "codename": "add_formapagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change forma pagamento",
+    "content_type": [
+      "financeiro",
+      "formapagamento"
+    ],
+    "codename": "change_formapagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete forma pagamento",
+    "content_type": [
+      "financeiro",
+      "formapagamento"
+    ],
+    "codename": "delete_formapagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view forma pagamento",
+    "content_type": [
+      "financeiro",
+      "formapagamento"
+    ],
+    "codename": "view_formapagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add forma pagamento parcela",
+    "content_type": [
+      "financeiro",
+      "formapagamentoparcela"
+    ],
+    "codename": "add_formapagamentoparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change forma pagamento parcela",
+    "content_type": [
+      "financeiro",
+      "formapagamentoparcela"
+    ],
+    "codename": "change_formapagamentoparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete forma pagamento parcela",
+    "content_type": [
+      "financeiro",
+      "formapagamentoparcela"
+    ],
+    "codename": "delete_formapagamentoparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view forma pagamento parcela",
+    "content_type": [
+      "financeiro",
+      "formapagamentoparcela"
+    ],
+    "codename": "view_formapagamentoparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add caixa",
+    "content_type": [
+      "financeiro",
+      "caixa"
+    ],
+    "codename": "add_caixa"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change caixa",
+    "content_type": [
+      "financeiro",
+      "caixa"
+    ],
+    "codename": "change_caixa"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete caixa",
+    "content_type": [
+      "financeiro",
+      "caixa"
+    ],
+    "codename": "delete_caixa"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view caixa",
+    "content_type": [
+      "financeiro",
+      "caixa"
+    ],
+    "codename": "view_caixa"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add conta bancaria",
+    "content_type": [
+      "financeiro",
+      "contabancaria"
+    ],
+    "codename": "add_contabancaria"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change conta bancaria",
+    "content_type": [
+      "financeiro",
+      "contabancaria"
+    ],
+    "codename": "change_contabancaria"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete conta bancaria",
+    "content_type": [
+      "financeiro",
+      "contabancaria"
+    ],
+    "codename": "delete_contabancaria"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view conta bancaria",
+    "content_type": [
+      "financeiro",
+      "contabancaria"
+    ],
+    "codename": "view_contabancaria"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add movimentacao financeira",
+    "content_type": [
+      "financeiro",
+      "movimentacaofinanceira"
+    ],
+    "codename": "add_movimentacaofinanceira"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change movimentacao financeira",
+    "content_type": [
+      "financeiro",
+      "movimentacaofinanceira"
+    ],
+    "codename": "change_movimentacaofinanceira"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete movimentacao financeira",
+    "content_type": [
+      "financeiro",
+      "movimentacaofinanceira"
+    ],
+    "codename": "delete_movimentacaofinanceira"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view movimentacao financeira",
+    "content_type": [
+      "financeiro",
+      "movimentacaofinanceira"
+    ],
+    "codename": "view_movimentacaofinanceira"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pagar",
+    "content_type": [
+      "financeiro",
+      "pagar"
+    ],
+    "codename": "add_pagar"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pagar",
+    "content_type": [
+      "financeiro",
+      "pagar"
+    ],
+    "codename": "change_pagar"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pagar",
+    "content_type": [
+      "financeiro",
+      "pagar"
+    ],
+    "codename": "delete_pagar"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pagar",
+    "content_type": [
+      "financeiro",
+      "pagar"
+    ],
+    "codename": "view_pagar"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pagar item",
+    "content_type": [
+      "financeiro",
+      "pagaritem"
+    ],
+    "codename": "add_pagaritem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pagar item",
+    "content_type": [
+      "financeiro",
+      "pagaritem"
+    ],
+    "codename": "change_pagaritem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pagar item",
+    "content_type": [
+      "financeiro",
+      "pagaritem"
+    ],
+    "codename": "delete_pagaritem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pagar item",
+    "content_type": [
+      "financeiro",
+      "pagaritem"
+    ],
+    "codename": "view_pagaritem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pagar rateio",
+    "content_type": [
+      "financeiro",
+      "pagarrateio"
+    ],
+    "codename": "add_pagarrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pagar rateio",
+    "content_type": [
+      "financeiro",
+      "pagarrateio"
+    ],
+    "codename": "change_pagarrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pagar rateio",
+    "content_type": [
+      "financeiro",
+      "pagarrateio"
+    ],
+    "codename": "delete_pagarrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pagar rateio",
+    "content_type": [
+      "financeiro",
+      "pagarrateio"
+    ],
+    "codename": "view_pagarrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add receber",
+    "content_type": [
+      "financeiro",
+      "receber"
+    ],
+    "codename": "add_receber"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change receber",
+    "content_type": [
+      "financeiro",
+      "receber"
+    ],
+    "codename": "change_receber"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete receber",
+    "content_type": [
+      "financeiro",
+      "receber"
+    ],
+    "codename": "delete_receber"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view receber",
+    "content_type": [
+      "financeiro",
+      "receber"
+    ],
+    "codename": "view_receber"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add receber item",
+    "content_type": [
+      "financeiro",
+      "receberitem"
+    ],
+    "codename": "add_receberitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change receber item",
+    "content_type": [
+      "financeiro",
+      "receberitem"
+    ],
+    "codename": "change_receberitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete receber item",
+    "content_type": [
+      "financeiro",
+      "receberitem"
+    ],
+    "codename": "delete_receberitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view receber item",
+    "content_type": [
+      "financeiro",
+      "receberitem"
+    ],
+    "codename": "view_receberitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add receber rateio",
+    "content_type": [
+      "financeiro",
+      "receberrateio"
+    ],
+    "codename": "add_receberrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change receber rateio",
+    "content_type": [
+      "financeiro",
+      "receberrateio"
+    ],
+    "codename": "change_receberrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete receber rateio",
+    "content_type": [
+      "financeiro",
+      "receberrateio"
+    ],
+    "codename": "delete_receberrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view receber rateio",
+    "content_type": [
+      "financeiro",
+      "receberrateio"
+    ],
+    "codename": "view_receberrateio"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pedido compra",
+    "content_type": [
+      "compras",
+      "pedidocompra"
+    ],
+    "codename": "add_pedidocompra"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pedido compra",
+    "content_type": [
+      "compras",
+      "pedidocompra"
+    ],
+    "codename": "change_pedidocompra"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pedido compra",
+    "content_type": [
+      "compras",
+      "pedidocompra"
+    ],
+    "codename": "delete_pedidocompra"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pedido compra",
+    "content_type": [
+      "compras",
+      "pedidocompra"
+    ],
+    "codename": "view_pedidocompra"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pedido compra item",
+    "content_type": [
+      "compras",
+      "pedidocompraitem"
+    ],
+    "codename": "add_pedidocompraitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pedido compra item",
+    "content_type": [
+      "compras",
+      "pedidocompraitem"
+    ],
+    "codename": "change_pedidocompraitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pedido compra item",
+    "content_type": [
+      "compras",
+      "pedidocompraitem"
+    ],
+    "codename": "delete_pedidocompraitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pedido compra item",
+    "content_type": [
+      "compras",
+      "pedidocompraitem"
+    ],
+    "codename": "view_pedidocompraitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pedido compra entrega",
+    "content_type": [
+      "compras",
+      "pedidocompraentrega"
+    ],
+    "codename": "add_pedidocompraentrega"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pedido compra entrega",
+    "content_type": [
+      "compras",
+      "pedidocompraentrega"
+    ],
+    "codename": "change_pedidocompraentrega"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pedido compra entrega",
+    "content_type": [
+      "compras",
+      "pedidocompraentrega"
+    ],
+    "codename": "delete_pedidocompraentrega"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pedido compra entrega",
+    "content_type": [
+      "compras",
+      "pedidocompraentrega"
+    ],
+    "codename": "view_pedidocompraentrega"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add pedido compra parcela",
+    "content_type": [
+      "compras",
+      "pedidocompraparcela"
+    ],
+    "codename": "add_pedidocompraparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change pedido compra parcela",
+    "content_type": [
+      "compras",
+      "pedidocompraparcela"
+    ],
+    "codename": "change_pedidocompraparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete pedido compra parcela",
+    "content_type": [
+      "compras",
+      "pedidocompraparcela"
+    ],
+    "codename": "delete_pedidocompraparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view pedido compra parcela",
+    "content_type": [
+      "compras",
+      "pedidocompraparcela"
+    ],
+    "codename": "view_pedidocompraparcela"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add nota fiscal entrada",
+    "content_type": [
+      "fiscal",
+      "notafiscalentrada"
+    ],
+    "codename": "add_notafiscalentrada"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change nota fiscal entrada",
+    "content_type": [
+      "fiscal",
+      "notafiscalentrada"
+    ],
+    "codename": "change_notafiscalentrada"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete nota fiscal entrada",
+    "content_type": [
+      "fiscal",
+      "notafiscalentrada"
+    ],
+    "codename": "delete_notafiscalentrada"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view nota fiscal entrada",
+    "content_type": [
+      "fiscal",
+      "notafiscalentrada"
+    ],
+    "codename": "view_notafiscalentrada"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add nota fiscal entrada item",
+    "content_type": [
+      "fiscal",
+      "notafiscalentradaitem"
+    ],
+    "codename": "add_notafiscalentradaitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change nota fiscal entrada item",
+    "content_type": [
+      "fiscal",
+      "notafiscalentradaitem"
+    ],
+    "codename": "change_notafiscalentradaitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete nota fiscal entrada item",
+    "content_type": [
+      "fiscal",
+      "notafiscalentradaitem"
+    ],
+    "codename": "delete_notafiscalentradaitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view nota fiscal entrada item",
+    "content_type": [
+      "fiscal",
+      "notafiscalentradaitem"
+    ],
+    "codename": "view_notafiscalentradaitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add venda pdv",
+    "content_type": [
+      "fiscal",
+      "vendapdv"
+    ],
+    "codename": "add_vendapdv"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change venda pdv",
+    "content_type": [
+      "fiscal",
+      "vendapdv"
+    ],
+    "codename": "change_vendapdv"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete venda pdv",
+    "content_type": [
+      "fiscal",
+      "vendapdv"
+    ],
+    "codename": "delete_vendapdv"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view venda pdv",
+    "content_type": [
+      "fiscal",
+      "vendapdv"
+    ],
+    "codename": "view_vendapdv"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add venda pdv item",
+    "content_type": [
+      "fiscal",
+      "vendapdvitem"
+    ],
+    "codename": "add_vendapdvitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change venda pdv item",
+    "content_type": [
+      "fiscal",
+      "vendapdvitem"
+    ],
+    "codename": "change_vendapdvitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete venda pdv item",
+    "content_type": [
+      "fiscal",
+      "vendapdvitem"
+    ],
+    "codename": "delete_vendapdvitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view venda pdv item",
+    "content_type": [
+      "fiscal",
+      "vendapdvitem"
+    ],
+    "codename": "view_vendapdvitem"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add venda pdv pagamento",
+    "content_type": [
+      "fiscal",
+      "vendapdvpagamento"
+    ],
+    "codename": "add_vendapdvpagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change venda pdv pagamento",
+    "content_type": [
+      "fiscal",
+      "vendapdvpagamento"
+    ],
+    "codename": "change_vendapdvpagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete venda pdv pagamento",
+    "content_type": [
+      "fiscal",
+      "vendapdvpagamento"
+    ],
+    "codename": "delete_vendapdvpagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view venda pdv pagamento",
+    "content_type": [
+      "fiscal",
+      "vendapdvpagamento"
+    ],
+    "codename": "view_vendapdvpagamento"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can add nf ce",
+    "content_type": [
+      "fiscal",
+      "nfce"
+    ],
+    "codename": "add_nfce"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can change nf ce",
+    "content_type": [
+      "fiscal",
+      "nfce"
+    ],
+    "codename": "change_nfce"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can delete nf ce",
+    "content_type": [
+      "fiscal",
+      "nfce"
+    ],
+    "codename": "delete_nfce"
+  }
+},
+{
+  "model": "auth.permission",
+  "fields": {
+    "name": "Can view nf ce",
+    "content_type": [
+      "fiscal",
+      "nfce"
+    ],
+    "codename": "view_nfce"
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$600000$rrHkj4DhiXjml8fMmMFdUN$BHZCcknmFosbPyxNO1F0GDod/u4OwytwIImE10aYNz8=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "admin",
+    "first_name": "Admin",
+    "last_name": "Teste",
+    "email": "admin@sysvar.test",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-06-03T17:44:31.742Z",
+    "type": "Admin",
+    "loja": 1,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 1,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": "01310100",
+      "Rede": "SIM",
+      "cnpj": "11222333000181",
+      "ativo": true,
+      "email": "centro@sysvar.test",
+      "Matriz": "SIM",
+      "bairro": "Bela Vista",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "1000",
+      "endereco": "Avenida Paulista",
+      "nome_loja": "Sysvar Moda Centro",
+      "telefone1": "11988887777",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2024-01-10",
+      "apelido_loja": "CENTRO",
+      "ContaContabil": "1.1.01",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.405Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 2,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": "01310100",
+      "Rede": "SIM",
+      "cnpj": "12345678000195",
+      "ativo": true,
+      "email": "shopping@sysvar.test",
+      "Matriz": "NAO",
+      "bairro": "Bela Vista",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "1000",
+      "endereco": "Avenida Paulista",
+      "nome_loja": "Sysvar Moda Shopping",
+      "telefone1": "11977776666",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2024-01-10",
+      "apelido_loja": "SHOPPING",
+      "ContaContabil": "1.1.01",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.408Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 3,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": null,
+      "cpf": "00000000000",
+      "ativo": true,
+      "email": "consumidor@cliente.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "CONSUMIDOR",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Sem cadastro",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": null,
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Consumidor Final",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.412Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 4,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": null,
+      "cpf": "52998224725",
+      "ativo": true,
+      "email": "mari@cliente.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "MARI",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": null,
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Mariana Alves",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.414Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 5,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cep": null,
+      "cpf": "11144477735",
+      "ativo": true,
+      "email": "rafa@cliente.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "RAFA",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": null,
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Rafael Costa",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.416Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 6,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "cep": null,
+      "cpf": "93541134780",
+      "ativo": true,
+      "email": "bianca@cliente.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "BIANCA",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "VIP",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": null,
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": true,
+      "nome_cliente": "Bianca Lima",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.417Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 7,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": null,
+      "cnpj": "19131243000197",
+      "ativo": true,
+      "email": "aurora@fornecedor.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "AURORA",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Revenda",
+      "telefone1": "1133334444",
+      "telefone2": null,
+      "logradouro": null,
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": null,
+      "nome_fornecedor": "Textil Aurora Ltda"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.421Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 8,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": null,
+      "cnpj": "04252011000110",
+      "ativo": true,
+      "email": "horizonte@fornecedor.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "HORIZONTE",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Revenda",
+      "telefone1": "1133334444",
+      "telefone2": null,
+      "logradouro": null,
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": null,
+      "nome_fornecedor": "Malharia Horizonte Ltda"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.422Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 9,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cep": null,
+      "cnpj": "40432123000188",
+      "ativo": true,
+      "email": "office@fornecedor.test",
+      "bairro": null,
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": null,
+      "apelido": "OFFICE",
+      "bloqueio": false,
+      "endereco": null,
+      "categoria": "Uso/Consumo",
+      "telefone1": "1133334444",
+      "telefone2": null,
+      "logradouro": null,
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": null,
+      "nome_fornecedor": "Insumos Office Ltda"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.424Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 10,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cpf": "39053344705",
+      "fim": null,
+      "meta": "25000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2025-01-02",
+      "apelido": "ANA",
+      "categoria": "Gerente",
+      "nomefuncionario": "Ana Souza",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.427Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 11,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cpf": "98765432100",
+      "fim": null,
+      "meta": "18000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2025-01-02",
+      "apelido": "CARLOS",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Carlos Pereira",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.428Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 12,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cpf": "12345678909",
+      "fim": null,
+      "meta": "18000.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2025-01-02",
+      "apelido": "JULIA",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Julia Martins",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.430Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 13,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "nat_lancamento",
+    "object_id": "1",
+    "changes": {
+      "tipo": "RECEITA",
+      "codigo": "1.01",
+      "status": "ATIVO",
+      "descricao": "Receita de venda de mercadorias",
+      "idnatureza": 1,
+      "subcategoria": "Mercadorias",
+      "tipo_natureza": "CREDITO",
+      "categoria_principal": "Vendas"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.433Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 14,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "nat_lancamento",
+    "object_id": "2",
+    "changes": {
+      "tipo": "DESPESA",
+      "codigo": "2.01",
+      "status": "ATIVO",
+      "descricao": "Compra de mercadorias para revenda",
+      "idnatureza": 2,
+      "subcategoria": "Mercadorias",
+      "tipo_natureza": "DEBITO",
+      "categoria_principal": "Compras"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.435Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 15,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "nat_lancamento",
+    "object_id": "3",
+    "changes": {
+      "tipo": "DESPESA",
+      "codigo": "2.02",
+      "status": "ATIVO",
+      "descricao": "Compra de materiais de uso e consumo",
+      "idnatureza": 3,
+      "subcategoria": "Uso e consumo",
+      "tipo_natureza": "DEBITO",
+      "categoria_principal": "Administrativo"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.437Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 16,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "ativo": true,
+      "next_itemref": 1,
+      "company_prefix": "1234",
+      "country_prefix": "789"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.481Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 17,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "ncm",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "ncm": "6204.42.00",
+      "campo1": null,
+      "aliquota": "18.00",
+      "descricao": "Vestidos femininos de algodao"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.483Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 18,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "ncm",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "ncm": "6203.42.00",
+      "campo1": null,
+      "aliquota": "18.00",
+      "descricao": "Calcas de algodao"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.486Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 19,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "unidade",
+    "object_id": "1",
+    "changes": {
+      "Codigo": "UN",
+      "Descricao": "Unidade",
+      "Idunidade": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.488Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 20,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "grade",
+    "object_id": "1",
+    "changes": {
+      "Status": "ATIVO",
+      "Idgrade": 1,
+      "Descricao": "Grade PP ao GG"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.492Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 21,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tamanho",
+    "object_id": "1",
+    "changes": {
+      "Status": "ATIVO",
+      "Tamanho": "PP",
+      "idgrade": 1,
+      "Descricao": "Tamanho PP",
+      "Idtamanho": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.495Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 22,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tamanho",
+    "object_id": "2",
+    "changes": {
+      "Status": "ATIVO",
+      "Tamanho": "P",
+      "idgrade": 1,
+      "Descricao": "Tamanho P",
+      "Idtamanho": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.497Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 23,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tamanho",
+    "object_id": "3",
+    "changes": {
+      "Status": "ATIVO",
+      "Tamanho": "M",
+      "idgrade": 1,
+      "Descricao": "Tamanho M",
+      "Idtamanho": 3
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.499Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 24,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tamanho",
+    "object_id": "4",
+    "changes": {
+      "Status": "ATIVO",
+      "Tamanho": "G",
+      "idgrade": 1,
+      "Descricao": "Tamanho G",
+      "Idtamanho": 4
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.500Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 25,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tamanho",
+    "object_id": "5",
+    "changes": {
+      "Status": "ATIVO",
+      "Tamanho": "GG",
+      "idgrade": 1,
+      "Descricao": "Tamanho GG",
+      "Idtamanho": 5
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.502Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 26,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "cor",
+    "object_id": "1",
+    "changes": {
+      "Cor": "Preto",
+      "Idcor": 1,
+      "Codigo": "PR",
+      "Status": "ATIVO",
+      "Descricao": "Preto"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.505Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 27,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "cor",
+    "object_id": "2",
+    "changes": {
+      "Cor": "Azul",
+      "Idcor": 2,
+      "Codigo": "AZ",
+      "Status": "ATIVO",
+      "Descricao": "Azul"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.507Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 28,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "cor",
+    "object_id": "3",
+    "changes": {
+      "Cor": "Branco",
+      "Idcor": 3,
+      "Codigo": "BR",
+      "Status": "ATIVO",
+      "Descricao": "Branco"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.508Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 29,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "material",
+    "object_id": "1",
+    "changes": {
+      "Codigo": "ALG",
+      "Status": "ATIVO",
+      "Descricao": "Algodao",
+      "Idmaterial": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.513Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 30,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "material",
+    "object_id": "2",
+    "changes": {
+      "Codigo": "JNS",
+      "Status": "ATIVO",
+      "Descricao": "Jeans",
+      "Idmaterial": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.515Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 31,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "colecao",
+    "object_id": "1",
+    "changes": {
+      "Codigo": "26",
+      "Status": "AT",
+      "Estacao": "01",
+      "Contador": 0,
+      "Descricao": "Verao 2026",
+      "Idcolecao": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.519Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 32,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "grupo",
+    "object_id": "1",
+    "changes": {
+      "Codigo": "01",
+      "Margem": "120.00",
+      "Idgrupo": 1,
+      "CodigoRef": "01",
+      "Descricao": "Feminino"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.523Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 33,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "1",
+    "changes": {
+      "Margem": "120.00",
+      "Idgrupo": 1,
+      "Descricao": "Vestidos",
+      "Idsubgrupo": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.527Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 34,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "2",
+    "changes": {
+      "Margem": "110.00",
+      "Idgrupo": 1,
+      "Descricao": "Calcas",
+      "Idsubgrupo": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.529Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 35,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tabelapreco",
+    "object_id": "1",
+    "changes": {
+      "DataFim": null,
+      "Idtabela": 1,
+      "Promocao": false,
+      "DataInicio": "2026-06-03",
+      "NomeTabela": "Tabela Padrao"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.532Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 36,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "pack",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "nome": "Pack Basico 1-2-2-1",
+      "ativo": true,
+      "grade": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.537Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 37,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "packitem",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "qtd": 1,
+      "pack": 1,
+      "tamanho": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.541Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 38,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "packitem",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "qtd": 2,
+      "pack": 1,
+      "tamanho": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.542Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 39,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "packitem",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "qtd": 2,
+      "pack": 1,
+      "tamanho": 3
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.544Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 40,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "packitem",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "qtd": 1,
+      "pack": 1,
+      "tamanho": 4
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.546Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 41,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "packitem",
+    "object_id": "5",
+    "changes": {
+      "id": 5,
+      "qtd": 1,
+      "pack": 1,
+      "tamanho": 5
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.547Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 42,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "codigos",
+    "object_id": "1",
+    "changes": {
+      "colecao": "26",
+      "estacao": "01",
+      "Idcodigo": 1,
+      "valor_var": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.552Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 43,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "codigos",
+    "object_id": "1",
+    "changes": {
+      "valor_var": [
+        1,
+        2
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.554Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 44,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produto",
+    "object_id": "1",
+    "changes": {
+      "ncm": "6204.42.00",
+      "ativo": true,
+      "grade": 1,
+      "grupo": 1,
+      "colecao": 1,
+      "cst_pis": null,
+      "unidade": 1,
+      "aliq_ipi": null,
+      "aliq_pis": null,
+      "material": 1,
+      "subgrupo": 1,
+      "Idproduto": 1,
+      "descricao": "Vestido Midi Floral",
+      "cst_cofins": null,
+      "referencia": "26-01-01001",
+      "aliq_cofins": null,
+      "observacoes": null,
+      "data_inativo": null,
+      "ipi_situacao": null,
+      "tipo_produto": "1",
+      "aliquota_icms": "18.00",
+      "bloqueado_venda": false,
+      "cfop_venda_fora": "6102",
+      "cfop_venda_dentro": "5102",
+      "csosn_ou_cst_icms": "102",
+      "origem_mercadoria": 0,
+      "descricao_reduzida": "Vestido Floral"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.556Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 45,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tabelaprecoproduto",
+    "object_id": "1",
+    "changes": {
+      "ativo": true,
+      "preco": "189.90",
+      "tabela": 1,
+      "DataFim": null,
+      "produto": 1,
+      "DataInicio": "2026-06-03",
+      "Idprodutopreco": 1,
+      "preco_promocional": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.558Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 46,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        1,
+        2
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.562Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 47,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "1",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 1,
+      "idtamanho": 1,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00001",
+      "IdprodutoDetalhe": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.563Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 48,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        2,
+        3
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.566Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 49,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "2",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 1,
+      "idtamanho": 2,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00002",
+      "IdprodutoDetalhe": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.567Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 50,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        3,
+        4
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.571Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 51,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "3",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 1,
+      "idtamanho": 3,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00003",
+      "IdprodutoDetalhe": 3
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.572Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 52,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        4,
+        5
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.575Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 53,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "4",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 1,
+      "idtamanho": 4,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00004",
+      "IdprodutoDetalhe": 4
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.576Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 54,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        5,
+        6
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.579Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 55,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "5",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 1,
+      "idtamanho": 5,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00005",
+      "IdprodutoDetalhe": 5
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.580Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 56,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        6,
+        7
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.584Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 57,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "6",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 1,
+      "idtamanho": 1,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00006",
+      "IdprodutoDetalhe": 6
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.585Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 58,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        7,
+        8
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.588Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 59,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "7",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 1,
+      "idtamanho": 2,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00007",
+      "IdprodutoDetalhe": 7
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.588Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 60,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        8,
+        9
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.592Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 61,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "8",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 1,
+      "idtamanho": 3,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00008",
+      "IdprodutoDetalhe": 8
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.593Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 62,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        9,
+        10
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.596Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 63,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "9",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 1,
+      "idtamanho": 4,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00009",
+      "IdprodutoDetalhe": 9
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.596Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 64,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        10,
+        11
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.599Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 65,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "10",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 1,
+      "idtamanho": 5,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00010",
+      "IdprodutoDetalhe": 10
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.600Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 66,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        11,
+        12
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.602Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 67,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "11",
+    "changes": {
+      "ativo": true,
+      "idcor": 3,
+      "produto": 1,
+      "idtamanho": 1,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00011",
+      "IdprodutoDetalhe": 11
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.603Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 68,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        12,
+        13
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.607Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 69,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "12",
+    "changes": {
+      "ativo": true,
+      "idcor": 3,
+      "produto": 1,
+      "idtamanho": 2,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00012",
+      "IdprodutoDetalhe": 12
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.608Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 70,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        13,
+        14
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.611Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 71,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "13",
+    "changes": {
+      "ativo": true,
+      "idcor": 3,
+      "produto": 1,
+      "idtamanho": 3,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00013",
+      "IdprodutoDetalhe": 13
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.612Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 72,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        14,
+        15
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.615Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 73,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "14",
+    "changes": {
+      "ativo": true,
+      "idcor": 3,
+      "produto": 1,
+      "idtamanho": 4,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00014",
+      "IdprodutoDetalhe": 14
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.616Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 74,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        15,
+        16
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.619Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 75,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "15",
+    "changes": {
+      "ativo": true,
+      "idcor": 3,
+      "produto": 1,
+      "idtamanho": 5,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00015",
+      "IdprodutoDetalhe": 15
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.620Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 76,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "codigos",
+    "object_id": "1",
+    "changes": {
+      "valor_var": [
+        2,
+        3
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.623Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 77,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produto",
+    "object_id": "2",
+    "changes": {
+      "ncm": "6203.42.00",
+      "ativo": true,
+      "grade": 1,
+      "grupo": 1,
+      "colecao": 1,
+      "cst_pis": null,
+      "unidade": 1,
+      "aliq_ipi": null,
+      "aliq_pis": null,
+      "material": 2,
+      "subgrupo": 2,
+      "Idproduto": 2,
+      "descricao": "Calca Jeans Reta",
+      "cst_cofins": null,
+      "referencia": "26-01-01002",
+      "aliq_cofins": null,
+      "observacoes": null,
+      "data_inativo": null,
+      "ipi_situacao": null,
+      "tipo_produto": "1",
+      "aliquota_icms": "18.00",
+      "bloqueado_venda": false,
+      "cfop_venda_fora": "6102",
+      "cfop_venda_dentro": "5102",
+      "csosn_ou_cst_icms": "102",
+      "origem_mercadoria": 0,
+      "descricao_reduzida": "Jeans Reta"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.624Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 78,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "tabelaprecoproduto",
+    "object_id": "2",
+    "changes": {
+      "ativo": true,
+      "preco": "159.90",
+      "tabela": 1,
+      "DataFim": null,
+      "produto": 2,
+      "DataInicio": "2026-06-03",
+      "Idprodutopreco": 2,
+      "preco_promocional": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.626Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 79,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        16,
+        17
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.629Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 80,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "16",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 2,
+      "idtamanho": 1,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00016",
+      "IdprodutoDetalhe": 16
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.630Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 81,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        17,
+        18
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.633Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 82,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "17",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 2,
+      "idtamanho": 2,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00017",
+      "IdprodutoDetalhe": 17
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.634Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 83,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        18,
+        19
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.637Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 84,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "18",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 2,
+      "idtamanho": 3,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00018",
+      "IdprodutoDetalhe": 18
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.638Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 85,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        19,
+        20
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.640Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 86,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "19",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 2,
+      "idtamanho": 4,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00019",
+      "IdprodutoDetalhe": 19
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.641Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 87,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        20,
+        21
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.643Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 88,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "20",
+    "changes": {
+      "ativo": true,
+      "idcor": 1,
+      "produto": 2,
+      "idtamanho": 5,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00020",
+      "IdprodutoDetalhe": 20
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.644Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 89,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        21,
+        22
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.646Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 90,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "21",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 2,
+      "idtamanho": 1,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00021",
+      "IdprodutoDetalhe": 21
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.647Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 91,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        22,
+        23
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.649Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 92,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "22",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 2,
+      "idtamanho": 2,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00022",
+      "IdprodutoDetalhe": 22
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.649Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 93,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        23,
+        24
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.652Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 94,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "23",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 2,
+      "idtamanho": 3,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00023",
+      "IdprodutoDetalhe": 23
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.653Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 95,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        24,
+        25
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.655Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 96,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "24",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 2,
+      "idtamanho": 4,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00024",
+      "IdprodutoDetalhe": 24
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.656Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 97,
+  "fields": {
+    "action": "update",
+    "app_label": "produto",
+    "model": "configean",
+    "object_id": "1",
+    "changes": {
+      "next_itemref": [
+        25,
+        26
+      ]
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.658Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 98,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produtodetalhe",
+    "object_id": "25",
+    "changes": {
+      "ativo": true,
+      "idcor": 2,
+      "produto": 2,
+      "idtamanho": 5,
+      "config_ean": 1,
+      "bloqueado_venda": false,
+      "codigo_item_ref": "00025",
+      "IdprodutoDetalhe": 25
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.658Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 99,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "produto",
+    "object_id": "3",
+    "changes": {
+      "ncm": "4819.40.00",
+      "ativo": true,
+      "grade": null,
+      "grupo": null,
+      "colecao": null,
+      "cst_pis": null,
+      "unidade": 1,
+      "aliq_ipi": null,
+      "aliq_pis": null,
+      "material": null,
+      "subgrupo": null,
+      "Idproduto": 3,
+      "descricao": "Sacola Kraft Media",
+      "cst_cofins": null,
+      "referencia": null,
+      "aliq_cofins": null,
+      "observacoes": null,
+      "data_inativo": null,
+      "ipi_situacao": null,
+      "tipo_produto": "2",
+      "aliquota_icms": null,
+      "bloqueado_venda": false,
+      "cfop_venda_fora": null,
+      "cfop_venda_dentro": null,
+      "csosn_ou_cst_icms": null,
+      "origem_mercadoria": 0,
+      "descricao_reduzida": "Sacola Kraft"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.660Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 100,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "1",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 1,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000019"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.662Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 101,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "2",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 2,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000019"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.664Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 102,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "3",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 3,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000026"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.665Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 103,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "4",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 4,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000026"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.666Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 104,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "5",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 5,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000033"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.669Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 105,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "6",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 6,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000033"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.670Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 106,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "7",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 7,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000040"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.672Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 107,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "8",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 8,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000040"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.673Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 108,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "9",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 9,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000057"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.675Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 109,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "10",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 10,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000057"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.676Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 110,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "11",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 11,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000064"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.678Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 111,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "12",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 12,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000064"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.679Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 112,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "13",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 13,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000071"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.680Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 113,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "14",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 14,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000071"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.682Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 114,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "15",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 15,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000088"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.683Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 115,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "16",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 16,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000088"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.685Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 116,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "17",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 17,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000095"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.687Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 117,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "18",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 18,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000095"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.688Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 118,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "19",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 19,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000101"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.690Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 119,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "20",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 20,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000101"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.691Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 120,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "21",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 21,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000118"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.692Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 121,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "22",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 22,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000118"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.693Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 122,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "23",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 23,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000125"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.695Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 123,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "24",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 24,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000125"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.697Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 124,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "25",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 25,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000132"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.698Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 125,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "26",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 26,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000132"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.700Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 126,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "27",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 27,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000149"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.702Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 127,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "28",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 28,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000149"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.703Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 128,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "29",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 29,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000156"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.705Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 129,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "30",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 30,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000156"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.706Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 130,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "31",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 31,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000163"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.709Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 131,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "32",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 32,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000163"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.710Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 132,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "33",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 33,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000170"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.711Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 133,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "34",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 34,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000170"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.712Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 134,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "35",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 35,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000187"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.714Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 135,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "36",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 36,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000187"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.715Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 136,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "37",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 37,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000194"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.716Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 137,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "38",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 38,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000194"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.717Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 138,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "39",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 39,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000200"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.718Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 139,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "40",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 40,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000200"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.720Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 140,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "41",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 41,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000217"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.721Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 141,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "42",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 42,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000217"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.723Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 142,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "43",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 43,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000224"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.724Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 143,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "44",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 44,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000224"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.725Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 144,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "45",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 45,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000231"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.726Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 145,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "46",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 46,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000231"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.727Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 146,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "47",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 47,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000248"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.728Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 147,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "48",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 48,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000248"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.729Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 148,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "49",
+    "changes": {
+      "Idloja": 1,
+      "Estoque": 12,
+      "reserva": 0,
+      "Idestoque": 49,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000255"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.730Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 149,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoque",
+    "object_id": "50",
+    "changes": {
+      "Idloja": 2,
+      "Estoque": 6,
+      "reserva": 0,
+      "Idestoque": 50,
+      "referencia": "26-01-01002",
+      "CodigodeBarra": "7891234000255"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.731Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 150,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "estoquemovimentacao",
+    "object_id": "1",
+    "changes": {
+      "tipo": "ENTRADA",
+      "Idloja": 1,
+      "documento": "INI-001",
+      "observacao": "Carga inicial de teste",
+      "quantidade": 12,
+      "referencia": "26-01-01001",
+      "Idmovimento": 1,
+      "CodigodeBarra": "7891234000019",
+      "data_movimento": "2026-06-03T17:44:31.733Z",
+      "saldo_anterior": 0,
+      "saldo_posterior": 12
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.734Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 151,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "inventarioestoque",
+    "object_id": "1",
+    "changes": {
+      "Idloja": 1,
+      "status": "ABERTO",
+      "descricao": "Inventário de Teste",
+      "observacao": "Inventário inicial para homologação",
+      "Idinventario": 1,
+      "data_abertura": "2026-06-03",
+      "data_fechamento": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.737Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 152,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "inventarioestoqueitem",
+    "object_id": "1",
+    "changes": {
+      "diferenca": 0,
+      "inventario": 1,
+      "observacao": null,
+      "referencia": "26-01-01001",
+      "CodigodeBarra": "7891234000019",
+      "saldo_contado": 12,
+      "saldo_sistema": 12,
+      "Idinventarioitem": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T17:44:31.741Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 153,
+  "fields": {
+    "action": "custom",
+    "app_label": "accounts",
+    "model": "session",
+    "object_id": "takeshi",
+    "changes": {
+      "auth": "session",
+      "event": "login_failed"
+    },
+    "user": null,
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T17:48:59.903Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 154,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "1",
+    "changes": {
+      "auth": "token",
+      "token_created": true
+    },
+    "user": [
+      "admin"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T17:49:14.341Z"
+  }
+},
+{
+  "model": "authtoken.token",
+  "pk": "a43a4365ee00e90bb475c6f243174c79c56b4a41",
+  "fields": {
+    "user": [
+      "admin"
+    ],
+    "created": "2026-06-03T17:49:14.338Z"
+  }
+}
+]

@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import (
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     CashbackConfig, CashbackMovimento,
+    ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     FormaPagamento, FormaPagamentoParcela
@@ -173,4 +174,29 @@ class CashbackMovimentoAdmin(admin.ModelAdmin):
     list_display = ("Idcashbackmovimento", "cliente", "tipo", "status", "valor", "validade", "criado_em")
     list_filter = ("tipo", "status", "validade")
     search_fields = ("cliente__nome_cliente", "observacao", "venda_origem__documento", "venda_uso__documento")
+    readonly_fields = ("criado_em",)
+
+
+class ValeTrocaMovimentoInline(admin.TabularInline):
+    model = ValeTrocaMovimento
+    extra = 0
+    fields = ("tipo", "valor", "saldo_apos", "venda_uso", "observacao", "criado_em")
+    readonly_fields = ("criado_em",)
+    show_change_link = True
+
+
+@admin.register(ValeTroca)
+class ValeTrocaAdmin(admin.ModelAdmin):
+    list_display = ("Idvaletroca", "documento", "cliente", "loja", "valor_original", "saldo", "status", "criado_em")
+    list_filter = ("status", "loja", "validade")
+    search_fields = ("documento", "cliente__nome_cliente", "devolucao__documento", "devolucao__venda__documento")
+    readonly_fields = ("criado_em", "atualizado_em")
+    inlines = [ValeTrocaMovimentoInline]
+
+
+@admin.register(ValeTrocaMovimento)
+class ValeTrocaMovimentoAdmin(admin.ModelAdmin):
+    list_display = ("Idvaletrocamov", "vale", "tipo", "valor", "saldo_apos", "venda_uso", "criado_em")
+    list_filter = ("tipo", "criado_em")
+    search_fields = ("vale__documento", "venda_uso__documento", "observacao")
     readonly_fields = ("criado_em",)

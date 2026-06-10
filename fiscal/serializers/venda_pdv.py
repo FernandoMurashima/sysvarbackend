@@ -91,6 +91,7 @@ class VendaDevolucaoItemSerializer(serializers.ModelSerializer):
 class VendaDevolucaoSerializer(serializers.ModelSerializer):
     itens = VendaDevolucaoItemSerializer(many=True, read_only=True)
     nfe_devolucao = NFeDevolucaoSerializer(read_only=True)
+    vale_troca = serializers.SerializerMethodField()
 
     class Meta:
         model = VendaDevolucao
@@ -104,3 +105,15 @@ class VendaDevolucaoSerializer(serializers.ModelSerializer):
             "criado_em",
             "atualizado_em",
         )
+
+    def get_vale_troca(self, obj):
+        vale = getattr(obj, "vale_troca", None)
+        if not vale:
+            return None
+        return {
+            "id": vale.Idvaletroca,
+            "documento": vale.documento,
+            "valor_original": str(vale.valor_original),
+            "saldo": str(vale.saldo),
+            "status": vale.status,
+        }

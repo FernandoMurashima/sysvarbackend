@@ -3,6 +3,7 @@ from .models import (
     FormaPagamento, FormaPagamentoParcela,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     CashbackConfig, CashbackMovimento,
+    ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
 )
@@ -60,6 +61,28 @@ class CashbackMovimentoSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError('O valor deve ser maior que zero.')
         return value
+
+
+class ValeTrocaMovimentoSerializer(serializers.ModelSerializer):
+    venda_documento = serializers.CharField(source='venda_uso.documento', read_only=True)
+
+    class Meta:
+        model = ValeTrocaMovimento
+        fields = '__all__'
+        read_only_fields = ('criado_por', 'criado_em')
+
+
+class ValeTrocaSerializer(serializers.ModelSerializer):
+    cliente_nome = serializers.CharField(source='cliente.nome_cliente', read_only=True)
+    loja_nome = serializers.CharField(source='loja.nome_loja', read_only=True)
+    devolucao_documento = serializers.CharField(source='devolucao.documento', read_only=True)
+    venda_origem_documento = serializers.CharField(source='devolucao.venda.documento', read_only=True)
+    movimentos = ValeTrocaMovimentoSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ValeTroca
+        fields = '__all__'
+        read_only_fields = ('criado_por', 'criado_em', 'atualizado_em')
 
 class PagarRateioSerializer(serializers.ModelSerializer):
     class Meta:

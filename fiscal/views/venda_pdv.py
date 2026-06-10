@@ -3,7 +3,7 @@ from collections import defaultdict
 from random import randint
 from typing import Dict, List
 
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Max
 from django.utils import timezone
 from datetime import datetime, time, timedelta
@@ -20,7 +20,10 @@ from financeiro.models import (
     MovimentacaoFinanceira,
     Receber,
     ReceberItem,
+    ValeTroca,
+    ValeTrocaMovimento,
     saldo_cashback_cliente,
+    saldo_vale_troca_cliente,
 )
 from fiscal.models import NFCe, NFeDevolucao, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from fiscal.models.venda_pdv import money
@@ -367,6 +370,10 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if cashback_erro:
             transaction.set_rollback(True)
             return Response({"detail": cashback_erro}, status=status.HTTP_400_BAD_REQUEST)
+        troca_erro = self._validar_vale_troca(venda, pagamentos_payload, total)
+        if troca_erro:
+            transaction.set_rollback(True)
+            return Response({"detail": troca_erro}, status=status.HTTP_400_BAD_REQUEST)
 
         venda.subtotal = money(subtotal)
         venda.desconto_itens = money(desconto_itens)
@@ -378,6 +385,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         self._registrar_pagamentos(venda, pagamentos_payload)
 
         self._registrar_financeiro(venda)
+        self._registrar_uso_vale_troca(venda, pagamentos_payload)
         self._registrar_cashback(venda, pagamentos_payload)
         nfce = self._autorizar_nfce(venda)
         payload = VendaPdvSerializer(venda, context={"request": request}).data
@@ -417,6 +425,9 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     def _total_cashback_usado(self, pagamentos: List[Dict]) -> Decimal:
         return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] == "CASHBACK"), Decimal("0")))
 
+    def _total_vale_troca_usado(self, pagamentos: List[Dict]) -> Decimal:
+        return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] == "TROCA"), Decimal("0")))
+
     def _cliente_padrao(self, venda: VendaPdv) -> bool:
         cliente = venda.cliente
         cpf = _limpar_numero(getattr(cliente, "cpf", ""))
@@ -452,6 +463,81 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if cashback_usado > limite:
             return "O cashback usado ultrapassa o limite permitido para a venda."
         return ""
+
+    def _validar_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal) -> str:
+        vale_usado = self._total_vale_troca_usado(pagamentos)
+        if vale_usado <= 0:
+            return ""
+        if self._cliente_padrao(venda):
+            return "Troca exige cliente identificado."
+        saldo = money(saldo_vale_troca_cliente(venda.cliente_id))
+        if vale_usado > saldo:
+            return "O valor de troca informado é maior que o saldo disponível do cliente."
+        for pagamento in pagamentos:
+            if pagamento["forma"] != "TROCA":
+                continue
+            if not pagamento.get("autorizacao"):
+                return "Selecione um cupom de troca válido para o pagamento."
+            vale = self._vale_troca_por_documento(venda, pagamento["autorizacao"])
+            if not vale:
+                return "Cupom de troca inválido para este cliente."
+            if money(pagamento["valor"]) > money(vale.saldo):
+                return "O valor informado é maior que o saldo do cupom de troca selecionado."
+        if vale_usado > total:
+            return "Troca não pode gerar troco; use apenas o saldo pendente da venda."
+        valor_outros = money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] != "TROCA"), Decimal("0")))
+        if vale_usado > money(max(Decimal("0.00"), total - valor_outros)):
+            return "Troca não pode gerar troco; use apenas o saldo pendente da venda."
+        return ""
+
+    def _registrar_uso_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict]):
+        pagamentos_troca = [pagamento for pagamento in pagamentos if pagamento["forma"] == "TROCA"]
+        if not pagamentos_troca:
+            return
+        hoje = timezone.localdate()
+        vales_base = (
+            ValeTroca.objects.select_for_update()
+            .filter(cliente=venda.cliente, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+        )
+        for pagamento in pagamentos_troca:
+            restante = money(pagamento["valor"])
+            documento = (pagamento.get("autorizacao") or "").strip()
+            vales = vales_base.filter(documento=documento) if documento else vales_base.order_by("criado_em", "Idvaletroca")
+            self._consumir_vales_troca(venda, vales, restante)
+
+    def _vale_troca_por_documento(self, venda: VendaPdv, documento: str):
+        hoje = timezone.localdate()
+        return (
+            ValeTroca.objects
+            .filter(cliente=venda.cliente, documento=documento.strip(), status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+            .first()
+        )
+
+    def _consumir_vales_troca(self, venda: VendaPdv, vales, valor: Decimal):
+        restante = money(valor)
+        for vale in vales:
+            if restante <= 0:
+                break
+            saldo_atual = money(vale.saldo)
+            uso = money(min(saldo_atual, restante))
+            vale.saldo = money(saldo_atual - uso)
+            if vale.saldo <= 0:
+                vale.status = ValeTroca.STATUS_USADO
+            vale.save(update_fields=["saldo", "status", "atualizado_em"])
+            ValeTrocaMovimento.objects.create(
+                vale=vale,
+                venda_uso=venda,
+                tipo=ValeTrocaMovimento.TIPO_USO,
+                valor=uso,
+                saldo_apos=vale.saldo,
+                observacao=f"Uso na venda PDV {venda.documento}",
+                criado_por=venda.criado_por,
+            )
+            restante = money(restante - uso)
+        if restante > 0:
+            raise ValueError("Saldo de troca insuficiente para concluir a venda.")
 
     def _registrar_cashback(self, venda: VendaPdv, pagamentos: List[Dict]):
         config = CashbackConfig.regra_ativa()
@@ -562,7 +648,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         saldo_para_caixa = money(venda.total)
         for pagamento in pagamentos:
-            if pagamento.forma == "CASHBACK":
+            if pagamento.forma in ("CASHBACK", "TROCA"):
                 continue
             valor_caixa = money(min(money(pagamento.valor), saldo_para_caixa))
             if valor_caixa <= 0:
@@ -945,66 +1031,31 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         )
 
     def _registrar_credito_cliente(self, devolucao: VendaDevolucao):
-        CashbackMovimento.objects.create(
-            cliente=devolucao.cliente,
-            tipo=CashbackMovimento.TIPO_CREDITO,
+        vale, created = ValeTroca.objects.get_or_create(
+            devolucao=devolucao,
+            defaults={
+                "cliente": devolucao.cliente,
+                "loja": devolucao.loja,
+                "documento": f"VT-{devolucao.documento}",
+                "valor_original": devolucao.credito_cliente,
+                "saldo": devolucao.credito_cliente,
+                "status": ValeTroca.STATUS_ABERTO,
+                "observacao": f"Vale-troca gerado pela devolução {devolucao.documento}",
+                "criado_por": devolucao.criado_por,
+            },
+        )
+        if not created:
+            return
+        ValeTrocaMovimento.objects.create(
+            vale=vale,
+            tipo=ValeTrocaMovimento.TIPO_CREDITO,
             valor=devolucao.credito_cliente,
+            saldo_apos=devolucao.credito_cliente,
             observacao=f"Crédito por devolução {devolucao.documento} da venda {devolucao.venda.documento}",
             criado_por=devolucao.criado_por,
         )
-
-    def _natureza_devolucao(self) -> Nat_Lancamento:
-        natureza = Nat_Lancamento.objects.filter(codigo="2.01").first()
-        if natureza:
-            return natureza
-        return Nat_Lancamento.objects.create(
-            codigo="2.01",
-            categoria_principal="Devoluções",
-            subcategoria="Vendas",
-            descricao="Devolução de venda de mercadorias",
-            tipo="DESPESA",
-            status="ATIVO",
-            tipo_natureza="DEBITO",
-        )
-
     def _estornar_financeiro(self, devolucao: VendaDevolucao):
         valor = money(devolucao.credito_cliente)
-        natureza = self._natureza_devolucao()
-        caixa = devolucao.venda.caixa
-        if caixa:
-            caixa.saldo_atual = money(caixa.saldo_atual) - valor
-            caixa.save(update_fields=["saldo_atual"])
-            MovimentacaoFinanceira.objects.create(
-                idloja=devolucao.loja,
-                data_movimento=timezone.localdate(),
-                tipo=MovimentacaoFinanceira.TIPO_SAIDA,
-                status=MovimentacaoFinanceira.STATUS_EFETIVA,
-                origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
-                valor=valor,
-                historico=f"Devolução da venda {devolucao.venda.documento}",
-                documento=devolucao.documento,
-                Idnatureza=natureza,
-                FormaPagamento="CREDITO_CLIENTE",
-                caixa=caixa,
-            )
-        master = Caixa.objects.select_for_update().filter(tipo_caixa=Caixa.TIPO_MASTER, ativo=True).order_by("Idcaixa").first()
-        if master:
-            master.saldo_atual = money(master.saldo_atual) - valor
-            master.save(update_fields=["saldo_atual"])
-            MovimentacaoFinanceira.objects.create(
-                idloja=devolucao.loja,
-                data_movimento=timezone.localdate(),
-                tipo=MovimentacaoFinanceira.TIPO_SAIDA,
-                status=MovimentacaoFinanceira.STATUS_EFETIVA,
-                origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
-                valor=valor,
-                historico=f"Consolidacao master devolução {devolucao.documento}",
-                documento=devolucao.documento,
-                Idnatureza=natureza,
-                FormaPagamento="CREDITO_CLIENTE",
-                caixa=master,
-            )
-
         receber = Receber.objects.filter(pedido_venda=devolucao.venda_id).prefetch_related("itens").first()
         if not receber:
             return

@@ -139,6 +139,91 @@ def saldo_cashback_cliente(cliente_id, ate=None):
 
 
 # =========================
+# Crédito de troca
+# =========================
+class ValeTroca(models.Model):
+    STATUS_ABERTO = 'ABERTO'
+    STATUS_USADO = 'USADO'
+    STATUS_CANCELADO = 'CANCELADO'
+    STATUS_EXPIRADO = 'EXPIRADO'
+    STATUS_CHOICES = [
+        (STATUS_ABERTO, 'Aberto'),
+        (STATUS_USADO, 'Usado'),
+        (STATUS_CANCELADO, 'Cancelado'),
+        (STATUS_EXPIRADO, 'Expirado'),
+    ]
+
+    Idvaletroca = models.BigAutoField(primary_key=True)
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
+    loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
+    devolucao = models.OneToOneField('fiscal.VendaDevolucao', on_delete=models.PROTECT, related_name='vale_troca')
+    documento = models.CharField(max_length=50, unique=True, db_index=True)
+    valor_original = models.DecimalField(max_digits=18, decimal_places=2)
+    saldo = models.DecimalField(max_digits=18, decimal_places=2)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ABERTO, db_index=True)
+    validade = models.DateField(null=True, blank=True, db_index=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    criado_por = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'financeiro_vale_troca'
+        ordering = ['-criado_em', '-Idvaletroca']
+        indexes = [
+            models.Index(fields=['cliente', 'status'], name='ix_vale_troca_cliente_status'),
+            models.Index(fields=['loja', 'status'], name='ix_vale_troca_loja_status'),
+        ]
+
+    def __str__(self):
+        return f'{self.documento} - {self.saldo}'
+
+
+class ValeTrocaMovimento(models.Model):
+    TIPO_CREDITO = 'CREDITO'
+    TIPO_USO = 'USO'
+    TIPO_ESTORNO = 'ESTORNO'
+    TIPO_CHOICES = [
+        (TIPO_CREDITO, 'Crédito gerado'),
+        (TIPO_USO, 'Uso em venda'),
+        (TIPO_ESTORNO, 'Estorno'),
+    ]
+
+    Idvaletrocamov = models.BigAutoField(primary_key=True)
+    vale = models.ForeignKey(ValeTroca, on_delete=models.PROTECT, related_name='movimentos')
+    venda_uso = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='vales_troca_usados')
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, db_index=True)
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    saldo_apos = models.DecimalField(max_digits=18, decimal_places=2)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    criado_por = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_vale_troca_movimento'
+        ordering = ['-criado_em', '-Idvaletrocamov']
+        indexes = [
+            models.Index(fields=['vale', 'tipo'], name='ix_vale_troca_mov_vale_tipo'),
+            models.Index(fields=['venda_uso'], name='ix_vale_troca_mov_venda'),
+        ]
+
+    def __str__(self):
+        return f'{self.vale_id} - {self.tipo} - {self.valor}'
+
+
+def saldo_vale_troca_cliente(cliente_id, ate=None):
+    hoje = ate or timezone.localdate()
+    saldo = (
+        ValeTroca.objects
+        .filter(cliente_id=cliente_id, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+        .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+        .aggregate(total=Sum('saldo'))
+        .get('total')
+    )
+    return saldo or 0
+
+
+# =========================
 # Caixa e Bancos
 # =========================
 class Caixa(models.Model):

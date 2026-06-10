@@ -2,7 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
-from django.db import transaction
+from django.db import models, transaction
 from accounts.permissions import HasModuleRole
 
 try:
@@ -13,6 +13,7 @@ except Exception:
 from .models import (
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     CashbackConfig, CashbackMovimento, saldo_cashback_cliente,
+    ValeTroca, ValeTrocaMovimento, saldo_vale_troca_cliente,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     FormaPagamento, FormaPagamentoParcela
@@ -20,6 +21,7 @@ from .models import (
 from .serializers import (
     CaixaSerializer, ContaBancariaSerializer, MovimentacaoFinanceiraSerializer,
     CashbackConfigSerializer, CashbackMovimentoSerializer,
+    ValeTrocaSerializer, ValeTrocaMovimentoSerializer,
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     FormaPagamentoSerializer, FormaPagamentoParcelaSerializer
@@ -144,6 +146,67 @@ class CashbackMovimentoViewSet(BaseViewSet):
         if not cliente:
             return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'cliente': int(cliente), 'saldo': str(saldo_cashback_cliente(cliente))})
+
+
+class ValeTrocaViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "AssistenteReceber"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = ValeTroca.objects.select_related('cliente', 'loja', 'devolucao', 'devolucao__venda').prefetch_related('movimentos').all()
+    serializer_class = ValeTrocaSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        cliente = self.request.query_params.get('cliente')
+        loja = self.request.query_params.get('loja')
+        status_q = self.request.query_params.get('status')
+        documento = (self.request.query_params.get('documento') or '').strip()
+        if cliente:
+            qs = qs.filter(cliente_id=cliente)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if documento:
+            qs = qs.filter(documento__icontains=documento)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='saldo')
+    def saldo(self, request):
+        cliente = request.query_params.get('cliente')
+        if not cliente:
+            return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'cliente': int(cliente), 'saldo': str(saldo_vale_troca_cliente(cliente))})
+
+    @action(detail=False, methods=['get'], url_path='disponiveis')
+    def disponiveis(self, request):
+        cliente = request.query_params.get('cliente')
+        if not cliente:
+            return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
+        hoje = timezone.localdate()
+        qs = (
+            self.get_queryset()
+            .filter(cliente_id=cliente, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+            .order_by('criado_em')
+        )
+        return Response(self.get_serializer(qs, many=True).data)
+
+
+class ValeTrocaMovimentoViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "AssistenteReceber"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = ValeTrocaMovimento.objects.select_related('vale', 'venda_uso').all()
+    serializer_class = ValeTrocaMovimentoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vale = self.request.query_params.get('vale')
+        cliente = self.request.query_params.get('cliente')
+        if vale:
+            qs = qs.filter(vale_id=vale)
+        if cliente:
+            qs = qs.filter(vale__cliente_id=cliente)
+        return qs
 
 
 class CaixaViewSet(BaseViewSet):

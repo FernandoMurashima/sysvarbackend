@@ -16,6 +16,7 @@ class Command(BaseCommand):
             ("PIX", "PIX", [0]),
             ("DEBITO", "Cartao de debito", [0]),
             ("CREDITO", "Cartao de credito", [30]),
+            ("TROCA", "Vale-troca", [0]),
             ("BOLETO", "Boleto bancario", [30]),
             ("7", "7 dias", [7]),
             ("15", "15 dias", [15]),

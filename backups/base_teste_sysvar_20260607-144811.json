@@ -1,0 +1,2745 @@
+[
+{
+  "model": "cadastros.loja",
+  "pk": 1,
+  "fields": {
+    "nome_loja": "Loja 01",
+    "apelido_loja": "01",
+    "cnpj": "10000000000145",
+    "logradouro": "Rua",
+    "endereco": "Endereco Loja 01",
+    "numero": "101",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "loja01@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2026-01-01",
+    "ContaContabil": "01.01.01",
+    "DataEnceramento": null,
+    "Matriz": "SIM",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:10:38.543Z"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 2,
+  "fields": {
+    "nome_loja": "Loja 02",
+    "apelido_loja": "02",
+    "cnpj": "10000000000226",
+    "logradouro": "Rua",
+    "endereco": "Endereco Loja 02",
+    "numero": "102",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "loja02@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2026-01-01",
+    "ContaContabil": "01.01.02",
+    "DataEnceramento": null,
+    "Matriz": "NAO",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:10:38.550Z"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 3,
+  "fields": {
+    "nome_loja": "Loja 03",
+    "apelido_loja": "03",
+    "cnpj": "10000000000307",
+    "logradouro": "Rua",
+    "endereco": "Endereco Loja 03",
+    "numero": "103",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "loja03@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2026-01-01",
+    "ContaContabil": "01.01.03",
+    "DataEnceramento": null,
+    "Matriz": "NAO",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:10:38.554Z"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 4,
+  "fields": {
+    "nome_loja": "Loja 04",
+    "apelido_loja": "04",
+    "cnpj": "10000000000498",
+    "logradouro": "Rua",
+    "endereco": "Endereco Loja 04",
+    "numero": "104",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "loja04@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2026-01-01",
+    "ContaContabil": "01.01.04",
+    "DataEnceramento": null,
+    "Matriz": "NAO",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:10:38.558Z"
+  }
+},
+{
+  "model": "cadastros.loja",
+  "pk": 5,
+  "fields": {
+    "nome_loja": "Loja 05",
+    "apelido_loja": "05",
+    "cnpj": "10000000000579",
+    "logradouro": "Rua",
+    "endereco": "Endereco Loja 05",
+    "numero": "105",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "loja05@sysvar.test",
+    "EstoqueNegativo": "NAO",
+    "Rede": "SIM",
+    "DataAbertura": "2026-01-01",
+    "ContaContabil": "01.01.05",
+    "DataEnceramento": null,
+    "Matriz": "NAO",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:10:38.561Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 1,
+  "fields": {
+    "nome_cliente": "Consumidor Final",
+    "apelido": "CONSUMIDOR",
+    "cpf": "00000000000",
+    "logradouro": "Rua",
+    "endereco": "Endereco Consumidor Final",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "consumidor@cliente.test",
+    "categoria": "Padrao",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.662Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 2,
+  "fields": {
+    "nome_cliente": "Cliente 01",
+    "apelido": "CLI01",
+    "cpf": "52998224725",
+    "logradouro": "Rua",
+    "endereco": "Endereco Cliente 01",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "cli01@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.667Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 3,
+  "fields": {
+    "nome_cliente": "Cliente 02",
+    "apelido": "CLI02",
+    "cpf": "15350946056",
+    "logradouro": "Rua",
+    "endereco": "Endereco Cliente 02",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "cli02@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.670Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 4,
+  "fields": {
+    "nome_cliente": "Cliente 03",
+    "apelido": "CLI03",
+    "cpf": "11144477735",
+    "logradouro": "Rua",
+    "endereco": "Endereco Cliente 03",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "cli03@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.672Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 5,
+  "fields": {
+    "nome_cliente": "Cliente 04",
+    "apelido": "CLI04",
+    "cpf": "93541134780",
+    "logradouro": "Rua",
+    "endereco": "Endereco Cliente 04",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "cli04@cliente.test",
+    "categoria": "VIP",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": true,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.675Z"
+  }
+},
+{
+  "model": "cadastros.cliente",
+  "pk": 6,
+  "fields": {
+    "nome_cliente": "Cliente 05",
+    "apelido": "CLI05",
+    "cpf": "98765432100",
+    "logradouro": "Rua",
+    "endereco": "Endereco Cliente 05",
+    "numero": "100",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "11999990000",
+    "telefone2": null,
+    "email": "cli05@cliente.test",
+    "categoria": "Varejo",
+    "bloqueio": false,
+    "aniversario": null,
+    "mala_direta": false,
+    "conta_contabil": null,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:19:09.678Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 1,
+  "fields": {
+    "nome_fornecedor": "Fornecedor 01",
+    "apelido": "FORN01",
+    "cnpj": "20000000000107",
+    "logradouro": "Rua",
+    "endereco": "Endereco Fornecedor 01",
+    "numero": "201",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133330000",
+    "telefone2": null,
+    "email": "fornecedor01@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": "02.01.01",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.057Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 2,
+  "fields": {
+    "nome_fornecedor": "Fornecedor 02",
+    "apelido": "FORN02",
+    "cnpj": "20000000000280",
+    "logradouro": "Rua",
+    "endereco": "Endereco Fornecedor 02",
+    "numero": "202",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133330000",
+    "telefone2": null,
+    "email": "fornecedor02@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": "02.01.02",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.063Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 3,
+  "fields": {
+    "nome_fornecedor": "Fornecedor 03",
+    "apelido": "FORN03",
+    "cnpj": "20000000000360",
+    "logradouro": "Rua",
+    "endereco": "Endereco Fornecedor 03",
+    "numero": "203",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133330000",
+    "telefone2": null,
+    "email": "fornecedor03@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": "02.01.03",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.068Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 4,
+  "fields": {
+    "nome_fornecedor": "Fornecedor 04",
+    "apelido": "FORN04",
+    "cnpj": "20000000000441",
+    "logradouro": "Rua",
+    "endereco": "Endereco Fornecedor 04",
+    "numero": "204",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133330000",
+    "telefone2": null,
+    "email": "fornecedor04@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": "02.01.04",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.072Z"
+  }
+},
+{
+  "model": "cadastros.fornecedor",
+  "pk": 5,
+  "fields": {
+    "nome_fornecedor": "Fornecedor 05",
+    "apelido": "FORN05",
+    "cnpj": "20000000000522",
+    "logradouro": "Rua",
+    "endereco": "Endereco Fornecedor 05",
+    "numero": "205",
+    "complemento": null,
+    "cep": "01001000",
+    "bairro": "Bairro Teste",
+    "cidade": "Sao Paulo",
+    "estado": "SP",
+    "telefone1": "1133330000",
+    "telefone2": null,
+    "email": "fornecedor05@fornecedor.test",
+    "categoria": "Revenda",
+    "bloqueio": false,
+    "mala_direta": false,
+    "conta_contabil": "02.01.05",
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.076Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 1,
+  "fields": {
+    "nomefuncionario": "Vendedor 01-1",
+    "apelido": "VEN011",
+    "cpf": "30000000116",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.081Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 2,
+  "fields": {
+    "nomefuncionario": "Vendedor 01-2",
+    "apelido": "VEN012",
+    "cpf": "30000000205",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.084Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 3,
+  "fields": {
+    "nomefuncionario": "Vendedor 01-3",
+    "apelido": "VEN013",
+    "cpf": "30000000388",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.088Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 4,
+  "fields": {
+    "nomefuncionario": "Gerente 01",
+    "apelido": "GER01",
+    "cpf": "40000000477",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "50000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.092Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 5,
+  "fields": {
+    "nomefuncionario": "Caixa 01",
+    "apelido": "CX01",
+    "cpf": "50000000566",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Caixa",
+    "meta": "0.00",
+    "comissao_percentual": "0.00",
+    "idloja": 1,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.096Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 6,
+  "fields": {
+    "nomefuncionario": "Vendedor 02-1",
+    "apelido": "VEN021",
+    "cpf": "30000000620",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.099Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 7,
+  "fields": {
+    "nomefuncionario": "Vendedor 02-2",
+    "apelido": "VEN022",
+    "cpf": "30000000701",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.101Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 8,
+  "fields": {
+    "nomefuncionario": "Vendedor 02-3",
+    "apelido": "VEN023",
+    "cpf": "30000000892",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.104Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 9,
+  "fields": {
+    "nomefuncionario": "Gerente 02",
+    "apelido": "GER02",
+    "cpf": "40000000981",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "50000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.107Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 10,
+  "fields": {
+    "nomefuncionario": "Caixa 02",
+    "apelido": "CX02",
+    "cpf": "50000001023",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Caixa",
+    "meta": "0.00",
+    "comissao_percentual": "0.00",
+    "idloja": 2,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.110Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 11,
+  "fields": {
+    "nomefuncionario": "Vendedor 03-1",
+    "apelido": "VEN031",
+    "cpf": "30000001198",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 3,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.112Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 12,
+  "fields": {
+    "nomefuncionario": "Vendedor 03-2",
+    "apelido": "VEN032",
+    "cpf": "30000001279",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 3,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.116Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 13,
+  "fields": {
+    "nomefuncionario": "Vendedor 03-3",
+    "apelido": "VEN033",
+    "cpf": "30000001350",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 3,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.119Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 14,
+  "fields": {
+    "nomefuncionario": "Gerente 03",
+    "apelido": "GER03",
+    "cpf": "40000001449",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "50000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 3,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.122Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 15,
+  "fields": {
+    "nomefuncionario": "Caixa 03",
+    "apelido": "CX03",
+    "cpf": "50000001538",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Caixa",
+    "meta": "0.00",
+    "comissao_percentual": "0.00",
+    "idloja": 3,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.124Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 16,
+  "fields": {
+    "nomefuncionario": "Vendedor 04-1",
+    "apelido": "VEN041",
+    "cpf": "30000001600",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 4,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.127Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 17,
+  "fields": {
+    "nomefuncionario": "Vendedor 04-2",
+    "apelido": "VEN042",
+    "cpf": "30000001783",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 4,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.131Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 18,
+  "fields": {
+    "nomefuncionario": "Vendedor 04-3",
+    "apelido": "VEN043",
+    "cpf": "30000001864",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 4,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.134Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 19,
+  "fields": {
+    "nomefuncionario": "Gerente 04",
+    "apelido": "GER04",
+    "cpf": "40000001953",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "50000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 4,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.138Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 20,
+  "fields": {
+    "nomefuncionario": "Caixa 04",
+    "apelido": "CX04",
+    "cpf": "50000002003",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Caixa",
+    "meta": "0.00",
+    "comissao_percentual": "0.00",
+    "idloja": 4,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.142Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 21,
+  "fields": {
+    "nomefuncionario": "Vendedor 05-1",
+    "apelido": "VEN051",
+    "cpf": "30000002160",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 5,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.145Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 22,
+  "fields": {
+    "nomefuncionario": "Vendedor 05-2",
+    "apelido": "VEN052",
+    "cpf": "30000002240",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 5,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.148Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 23,
+  "fields": {
+    "nomefuncionario": "Vendedor 05-3",
+    "apelido": "VEN053",
+    "cpf": "30000002321",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Vendedor",
+    "meta": "20000.00",
+    "comissao_percentual": "5.00",
+    "idloja": 5,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.152Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 24,
+  "fields": {
+    "nomefuncionario": "Gerente 05",
+    "apelido": "GER05",
+    "cpf": "40000002410",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Gerente",
+    "meta": "50000.00",
+    "comissao_percentual": "0.00",
+    "idloja": 5,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.157Z"
+  }
+},
+{
+  "model": "cadastros.funcionarios",
+  "pk": 25,
+  "fields": {
+    "nomefuncionario": "Caixa 05",
+    "apelido": "CX05",
+    "cpf": "50000002500",
+    "inicio": "2026-01-01",
+    "fim": null,
+    "categoria": "Caixa",
+    "meta": "0.00",
+    "comissao_percentual": "0.00",
+    "idloja": 5,
+    "ativo": true,
+    "data_cadastro": "2026-06-03T18:23:31.162Z"
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$600000$O311GZy8YEkZ4nKGn20piN$mZHJClymPvvpLbXICEQlQ1tD7TmvZADi5zg090RNwb0=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "admin",
+    "first_name": "",
+    "last_name": "",
+    "email": "admin@sysvar.test",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-06-03T17:55:23.589Z",
+    "type": "Admin",
+    "loja": null,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$600000$Pz6Co80KPmrdNI0wizMlxC$UpyBsRpcPGc7GHKsi5vP85jJVTQS2xscaNaHYxfRON8=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "takeshi",
+    "first_name": "",
+    "last_name": "",
+    "email": "takeshi@sysvar.test",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-06-03T18:17:07.418Z",
+    "type": "Admin",
+    "loja": null,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 1,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": "01001000",
+      "Rede": "SIM",
+      "cnpj": "10000000000145",
+      "ativo": true,
+      "email": "loja01@sysvar.test",
+      "Matriz": "SIM",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "101",
+      "endereco": "Endereco Loja 01",
+      "nome_loja": "Loja 01",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2026-01-01",
+      "apelido_loja": "01",
+      "ContaContabil": "01.01.01",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:10:38.544Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 2,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": "01001000",
+      "Rede": "SIM",
+      "cnpj": "10000000000226",
+      "ativo": true,
+      "email": "loja02@sysvar.test",
+      "Matriz": "NAO",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "102",
+      "endereco": "Endereco Loja 02",
+      "nome_loja": "Loja 02",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2026-01-01",
+      "apelido_loja": "02",
+      "ContaContabil": "01.01.02",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:10:38.551Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 3,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cep": "01001000",
+      "Rede": "SIM",
+      "cnpj": "10000000000307",
+      "ativo": true,
+      "email": "loja03@sysvar.test",
+      "Matriz": "NAO",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "103",
+      "endereco": "Endereco Loja 03",
+      "nome_loja": "Loja 03",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2026-01-01",
+      "apelido_loja": "03",
+      "ContaContabil": "01.01.03",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:10:38.555Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 4,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "cep": "01001000",
+      "Rede": "SIM",
+      "cnpj": "10000000000498",
+      "ativo": true,
+      "email": "loja04@sysvar.test",
+      "Matriz": "NAO",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "104",
+      "endereco": "Endereco Loja 04",
+      "nome_loja": "Loja 04",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2026-01-01",
+      "apelido_loja": "04",
+      "ContaContabil": "01.01.04",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:10:38.558Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 5,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "loja",
+    "object_id": "5",
+    "changes": {
+      "id": 5,
+      "cep": "01001000",
+      "Rede": "SIM",
+      "cnpj": "10000000000579",
+      "ativo": true,
+      "email": "loja05@sysvar.test",
+      "Matriz": "NAO",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "105",
+      "endereco": "Endereco Loja 05",
+      "nome_loja": "Loja 05",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "DataAbertura": "2026-01-01",
+      "apelido_loja": "05",
+      "ContaContabil": "01.01.05",
+      "DataEnceramento": null,
+      "EstoqueNegativo": "NAO"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:10:38.561Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 6,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "1",
+    "changes": {
+      "auth": "token",
+      "token_created": true
+    },
+    "user": [
+      "admin"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:13:07.925Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 7,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "1",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "admin"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:14:02.434Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 8,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "1",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "admin"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:15:59.328Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 9,
+  "fields": {
+    "action": "custom",
+    "app_label": "accounts",
+    "model": "session",
+    "object_id": "takeshi",
+    "changes": {
+      "auth": "session",
+      "event": "login_failed"
+    },
+    "user": null,
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:17:31.028Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 10,
+  "fields": {
+    "action": "custom",
+    "app_label": "accounts",
+    "model": "session",
+    "object_id": "takeshi",
+    "changes": {
+      "auth": "session",
+      "event": "login_failed"
+    },
+    "user": null,
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:17:40.959Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 11,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "2",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "takeshi"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T18:18:06.096Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 12,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": "01001000",
+      "cpf": "00000000000",
+      "ativo": true,
+      "email": "consumidor@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CONSUMIDOR",
+      "bloqueio": false,
+      "endereco": "Endereco Consumidor Final",
+      "categoria": "Padrao",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Consumidor Final",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.663Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 13,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": "01001000",
+      "cpf": "52998224725",
+      "ativo": true,
+      "email": "cli01@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CLI01",
+      "bloqueio": false,
+      "endereco": "Endereco Cliente 01",
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Cliente 01",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.667Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 14,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cep": "01001000",
+      "cpf": "15350946056",
+      "ativo": true,
+      "email": "cli02@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CLI02",
+      "bloqueio": false,
+      "endereco": "Endereco Cliente 02",
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Cliente 02",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.670Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 15,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "cep": "01001000",
+      "cpf": "11144477735",
+      "ativo": true,
+      "email": "cli03@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CLI03",
+      "bloqueio": false,
+      "endereco": "Endereco Cliente 03",
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Cliente 03",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.672Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 16,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "5",
+    "changes": {
+      "id": 5,
+      "cep": "01001000",
+      "cpf": "93541134780",
+      "ativo": true,
+      "email": "cli04@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CLI04",
+      "bloqueio": false,
+      "endereco": "Endereco Cliente 04",
+      "categoria": "VIP",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": true,
+      "nome_cliente": "Cliente 04",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.675Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 17,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "cliente",
+    "object_id": "6",
+    "changes": {
+      "id": 6,
+      "cep": "01001000",
+      "cpf": "98765432100",
+      "ativo": true,
+      "email": "cli05@cliente.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "100",
+      "apelido": "CLI05",
+      "bloqueio": false,
+      "endereco": "Endereco Cliente 05",
+      "categoria": "Varejo",
+      "telefone1": "11999990000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "aniversario": null,
+      "complemento": null,
+      "mala_direta": false,
+      "nome_cliente": "Cliente 05",
+      "conta_contabil": null
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:19:09.679Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 18,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cep": "01001000",
+      "cnpj": "20000000000107",
+      "ativo": true,
+      "email": "fornecedor01@fornecedor.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "201",
+      "apelido": "FORN01",
+      "bloqueio": false,
+      "endereco": "Endereco Fornecedor 01",
+      "categoria": "Revenda",
+      "telefone1": "1133330000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": "02.01.01",
+      "nome_fornecedor": "Fornecedor 01"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.058Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 19,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cep": "01001000",
+      "cnpj": "20000000000280",
+      "ativo": true,
+      "email": "fornecedor02@fornecedor.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "202",
+      "apelido": "FORN02",
+      "bloqueio": false,
+      "endereco": "Endereco Fornecedor 02",
+      "categoria": "Revenda",
+      "telefone1": "1133330000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": "02.01.02",
+      "nome_fornecedor": "Fornecedor 02"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.064Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 20,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cep": "01001000",
+      "cnpj": "20000000000360",
+      "ativo": true,
+      "email": "fornecedor03@fornecedor.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "203",
+      "apelido": "FORN03",
+      "bloqueio": false,
+      "endereco": "Endereco Fornecedor 03",
+      "categoria": "Revenda",
+      "telefone1": "1133330000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": "02.01.03",
+      "nome_fornecedor": "Fornecedor 03"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.069Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 21,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "cep": "01001000",
+      "cnpj": "20000000000441",
+      "ativo": true,
+      "email": "fornecedor04@fornecedor.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "204",
+      "apelido": "FORN04",
+      "bloqueio": false,
+      "endereco": "Endereco Fornecedor 04",
+      "categoria": "Revenda",
+      "telefone1": "1133330000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": "02.01.04",
+      "nome_fornecedor": "Fornecedor 04"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.072Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 22,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "fornecedor",
+    "object_id": "5",
+    "changes": {
+      "id": 5,
+      "cep": "01001000",
+      "cnpj": "20000000000522",
+      "ativo": true,
+      "email": "fornecedor05@fornecedor.test",
+      "bairro": "Bairro Teste",
+      "cidade": "Sao Paulo",
+      "estado": "SP",
+      "numero": "205",
+      "apelido": "FORN05",
+      "bloqueio": false,
+      "endereco": "Endereco Fornecedor 05",
+      "categoria": "Revenda",
+      "telefone1": "1133330000",
+      "telefone2": null,
+      "logradouro": "Rua",
+      "complemento": null,
+      "mala_direta": false,
+      "conta_contabil": "02.01.05",
+      "nome_fornecedor": "Fornecedor 05"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.077Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 23,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "cpf": "30000000116",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2026-01-01",
+      "apelido": "VEN011",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 01-1",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.082Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 24,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "2",
+    "changes": {
+      "id": 2,
+      "cpf": "30000000205",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2026-01-01",
+      "apelido": "VEN012",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 01-2",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.085Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 25,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "3",
+    "changes": {
+      "id": 3,
+      "cpf": "30000000388",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2026-01-01",
+      "apelido": "VEN013",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 01-3",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.088Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 26,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "4",
+    "changes": {
+      "id": 4,
+      "cpf": "40000000477",
+      "fim": null,
+      "meta": "50000.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2026-01-01",
+      "apelido": "GER01",
+      "categoria": "Gerente",
+      "nomefuncionario": "Gerente 01",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.092Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 27,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "5",
+    "changes": {
+      "id": 5,
+      "cpf": "50000000566",
+      "fim": null,
+      "meta": "0.00",
+      "ativo": true,
+      "idloja": 1,
+      "inicio": "2026-01-01",
+      "apelido": "CX01",
+      "categoria": "Caixa",
+      "nomefuncionario": "Caixa 01",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.096Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 28,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "6",
+    "changes": {
+      "id": 6,
+      "cpf": "30000000620",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2026-01-01",
+      "apelido": "VEN021",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 02-1",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.099Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 29,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "7",
+    "changes": {
+      "id": 7,
+      "cpf": "30000000701",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2026-01-01",
+      "apelido": "VEN022",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 02-2",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.102Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 30,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "8",
+    "changes": {
+      "id": 8,
+      "cpf": "30000000892",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2026-01-01",
+      "apelido": "VEN023",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 02-3",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.105Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 31,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "9",
+    "changes": {
+      "id": 9,
+      "cpf": "40000000981",
+      "fim": null,
+      "meta": "50000.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2026-01-01",
+      "apelido": "GER02",
+      "categoria": "Gerente",
+      "nomefuncionario": "Gerente 02",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.107Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 32,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "10",
+    "changes": {
+      "id": 10,
+      "cpf": "50000001023",
+      "fim": null,
+      "meta": "0.00",
+      "ativo": true,
+      "idloja": 2,
+      "inicio": "2026-01-01",
+      "apelido": "CX02",
+      "categoria": "Caixa",
+      "nomefuncionario": "Caixa 02",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.110Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 33,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "11",
+    "changes": {
+      "id": 11,
+      "cpf": "30000001198",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 3,
+      "inicio": "2026-01-01",
+      "apelido": "VEN031",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 03-1",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.113Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 34,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "12",
+    "changes": {
+      "id": 12,
+      "cpf": "30000001279",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 3,
+      "inicio": "2026-01-01",
+      "apelido": "VEN032",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 03-2",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.116Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 35,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "13",
+    "changes": {
+      "id": 13,
+      "cpf": "30000001350",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 3,
+      "inicio": "2026-01-01",
+      "apelido": "VEN033",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 03-3",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.119Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 36,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "14",
+    "changes": {
+      "id": 14,
+      "cpf": "40000001449",
+      "fim": null,
+      "meta": "50000.00",
+      "ativo": true,
+      "idloja": 3,
+      "inicio": "2026-01-01",
+      "apelido": "GER03",
+      "categoria": "Gerente",
+      "nomefuncionario": "Gerente 03",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.123Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 37,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "15",
+    "changes": {
+      "id": 15,
+      "cpf": "50000001538",
+      "fim": null,
+      "meta": "0.00",
+      "ativo": true,
+      "idloja": 3,
+      "inicio": "2026-01-01",
+      "apelido": "CX03",
+      "categoria": "Caixa",
+      "nomefuncionario": "Caixa 03",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.125Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 38,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "16",
+    "changes": {
+      "id": 16,
+      "cpf": "30000001600",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 4,
+      "inicio": "2026-01-01",
+      "apelido": "VEN041",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 04-1",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.128Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 39,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "17",
+    "changes": {
+      "id": 17,
+      "cpf": "30000001783",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 4,
+      "inicio": "2026-01-01",
+      "apelido": "VEN042",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 04-2",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.132Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 40,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "18",
+    "changes": {
+      "id": 18,
+      "cpf": "30000001864",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 4,
+      "inicio": "2026-01-01",
+      "apelido": "VEN043",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 04-3",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.135Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 41,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "19",
+    "changes": {
+      "id": 19,
+      "cpf": "40000001953",
+      "fim": null,
+      "meta": "50000.00",
+      "ativo": true,
+      "idloja": 4,
+      "inicio": "2026-01-01",
+      "apelido": "GER04",
+      "categoria": "Gerente",
+      "nomefuncionario": "Gerente 04",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.138Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 42,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "20",
+    "changes": {
+      "id": 20,
+      "cpf": "50000002003",
+      "fim": null,
+      "meta": "0.00",
+      "ativo": true,
+      "idloja": 4,
+      "inicio": "2026-01-01",
+      "apelido": "CX04",
+      "categoria": "Caixa",
+      "nomefuncionario": "Caixa 04",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.142Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 43,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "21",
+    "changes": {
+      "id": 21,
+      "cpf": "30000002160",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 5,
+      "inicio": "2026-01-01",
+      "apelido": "VEN051",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 05-1",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.145Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 44,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "22",
+    "changes": {
+      "id": 22,
+      "cpf": "30000002240",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 5,
+      "inicio": "2026-01-01",
+      "apelido": "VEN052",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 05-2",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.148Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 45,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "23",
+    "changes": {
+      "id": 23,
+      "cpf": "30000002321",
+      "fim": null,
+      "meta": "20000.00",
+      "ativo": true,
+      "idloja": 5,
+      "inicio": "2026-01-01",
+      "apelido": "VEN053",
+      "categoria": "Vendedor",
+      "nomefuncionario": "Vendedor 05-3",
+      "comissao_percentual": "5.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.152Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 46,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "24",
+    "changes": {
+      "id": 24,
+      "cpf": "40000002410",
+      "fim": null,
+      "meta": "50000.00",
+      "ativo": true,
+      "idloja": 5,
+      "inicio": "2026-01-01",
+      "apelido": "GER05",
+      "categoria": "Gerente",
+      "nomefuncionario": "Gerente 05",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.158Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 47,
+  "fields": {
+    "action": "create",
+    "app_label": "cadastros",
+    "model": "funcionarios",
+    "object_id": "25",
+    "changes": {
+      "id": 25,
+      "cpf": "50000002500",
+      "fim": null,
+      "meta": "0.00",
+      "ativo": true,
+      "idloja": 5,
+      "inicio": "2026-01-01",
+      "apelido": "CX05",
+      "categoria": "Caixa",
+      "nomefuncionario": "Caixa 05",
+      "comissao_percentual": "0.00"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:23:31.164Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 48,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "ncm",
+    "object_id": "1",
+    "changes": {
+      "id": 1,
+      "ncm": "6204.62.00",
+      "campo1": "TESTE",
+      "aliquota": "0.00",
+      "descricao": "Vestuario de algodao - NCM padrao para testes"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:30:47.874Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 49,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "grupo",
+    "object_id": "1",
+    "changes": {
+      "Codigo": "CAL",
+      "Margem": "0.00",
+      "Idgrupo": 1,
+      "CodigoRef": "01",
+      "Descricao": "Calca"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.408Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 50,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "1",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 1,
+      "Descricao": "Lisa",
+      "Idsubgrupo": 1
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.413Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 51,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "2",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 1,
+      "Descricao": "Estampada",
+      "Idsubgrupo": 2
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.417Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 52,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "3",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 1,
+      "Descricao": "Jeans",
+      "Idsubgrupo": 3
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.420Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 53,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "grupo",
+    "object_id": "2",
+    "changes": {
+      "Codigo": "BLU",
+      "Margem": "0.00",
+      "Idgrupo": 2,
+      "CodigoRef": "02",
+      "Descricao": "Blusa"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.422Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 54,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "4",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 2,
+      "Descricao": "Estampada",
+      "Idsubgrupo": 4
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.425Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 55,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "5",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 2,
+      "Descricao": "Lisa",
+      "Idsubgrupo": 5
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.428Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 56,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "grupo",
+    "object_id": "3",
+    "changes": {
+      "Codigo": "VES",
+      "Margem": "0.00",
+      "Idgrupo": 3,
+      "CodigoRef": "03",
+      "Descricao": "Vestido"
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.430Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 57,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "6",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 3,
+      "Descricao": "Lisos",
+      "Idsubgrupo": 6
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.433Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 58,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "7",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 3,
+      "Descricao": "Estampados",
+      "Idsubgrupo": 7
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.436Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 59,
+  "fields": {
+    "action": "create",
+    "app_label": "produto",
+    "model": "subgrupo",
+    "object_id": "8",
+    "changes": {
+      "Margem": "0.00",
+      "Idgrupo": 3,
+      "Descricao": "Renda",
+      "Idsubgrupo": 8
+    },
+    "user": null,
+    "ip": null,
+    "user_agent": null,
+    "created_at": "2026-06-03T18:45:51.440Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 60,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "2",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "takeshi"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T19:10:58.726Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 61,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "2",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "takeshi"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-03T19:25:53.522Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 62,
+  "fields": {
+    "action": "custom",
+    "app_label": "accounts",
+    "model": "session",
+    "object_id": "takeshi",
+    "changes": {
+      "auth": "session",
+      "event": "login_failed"
+    },
+    "user": null,
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-07T14:46:41.599Z"
+  }
+},
+{
+  "model": "auditoria.auditlog",
+  "pk": 63,
+  "fields": {
+    "action": "login",
+    "app_label": "accounts",
+    "model": "token",
+    "object_id": "2",
+    "changes": {
+      "auth": "token",
+      "token_created": false
+    },
+    "user": [
+      "takeshi"
+    ],
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "created_at": "2026-06-07T14:46:47.185Z"
+  }
+},
+{
+  "model": "produto.ncm",
+  "pk": 1,
+  "fields": {
+    "ncm": "6204.62.00",
+    "descricao": "Vestuario de algodao - NCM padrao para testes",
+    "aliquota": "0.00",
+    "campo1": "TESTE"
+  }
+},
+{
+  "model": "produto.grupo",
+  "pk": 1,
+  "fields": {
+    "Codigo": "CAL",
+    "CodigoRef": "01",
+    "Descricao": "Calca",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.408Z"
+  }
+},
+{
+  "model": "produto.grupo",
+  "pk": 2,
+  "fields": {
+    "Codigo": "BLU",
+    "CodigoRef": "02",
+    "Descricao": "Blusa",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.422Z"
+  }
+},
+{
+  "model": "produto.grupo",
+  "pk": 3,
+  "fields": {
+    "Codigo": "VES",
+    "CodigoRef": "03",
+    "Descricao": "Vestido",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.430Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 1,
+  "fields": {
+    "Idgrupo": 1,
+    "Descricao": "Lisa",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.412Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 2,
+  "fields": {
+    "Idgrupo": 1,
+    "Descricao": "Estampada",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.416Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 3,
+  "fields": {
+    "Idgrupo": 1,
+    "Descricao": "Jeans",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.418Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 4,
+  "fields": {
+    "Idgrupo": 2,
+    "Descricao": "Estampada",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.425Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 5,
+  "fields": {
+    "Idgrupo": 2,
+    "Descricao": "Lisa",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.428Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 6,
+  "fields": {
+    "Idgrupo": 3,
+    "Descricao": "Lisos",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.432Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 7,
+  "fields": {
+    "Idgrupo": 3,
+    "Descricao": "Estampados",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.435Z"
+  }
+},
+{
+  "model": "produto.subgrupo",
+  "pk": 8,
+  "fields": {
+    "Idgrupo": 3,
+    "Descricao": "Renda",
+    "Margem": "0.00",
+    "data_cadastro": "2026-06-03T18:45:51.439Z"
+  }
+},
+{
+  "model": "authtoken.token",
+  "pk": "8578911bad98a551deccc5ec71a819b776f3de94",
+  "fields": {
+    "user": [
+      "admin"
+    ],
+    "created": "2026-06-03T18:13:07.918Z"
+  }
+},
+{
+  "model": "authtoken.token",
+  "pk": "a012800af300b21b9718c639b5fec6175edce325",
+  "fields": {
+    "user": [
+      "takeshi"
+    ],
+    "created": "2026-06-03T18:17:07.423Z"
+  }
+}
+]
