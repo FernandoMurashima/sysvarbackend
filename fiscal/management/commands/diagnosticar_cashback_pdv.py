@@ -21,17 +21,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         limite = options["limite"]
-        config = CashbackConfig.regra_ativa()
-        if config:
-            self.stdout.write(self.style.SUCCESS(
-                f"Regra ativa: {config.nome} | {config.percentual}% | validade {config.validade_dias} dias"
-            ))
-        else:
-            self.stdout.write(self.style.WARNING("Não existe regra de cashback ativa."))
-
         vendas = (
             VendaPdv.objects
-            .select_related("cliente")
+            .select_related("cliente", "empresa")
             .prefetch_related("cashback_creditos", "cashback_usos", "pagamentos")
             .filter(status=VendaPdv.Status.FINALIZADA)
             .order_by("-data_venda")[:limite]
@@ -42,6 +34,7 @@ class Command(BaseCommand):
             return
 
         for venda in vendas:
+            config = CashbackConfig.regra_ativa(venda.empresa)
             creditos = list(venda.cashback_creditos.all())
             debitos = list(venda.cashback_usos.all())
             cliente = venda.cliente

@@ -9,7 +9,35 @@ from cadastros.validators import (
     cep_validator,
 )
 
+
+class Empresa(models.Model):
+    nome = models.CharField(max_length=120, db_index=True)
+    nome_fantasia = models.CharField(max_length=120, null=True, blank=True, db_index=True)
+    documento = models.CharField(max_length=18, null=True, blank=True, unique=True)
+    ativo = models.BooleanField(default=True, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["nome"]),
+            models.Index(fields=["nome_fantasia"]),
+            models.Index(fields=["ativo"]),
+        ]
+        ordering = ["nome"]
+
+    def __str__(self):
+        return self.nome_fantasia or self.nome
+
+
 class Loja(models.Model):
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="lojas",
+        db_index=True,
+    )
     nome_loja = models.CharField(max_length=50, db_index=True)
     apelido_loja = models.CharField(max_length=20, db_index=True)
     cnpj = models.CharField(max_length=18, validators=[cnpj_validator], unique=True)
@@ -51,6 +79,14 @@ class Loja(models.Model):
 
 
 class Cliente(models.Model):
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clientes",
+        db_index=True,
+    )
     nome_cliente = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=18, null=True, blank=True, db_index=True)
     cpf = models.CharField(max_length=15, null=True, blank=True, validators=[cpf_validator], db_index=True)
@@ -89,6 +125,14 @@ class Cliente(models.Model):
 
 
 class Fornecedor(models.Model):
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="fornecedores",
+        db_index=True,
+    )
     nome_fornecedor = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=18, null=True, blank=True, db_index=True)
     cnpj = models.CharField(max_length=18, validators=[cnpj_validator], unique=True)
@@ -126,6 +170,14 @@ class Fornecedor(models.Model):
 
 
 class Funcionarios(models.Model):
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="funcionarios",
+        db_index=True,
+    )
     nomefuncionario = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=20, null=True, blank=True, db_index=True)
     cpf = models.CharField(max_length=15, null=True, blank=True, validators=[cpf_validator], db_index=True)

@@ -58,6 +58,7 @@ class RegisterView(APIView):
             return Response({"error": "username já existe."}, status=400)
 
         loja_key = data.get("Idloja") or data.get("loja") or data.get("loja_id")
+        empresa_key = data.get("Idempresa") or data.get("empresa") or data.get("empresa_id")
         if user_type in TIPOS_EXIGEM_LOJA and not loja_key:
             return Response({"Idloja": ["Vincule este usuário a uma filial ou matriz."]}, status=400)
 
@@ -82,7 +83,15 @@ class RegisterView(APIView):
                 from cadastros.models import Loja  # evita import circular
                 loja = Loja.objects.get(pk=int(loja_key))
                 user.loja = loja
-                user.save(update_fields=["loja"])
+                user.empresa = loja.empresa
+                user.save(update_fields=["loja", "empresa"])
+            except Exception:
+                pass
+        elif empresa_key:
+            try:
+                from cadastros.models import Empresa
+                user.empresa = Empresa.objects.get(pk=int(empresa_key))
+                user.save(update_fields=["empresa"])
             except Exception:
                 pass
 
@@ -113,6 +122,8 @@ class RegisterView(APIView):
                     "first_name": user.first_name,
                     "last_name": user.last_name,
                     "type": getattr(user, "type", "Regular"),
+                    "Idempresa": getattr(user, "empresa_id", None),
+                    "empresa_nome": getattr(getattr(user, "empresa", None), "nome", None),
                     "Idloja": getattr(user, "loja_id", None),
                     "loja_nome": getattr(getattr(user, "loja", None), "nome_loja", None),
                 },

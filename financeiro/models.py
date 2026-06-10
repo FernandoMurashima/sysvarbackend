@@ -10,6 +10,7 @@ from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento
 # =========================
 class FormaPagamento(models.Model):
     Idformapagamento = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='formas_pagamento', db_index=True)
     codigo = models.CharField(max_length=10, unique=True)   # ex.: 'AV', '30/60', '01'
     descricao = models.CharField(max_length=120)
     num_parcelas = models.IntegerField(default=1)
@@ -50,6 +51,7 @@ class FormaPagamentoParcela(models.Model):
 # =========================
 class CashbackConfig(models.Model):
     Idcashbackconfig = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='cashback_configs', db_index=True)
     nome = models.CharField(max_length=80, default='Regra padrão')
     ativo = models.BooleanField(default=False)
     percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
@@ -70,8 +72,11 @@ class CashbackConfig(models.Model):
         return f'{self.nome} - {self.percentual}% ({status})'
 
     @classmethod
-    def regra_ativa(cls):
-        return cls.objects.filter(ativo=True).order_by('Idcashbackconfig').first()
+    def regra_ativa(cls, empresa=None):
+        qs = cls.objects.filter(ativo=True)
+        if empresa is not None:
+            qs = qs.filter(empresa=empresa)
+        return qs.order_by('Idcashbackconfig').first()
 
 
 class CashbackMovimento(models.Model):
@@ -94,6 +99,7 @@ class CashbackMovimento(models.Model):
     ]
 
     Idcashbackmovimento = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='cashback_movimentos', db_index=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='cashback_movimentos', db_index=True)
     venda_origem = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_creditos')
     venda_uso = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_usos')
@@ -117,11 +123,13 @@ class CashbackMovimento(models.Model):
         return f'{self.cliente_id} - {self.tipo} - {self.valor}'
 
 
-def saldo_cashback_cliente(cliente_id, ate=None):
+def saldo_cashback_cliente(cliente_id, ate=None, empresa=None):
     hoje = ate or timezone.localdate()
+    qs = CashbackMovimento.objects.filter(cliente_id=cliente_id, status=CashbackMovimento.STATUS_ATIVO)
+    if empresa is not None:
+        qs = qs.filter(empresa=empresa)
     saldo = (
-        CashbackMovimento.objects
-        .filter(cliente_id=cliente_id, status=CashbackMovimento.STATUS_ATIVO)
+        qs
         .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
         .aggregate(
             saldo=Sum(
@@ -154,6 +162,7 @@ class ValeTroca(models.Model):
     ]
 
     Idvaletroca = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='vales_troca', db_index=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
     loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
     devolucao = models.OneToOneField('fiscal.VendaDevolucao', on_delete=models.PROTECT, related_name='vale_troca')
@@ -211,11 +220,13 @@ class ValeTrocaMovimento(models.Model):
         return f'{self.vale_id} - {self.tipo} - {self.valor}'
 
 
-def saldo_vale_troca_cliente(cliente_id, ate=None):
+def saldo_vale_troca_cliente(cliente_id, ate=None, empresa=None):
     hoje = ate or timezone.localdate()
+    qs = ValeTroca.objects.filter(cliente_id=cliente_id, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+    if empresa is not None:
+        qs = qs.filter(empresa=empresa)
     saldo = (
-        ValeTroca.objects
-        .filter(cliente_id=cliente_id, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+        qs
         .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
         .aggregate(total=Sum('saldo'))
         .get('total')
@@ -235,6 +246,7 @@ class Caixa(models.Model):
     ]
 
     Idcaixa = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='caixas', db_index=True)
     idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='caixas', db_index=True, null=True, blank=True)
     tipo_caixa = models.CharField(max_length=10, choices=TIPO_CAIXA_CHOICES, default=TIPO_LOJA, db_index=True)
     codigo = models.CharField(max_length=20)
@@ -269,6 +281,7 @@ class ContaBancaria(models.Model):
     ]
 
     Idconta = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='contas_bancarias', db_index=True)
     idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='contas_bancarias', db_index=True)
     descricao = models.CharField(max_length=120)
     banco = models.CharField(max_length=80)
@@ -325,6 +338,7 @@ class MovimentacaoFinanceira(models.Model):
     ]
 
     Idmovimentacao = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='movimentacoes_financeiras', db_index=True)
     idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, db_index=True)
     data_movimento = models.DateField(default=timezone.now, db_index=True)
     tipo = models.CharField(max_length=15, choices=TIPO_CHOICES)
@@ -364,6 +378,7 @@ class MovimentacaoFinanceira(models.Model):
 class Pagar(models.Model):
     Idpagar = models.BigAutoField(primary_key=True)
 
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='titulos_pagar', db_index=True)
     idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, db_index=True)
     idfornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, db_index=True)
 
@@ -455,6 +470,7 @@ class PagarRateio(models.Model):
 class Receber(models.Model):
     Idreceber = models.BigAutoField(primary_key=True)
 
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='titulos_receber', db_index=True)
     idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, db_index=True)
     idcliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, db_index=True)
 

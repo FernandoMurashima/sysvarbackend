@@ -29,7 +29,7 @@ from fiscal.models import NFCe, NFeDevolucao, VendaDevolucao, VendaDevolucaoItem
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
 from produto.models import Estoque, EstoqueMovimentacao, Produto, ProdutoDetalhe
-from cadastros.models import Funcionarios
+from cadastros.models import Cliente, Funcionarios
 
 
 UF_CODIGO = {
@@ -92,6 +92,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         loja = self.request.query_params.get("loja")
         cliente = self.request.query_params.get("cliente")
         status_q = self.request.query_params.get("status")
@@ -102,6 +107,12 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if status_q:
             qs = qs.filter(status=status_q)
         return qs
+
+    def _empresa_id_usuario(self):
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return self.request.query_params.get("empresa")
+        return getattr(user, "empresa_id", None)
 
     @action(detail=False, methods=["get"], url_path="relatorio-vendas")
     def relatorio_vendas(self, request):
@@ -274,10 +285,15 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             .filter(status=VendaPdv.Status.FINALIZADA)
             .order_by("-data_venda")
         )
+        empresa_id = self._empresa_id_usuario()
         loja = request.query_params.get("loja")
         data_ini = request.query_params.get("data_ini")
         data_fim = request.query_params.get("data_fim")
         vendedor = request.query_params.get("vendedor")
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (request.user.is_superuser or request.user.is_staff):
+            return []
         if loja:
             qs = qs.filter(loja_id=loja)
         if vendedor:
@@ -316,13 +332,22 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if not loja_id or not caixa_id or not cliente_id or not vendedor_id:
             return Response({"detail": "Informe loja, caixa, cliente e vendedor."}, status=status.HTTP_400_BAD_REQUEST)
 
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not (request.user.is_superuser or request.user.is_staff):
+            return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         caixa = (
             Caixa.objects.select_for_update()
+            .select_related("idloja")
             .filter(pk=caixa_id, idloja_id=loja_id, ativo=True, tipo_caixa=Caixa.TIPO_LOJA)
             .first()
         )
         if not caixa:
             return Response({"detail": "O caixa informado não pertence à loja ou não está ativo."}, status=status.HTTP_400_BAD_REQUEST)
+        if empresa_id and caixa.idloja.empresa_id != int(empresa_id):
+            return Response({"detail": "A loja informada pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
+        cliente = Cliente.objects.filter(pk=cliente_id).first()
+        if not cliente or (empresa_id and cliente.empresa_id and cliente.empresa_id != int(empresa_id)):
+            return Response({"detail": "O cliente informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
         vendedor = (
             Funcionarios.objects
             .filter(pk=vendedor_id, idloja_id=loja_id, ativo=True, categoria__iexact="Vendedor")
@@ -330,9 +355,12 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         )
         if not vendedor:
             return Response({"detail": "O vendedor informado não está vinculado a esta loja."}, status=status.HTTP_400_BAD_REQUEST)
+        if empresa_id and vendedor.empresa_id and vendedor.empresa_id != int(empresa_id):
+            return Response({"detail": "O vendedor informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
 
         documento = data.get("documento") or f"PDV-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
         venda = VendaPdv.objects.create(
+            empresa=caixa.idloja.empresa,
             loja_id=loja_id,
             caixa=caixa,
             cliente_id=cliente_id,
@@ -442,13 +470,13 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if cashback_usado <= 0:
             return ""
 
-        config = CashbackConfig.regra_ativa()
+        config = CashbackConfig.regra_ativa(venda.empresa)
         if not config:
             return "Não existe regra de cashback ativa."
         if not self._cliente_participa_cashback(venda, config):
             return "Cashback não pode ser usado para consumidor final."
 
-        saldo = money(saldo_cashback_cliente(venda.cliente_id))
+        saldo = money(saldo_cashback_cliente(venda.cliente_id, empresa=venda.empresa))
         if cashback_usado > saldo:
             return "O cashback informado é maior que o saldo disponível do cliente."
         if cashback_usado > total:
@@ -470,7 +498,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return ""
         if self._cliente_padrao(venda):
             return "Troca exige cliente identificado."
-        saldo = money(saldo_vale_troca_cliente(venda.cliente_id))
+        saldo = money(saldo_vale_troca_cliente(venda.cliente_id, empresa=venda.empresa))
         if vale_usado > saldo:
             return "O valor de troca informado é maior que o saldo disponível do cliente."
         for pagamento in pagamentos:
@@ -497,7 +525,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         hoje = timezone.localdate()
         vales_base = (
             ValeTroca.objects.select_for_update()
-            .filter(cliente=venda.cliente, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(empresa=venda.empresa, cliente=venda.cliente, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
             .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
         )
         for pagamento in pagamentos_troca:
@@ -510,7 +538,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         hoje = timezone.localdate()
         return (
             ValeTroca.objects
-            .filter(cliente=venda.cliente, documento=documento.strip(), status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(empresa=venda.empresa, cliente=venda.cliente, documento=documento.strip(), status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
             .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
             .first()
         )
@@ -540,13 +568,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             raise ValueError("Saldo de troca insuficiente para concluir a venda.")
 
     def _registrar_cashback(self, venda: VendaPdv, pagamentos: List[Dict]):
-        config = CashbackConfig.regra_ativa()
+        config = CashbackConfig.regra_ativa(venda.empresa)
         if not config or not self._cliente_participa_cashback(venda, config):
             return
 
         cashback_usado = self._total_cashback_usado(pagamentos)
         if cashback_usado > 0 and not CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).exists():
             CashbackMovimento.objects.create(
+                empresa=venda.empresa,
                 cliente=venda.cliente,
                 venda_uso=venda,
                 tipo=CashbackMovimento.TIPO_DEBITO,
@@ -567,6 +596,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return
 
         CashbackMovimento.objects.create(
+            empresa=venda.empresa,
             cliente=venda.cliente,
             venda_origem=venda,
             tipo=CashbackMovimento.TIPO_CREDITO,
@@ -586,6 +616,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         sku = ProdutoDetalhe.objects.select_related("produto").get(ean13=ean)
         produto = sku.produto
+        if venda.empresa_id and produto.empresa_id and produto.empresa_id != venda.empresa_id:
+            raise ValueError("Produto pertence a outra empresa.")
         estoque = Estoque.objects.select_for_update().get(CodigodeBarra=ean, Idloja=venda.loja)
         anterior = estoque.Estoque or 0
         posterior = anterior - quantidade
@@ -660,6 +692,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             caixa.saldo_atual = money(caixa.saldo_atual) + valor_caixa
             caixa.save(update_fields=["saldo_atual"])
             MovimentacaoFinanceira.objects.create(
+                empresa=venda.empresa,
                 idloja=venda.loja,
                 data_movimento=timezone.localdate(),
                 tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
@@ -674,6 +707,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             )
             self._consolidar_caixa_master(venda, natureza, valor_caixa)
         receber = Receber.objects.create(
+            empresa=venda.empresa,
             idloja=venda.loja,
             idcliente=venda.cliente,
             Titulo=f"Venda PDV {venda.documento}",
@@ -708,12 +742,13 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     def _consolidar_caixa_master(self, venda: VendaPdv, natureza: Nat_Lancamento, valor: Decimal):
         master = (
             Caixa.objects.select_for_update()
-            .filter(tipo_caixa=Caixa.TIPO_MASTER, ativo=True)
+            .filter(empresa=venda.empresa, tipo_caixa=Caixa.TIPO_MASTER, ativo=True)
             .order_by("Idcaixa")
             .first()
         )
         if not master:
             master = Caixa.objects.create(
+                empresa=venda.empresa,
                 idloja=None,
                 tipo_caixa=Caixa.TIPO_MASTER,
                 codigo="MASTER",
@@ -726,6 +761,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         master.saldo_atual = money(master.saldo_atual) + money(valor)
         master.save(update_fields=["saldo_atual"])
         MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
             idloja=venda.loja,
             data_movimento=timezone.localdate(),
             tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
@@ -802,6 +838,16 @@ class NFCeViewSet(viewsets.ModelViewSet):
     serializer_class = NFCeSerializer
     queryset = NFCe.objects.select_related("venda", "venda__loja", "venda__cliente", "venda__vendedor").all()
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        empresa_id = self.request.query_params.get("empresa") if user.is_superuser or user.is_staff else getattr(user, "empresa_id", None)
+        if empresa_id:
+            qs = qs.filter(venda__empresa_id=empresa_id)
+        elif not (user.is_superuser or user.is_staff):
+            return qs.none()
+        return qs
+
     @action(detail=True, methods=["get"], url_path="cupom")
     def cupom(self, request, pk=None):
         nfce = self.get_object()
@@ -822,9 +868,14 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         loja = self.request.query_params.get("loja")
         cliente = self.request.query_params.get("cliente")
         venda = self.request.query_params.get("venda")
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         if loja:
             qs = qs.filter(loja_id=loja)
         if cliente:
@@ -832,6 +883,12 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         if venda:
             qs = qs.filter(venda_id=venda)
         return qs
+
+    def _empresa_id_usuario(self):
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return self.request.query_params.get("empresa")
+        return getattr(user, "empresa_id", None)
 
     @action(detail=False, methods=["get"], url_path="vendas-devolviveis")
     def vendas_devolviveis(self, request):
@@ -841,10 +898,15 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             .filter(status=VendaPdv.Status.FINALIZADA)
             .order_by("-data_venda")
         )
+        empresa_id = self._empresa_id_usuario()
         loja = request.query_params.get("loja")
         cliente = request.query_params.get("cliente")
         documento = (request.query_params.get("documento") or "").strip()
         ean = (request.query_params.get("ean") or "").strip()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (request.user.is_superuser or request.user.is_staff):
+            return Response([], status=status.HTTP_200_OK)
         if loja:
             qs = qs.filter(loja_id=loja)
         if cliente:
@@ -879,6 +941,11 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             .prefetch_related("itens", "pagamentos", "devolucoes__itens")
             .filter(status=VendaPdv.Status.FINALIZADA)
         )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (request.user.is_superuser or request.user.is_staff):
+            return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         venda = qs.filter(pk=venda_id).first() if venda_id else qs.filter(documento=documento).first()
         if not venda:
             return Response({"detail": "Venda finalizada não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -901,6 +968,11 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             .prefetch_related("itens", "devolucoes__itens", "pagamentos")
             .filter(status=VendaPdv.Status.FINALIZADA)
         )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            venda_qs = venda_qs.filter(empresa_id=empresa_id)
+        elif not (request.user.is_superuser or request.user.is_staff):
+            return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         venda = venda_qs.filter(pk=venda_id).first() if venda_id else venda_qs.filter(documento=documento).first()
         if not venda:
             return Response({"detail": "Venda finalizada não encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -929,6 +1001,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Valor da devolução inválido."}, status=status.HTTP_400_BAD_REQUEST)
 
         devolucao = VendaDevolucao.objects.create(
+            empresa=venda.empresa,
             venda=venda,
             loja=venda.loja,
             cliente=venda.cliente,
@@ -1034,6 +1107,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         vale, created = ValeTroca.objects.get_or_create(
             devolucao=devolucao,
             defaults={
+                "empresa": devolucao.empresa,
                 "cliente": devolucao.cliente,
                 "loja": devolucao.loja,
                 "documento": f"VT-{devolucao.documento}",
@@ -1056,7 +1130,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         )
     def _estornar_financeiro(self, devolucao: VendaDevolucao):
         valor = money(devolucao.credito_cliente)
-        receber = Receber.objects.filter(pedido_venda=devolucao.venda_id).prefetch_related("itens").first()
+        receber = Receber.objects.filter(empresa=devolucao.empresa, pedido_venda=devolucao.venda_id).prefetch_related("itens").first()
         if not receber:
             return
         restante = valor

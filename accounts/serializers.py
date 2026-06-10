@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from cadastros.models import Loja
+from cadastros.models import Empresa, Loja
 
 User = get_user_model()
 
@@ -20,7 +20,18 @@ class LojaMiniSerializer(serializers.ModelSerializer):
         model = Loja
         fields = ("Idloja", "nome_loja", "apelido_loja")
 
+
+class EmpresaMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Empresa
+        fields = ("id", "nome", "nome_fantasia")
+
+
 class UserSerializer(serializers.ModelSerializer):
+    empresa = EmpresaMiniSerializer(read_only=True)
+    Idempresa = serializers.PrimaryKeyRelatedField(
+        source="empresa", queryset=Empresa.objects.all(), allow_null=True, required=False
+    )
     # leitura amigável da loja
     loja = LojaMiniSerializer(read_only=True)
     # gravação por PK
@@ -34,7 +45,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "id", "username", "email", "first_name", "last_name",
-            "type", "Idloja", "loja",
+            "type", "Idempresa", "empresa", "Idloja", "loja",
             "is_active", "is_staff", "date_joined",
             "password",
         )
@@ -42,11 +53,18 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         tipo = attrs.get("type", getattr(self.instance, "type", User.Type.REGULAR))
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         loja = attrs.get("loja", getattr(self.instance, "loja", None))
         if tipo in TIPOS_EXIGEM_LOJA and not loja:
             raise serializers.ValidationError({
                 "Idloja": "Vincule este usuário a uma filial ou matriz."
             })
+        if loja and empresa and loja.empresa_id and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({
+                "Idloja": "A loja selecionada pertence a outra empresa."
+            })
+        if loja and not empresa:
+            attrs["empresa"] = loja.empresa
         return attrs
 
     def create(self, validated_data):

@@ -135,6 +135,7 @@ class Colecao(models.Model):
     )
 
     Idcolecao = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='colecoes', db_index=True)
     Descricao = models.CharField(max_length=100)
     Codigo = models.CharField(max_length=2, null=True, blank=True, help_text='Dois ultimos digitos do ano, ex.: 2026 = 26')
     Estacao = models.CharField(max_length=2, null=True, blank=True, choices=ESTACOES_CHOICES)
@@ -163,6 +164,7 @@ class Unidade(models.Model):
 
 class Grupo(models.Model):
     Idgrupo = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='grupos_produto', db_index=True)
     Codigo = models.CharField(max_length=12)
     CodigoRef = models.CharField(max_length=2, default='01', help_text='2 dígitos, ex.: 01')
     Descricao = models.CharField(max_length=100)
@@ -180,6 +182,7 @@ class Grupo(models.Model):
 
 class Subgrupo(models.Model):
     Idsubgrupo = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='subgrupos_produto', db_index=True)
     Idgrupo = models.ForeignKey(Grupo, on_delete=models.CASCADE, null=True, blank=True)
     Descricao = models.CharField(max_length=100)
     Margem = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(0)])
@@ -191,6 +194,7 @@ class Subgrupo(models.Model):
 
 class Tabelapreco(models.Model):
     Idtabela = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='tabelas_preco', db_index=True)
     NomeTabela = models.CharField(max_length=100, default='Tabela')
     DataInicio = models.DateField()
     Promocao = models.BooleanField(default=False)
@@ -227,6 +231,7 @@ class Produto(models.Model):
     )
 
     Idproduto = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='produtos', db_index=True)
     tipo_produto = models.CharField(max_length=1, choices=TIPO_CHOICES, default='1')
     referencia = models.CharField(max_length=11, null=True, blank=True, unique=True,
                                   help_text='Gerada automaticamente: AA-BB-CCDDD')
@@ -445,6 +450,7 @@ class Promocao(models.Model):
     ]
 
     Idpromocao = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='promocoes_produto', db_index=True)
     nome = models.CharField(max_length=100)
     ativo = models.BooleanField(default=True, db_index=True)
     data_inicio = models.DateField(db_index=True)
@@ -504,6 +510,7 @@ class Promocao(models.Model):
 # Packs (compra por grade)
 # ===========================
 class Pack(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='packs_produto', db_index=True)
     nome = models.CharField(max_length=80, null=True, blank=True)
     grade = models.ForeignKey(Grade, on_delete=models.PROTECT, related_name='packs')
     ativo = models.BooleanField(default=True)

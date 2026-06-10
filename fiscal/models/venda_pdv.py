@@ -15,6 +15,7 @@ class VendaPdv(models.Model):
         FINALIZADA = "FINALIZADA", "Finalizada"
         CANCELADA = "CANCELADA", "Cancelada"
 
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, null=True, blank=True, related_name="vendas_pdv", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="vendas_pdv")
     caixa = models.ForeignKey("financeiro.Caixa", on_delete=models.PROTECT, related_name="vendas_pdv", null=True, blank=True)
     cliente = models.ForeignKey("cadastros.Cliente", on_delete=models.PROTECT, related_name="vendas_pdv")
@@ -113,6 +114,7 @@ class VendaDevolucao(models.Model):
         FINALIZADA = "FINALIZADA", "Finalizada"
         CANCELADA = "CANCELADA", "Cancelada"
 
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, null=True, blank=True, related_name="devolucoes_venda", db_index=True)
     venda = models.ForeignKey(VendaPdv, on_delete=models.PROTECT, related_name="devolucoes")
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="devolucoes_venda")
     cliente = models.ForeignKey("cadastros.Cliente", on_delete=models.PROTECT, related_name="devolucoes_venda")

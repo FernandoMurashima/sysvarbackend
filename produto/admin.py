@@ -31,7 +31,8 @@ class MaterialAdmin(admin.ModelAdmin):
 
 @admin.register(Colecao)
 class ColecaoAdmin(admin.ModelAdmin):
-    list_display = ('Idcolecao', 'Descricao', 'Codigo', 'Estacao', 'Status', 'Contador')
+    list_display = ('Idcolecao', 'empresa', 'Descricao', 'Codigo', 'Estacao', 'Status', 'Contador')
+    list_filter = ('empresa', 'Status', 'Estacao')
 
 @admin.register(Unidade)
 class UnidadeAdmin(admin.ModelAdmin):
@@ -39,15 +40,18 @@ class UnidadeAdmin(admin.ModelAdmin):
 
 @admin.register(Grupo)
 class GrupoAdmin(admin.ModelAdmin):
-    list_display = ('Idgrupo', 'Codigo', 'Descricao', 'Margem')
+    list_display = ('Idgrupo', 'empresa', 'Codigo', 'Descricao', 'Margem')
+    list_filter = ('empresa',)
 
 @admin.register(Subgrupo)
 class SubgrupoAdmin(admin.ModelAdmin):
-    list_display = ('Idsubgrupo', 'Idgrupo', 'Descricao', 'Margem')
+    list_display = ('Idsubgrupo', 'empresa', 'Idgrupo', 'Descricao', 'Margem')
+    list_filter = ('empresa', 'Idgrupo')
 
 @admin.register(Tabelapreco)
 class TabelaprecoAdmin(admin.ModelAdmin):
-    list_display = ('Idtabela', 'NomeTabela', 'DataInicio', 'DataFim', 'Promocao')
+    list_display = ('Idtabela', 'empresa', 'NomeTabela', 'DataInicio', 'DataFim', 'Promocao')
+    list_filter = ('empresa', 'Promocao')
 
 @admin.register(Codigos)
 class CodigosAdmin(admin.ModelAdmin):
@@ -55,8 +59,8 @@ class CodigosAdmin(admin.ModelAdmin):
 
 @admin.register(Produto)
 class ProdutoAdmin(admin.ModelAdmin):
-    list_display = ('Idproduto', 'descricao', 'tipo_produto', 'referencia', 'unidade', 'ncm', 'ativo')
-    list_filter = ('tipo_produto', 'ativo', 'grupo', 'subgrupo', 'colecao')
+    list_display = ('Idproduto', 'empresa', 'descricao', 'tipo_produto', 'referencia', 'unidade', 'ncm', 'ativo')
+    list_filter = ('empresa', 'tipo_produto', 'ativo', 'grupo', 'subgrupo', 'colecao')
     search_fields = ('Idproduto', 'descricao', 'referencia')
 
 @admin.register(ProdutoDetalhe)
@@ -70,14 +74,15 @@ class TabelaprecoProdutoAdmin(admin.ModelAdmin):
 
 @admin.register(Promocao)
 class PromocaoAdmin(admin.ModelAdmin):
-    list_display = ('Idpromocao', 'nome', 'ativo', 'escopo', 'tipo', 'valor', 'data_inicio', 'data_fim', 'prioridade')
-    list_filter = ('ativo', 'escopo', 'tipo', 'data_inicio')
+    list_display = ('Idpromocao', 'empresa', 'nome', 'ativo', 'escopo', 'tipo', 'valor', 'data_inicio', 'data_fim', 'prioridade')
+    list_filter = ('empresa', 'ativo', 'escopo', 'tipo', 'data_inicio')
     search_fields = ('nome', 'observacao')
     filter_horizontal = ('lojas', 'produtos', 'colecoes', 'grupos', 'subgrupos')
 
 @admin.register(Pack)
 class PackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'nome', 'grade', 'ativo', 'data_cadastro', 'atualizado_em')
+    list_display = ('id', 'empresa', 'nome', 'grade', 'ativo', 'data_cadastro', 'atualizado_em')
+    list_filter = ('empresa', 'ativo')
 
 @admin.register(PackItem)
 class PackItemAdmin(admin.ModelAdmin):

@@ -1,7 +1,9 @@
 from rest_framework import viewsets, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
+from django.db.models import Q
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
@@ -76,6 +78,12 @@ class BaseViewSet(viewsets.ModelViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
 
+    def _empresa_id_usuario(self):
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return self.request.query_params.get("empresa")
+        return getattr(user, "empresa_id", None)
+
 
 # ----------------- Pedido -----------------
 class PedidoCompraViewSet(BaseViewSet):
@@ -84,10 +92,15 @@ class PedidoCompraViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         tipo = self.request.query_params.get("tipo")
         status_q = self.request.query_params.get("status")
         loja = self.request.query_params.get("loja")
         fornecedor = self.request.query_params.get("fornecedor")
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         if tipo in ("1", "2"):
             qs = qs.filter(tipo=tipo)
         if status_q:
@@ -97,6 +110,31 @@ class PedidoCompraViewSet(BaseViewSet):
         if fornecedor:
             qs = qs.filter(fornecedor_id=fornecedor)
         return qs
+
+    def perform_create(self, serializer):
+        loja = serializer.validated_data.get("loja")
+        fornecedor = serializer.validated_data.get("fornecedor")
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if empresa_id and loja.empresa_id != int(empresa_id):
+            raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        if loja.empresa_id and fornecedor.empresa_id and loja.empresa_id != fornecedor.empresa_id:
+            raise ValidationError({"fornecedor": "O fornecedor informado pertence a outra empresa."})
+        serializer.save(empresa=loja.empresa)
+
+    def perform_update(self, serializer):
+        loja = serializer.validated_data.get("loja") or serializer.instance.loja
+        fornecedor = serializer.validated_data.get("fornecedor") or serializer.instance.fornecedor
+        empresa_id = serializer.instance.empresa_id or getattr(loja, "empresa_id", None)
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
+            raise ValidationError({"empresa": "Pedido pertence a outra empresa."})
+        if loja.empresa_id and fornecedor.empresa_id and loja.empresa_id != fornecedor.empresa_id:
+            raise ValidationError({"fornecedor": "O fornecedor informado pertence a outra empresa."})
+        serializer.save(empresa=loja.empresa)
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
     @transaction.atomic
@@ -117,9 +155,9 @@ class PedidoCompraViewSet(BaseViewSet):
 
         try:
             if id_forma:
-                forma = FormaPagamento.objects.get(pk=id_forma, ativo=True)
+                forma = FormaPagamento.objects.filter(Q(empresa=obj.empresa) | Q(empresa__isnull=True), pk=id_forma, ativo=True).get()
             elif codigo:
-                forma = FormaPagamento.objects.get(codigo=codigo, ativo=True)
+                forma = FormaPagamento.objects.filter(Q(empresa=obj.empresa) | Q(empresa__isnull=True), codigo=codigo, ativo=True).get()
             else:
                 return Response({"detail": "Informe id_forma ou codigo_forma"}, status=status.HTTP_400_BAD_REQUEST)
         except FormaPagamento.DoesNotExist:
@@ -263,6 +301,7 @@ class PedidoCompraViewSet(BaseViewSet):
 
         # 7) Cria Pagar (PREVISTO)
         pagar = Pagar.objects.create(
+            empresa=obj.empresa,
             idloja=obj.loja,
             idfornecedor=obj.fornecedor,
             Titulo=f"PC {obj.id}",
@@ -354,10 +393,42 @@ class PedidoCompraItemViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         pedido = self.request.query_params.get("pedido")
+        if empresa_id:
+            qs = qs.filter(pedido__empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         if pedido:
             qs = qs.filter(pedido_id=pedido)
         return qs
+
+    def perform_create(self, serializer):
+        self._validar_item_empresa(serializer.validated_data)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        data = {**serializer.validated_data}
+        data.setdefault("pedido", serializer.instance.pedido)
+        data.setdefault("produto", serializer.validated_data.get("produto", serializer.instance.produto))
+        data.setdefault("pack", serializer.validated_data.get("pack", serializer.instance.pack))
+        self._validar_item_empresa(data)
+        serializer.save()
+
+    def _validar_item_empresa(self, data):
+        pedido = data.get("pedido")
+        produto = data.get("produto")
+        pack = data.get("pack")
+        empresa_id = pedido.empresa_id if pedido else None
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
+            raise ValidationError({"pedido": "Pedido pertence a outra empresa."})
+        if produto and produto.empresa_id and empresa_id and produto.empresa_id != empresa_id:
+            raise ValidationError({"produto": "Produto pertence a outra empresa."})
+        if pack and pack.empresa_id and empresa_id and pack.empresa_id != empresa_id:
+            raise ValidationError({"pack": "Pack pertence a outra empresa."})
 
 
 # ----------------- Entregas -----------------
@@ -367,7 +438,12 @@ class PedidoCompraEntregaViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         pedido = self.request.query_params.get("pedido")
+        if empresa_id:
+            qs = qs.filter(item__pedido__empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         if pedido:
             qs = qs.filter(item__pedido_id=pedido)
         return qs
@@ -380,7 +456,12 @@ class PedidoCompraParcelaViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         pedido = self.request.query_params.get("pedido")
+        if empresa_id:
+            qs = qs.filter(pedido__empresa_id=empresa_id)
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+            return qs.none()
         if pedido:
             qs = qs.filter(pedido_id=pedido)
         status_q = self.request.query_params.get("status")

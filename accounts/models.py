@@ -21,6 +21,8 @@ class User(AbstractUser):
         ASSISTENTE_PAGAR = 'AssistentePagar', 'Assistente contas a pagar'
 
     type = models.CharField(max_length=20, choices=Type.choices, default=Type.REGULAR)
+    # Empresa contratante/tenant do usuário no modelo SaaS.
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
     # Loja do usuário (opcional, pode ficar vazia)
     loja = models.ForeignKey('cadastros.Loja', on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
 

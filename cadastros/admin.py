@@ -1,11 +1,21 @@
 from django.contrib import admin
-from .models import Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+
+
+@admin.register(Empresa)
+class EmpresaAdmin(admin.ModelAdmin):
+    list_display = ("id", "nome", "nome_fantasia", "documento", "ativo", "data_cadastro")
+    list_filter = ("ativo",)
+    search_fields = ("nome", "nome_fantasia", "documento")
+    ordering = ("nome",)
+    readonly_fields = ("data_cadastro",)
 
 
 @admin.register(Loja)
 class LojaAdmin(admin.ModelAdmin):
     list_display = (
         "id",
+        "empresa",
         "nome_loja",
         "apelido_loja",
         "cnpj",
@@ -22,6 +32,7 @@ class LojaAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "ativo",
+        "empresa",
         "estado",
         "EstoqueNegativo",
         "Rede",
@@ -44,6 +55,9 @@ class LojaAdmin(admin.ModelAdmin):
         ("Identificação", {
             "fields": ("nome_loja", "apelido_loja", "cnpj", "ativo")
         }),
+        ("Empresa", {
+            "fields": ("empresa",)
+        }),
         ("Contato", {
             "fields": ("email", "telefone1", "telefone2")
         }),
@@ -61,8 +75,8 @@ class LojaAdmin(admin.ModelAdmin):
 
 @admin.register(Cliente)
 class ClienteAdmin(admin.ModelAdmin):
-    list_display = ("id", "nome_cliente", "apelido", "cpf", "telefone1", "cidade", "bloqueio", "ativo", "data_cadastro")
-    list_filter = ("ativo", "estado", "categoria", "bloqueio")
+    list_display = ("id", "empresa", "nome_cliente", "apelido", "cpf", "telefone1", "cidade", "bloqueio", "ativo", "data_cadastro")
+    list_filter = ("empresa", "ativo", "estado", "categoria", "bloqueio")
     search_fields = ("nome_cliente", "apelido", "cpf", "email", "cidade")
     ordering = ("nome_cliente",)
     readonly_fields = ("data_cadastro",)
@@ -70,8 +84,8 @@ class ClienteAdmin(admin.ModelAdmin):
 
 @admin.register(Fornecedor)
 class FornecedorAdmin(admin.ModelAdmin):
-    list_display = ("id", "nome_fornecedor", "apelido", "cnpj", "telefone1", "cidade", "bloqueio", "ativo", "data_cadastro")
-    list_filter = ("ativo", "estado", "categoria", "bloqueio")
+    list_display = ("id", "empresa", "nome_fornecedor", "apelido", "cnpj", "telefone1", "cidade", "bloqueio", "ativo", "data_cadastro")
+    list_filter = ("empresa", "ativo", "estado", "categoria", "bloqueio")
     search_fields = ("nome_fornecedor", "apelido", "cnpj", "email", "cidade")
     ordering = ("nome_fornecedor",)
     readonly_fields = ("data_cadastro",)
@@ -79,11 +93,11 @@ class FornecedorAdmin(admin.ModelAdmin):
 
 @admin.register(Funcionarios)
 class FuncionariosAdmin(admin.ModelAdmin):
-    list_display = ("id", "nomefuncionario", "apelido", "cpf", "categoria", "idloja", "meta", "comissao_percentual", "ativo", "data_cadastro")
-    list_filter = ("categoria", "ativo", "idloja")
+    list_display = ("id", "empresa", "nomefuncionario", "apelido", "cpf", "categoria", "idloja", "meta", "comissao_percentual", "ativo", "data_cadastro")
+    list_filter = ("empresa", "categoria", "ativo", "idloja")
     search_fields = ("nomefuncionario", "apelido", "cpf")
     ordering = ("nomefuncionario",)
-    list_select_related = ("idloja",)
+    list_select_related = ("empresa", "idloja")
     readonly_fields = ("data_cadastro",)
 
 

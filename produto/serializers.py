@@ -45,6 +45,13 @@ def _normalize_ncm_dotted(raw: str) -> str:
         return f'{d[:4]}.{d[4:6]}.{d[6:8]}'
     raise serializers.ValidationError({'ncm': 'Formato inválido. Use ####.##.## ou 8 dígitos.'})
 
+def _empresa_request(serializer):
+    request = serializer.context.get('request') if getattr(serializer, 'context', None) else None
+    user = getattr(request, 'user', None)
+    if user and user.is_authenticated and not (user.is_superuser or user.is_staff):
+        return getattr(user, 'empresa', None)
+    return None
+
 # ---------- Cadastros mestres ----------
 class ConfigEanSerializer(serializers.ModelSerializer):
     class Meta:
@@ -95,6 +102,15 @@ class SubgrupoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subgrupo
         fields = '__all__'
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        grupo = attrs.get('Idgrupo', getattr(self.instance, 'Idgrupo', None))
+        if grupo and empresa and grupo.empresa_id and grupo.empresa_id != empresa.id:
+            raise serializers.ValidationError({'Idgrupo': 'O grupo selecionado pertence a outra empresa.'})
+        if grupo and not attrs.get('empresa') and not empresa:
+            attrs['empresa'] = grupo.empresa
+        return attrs
 
 class TabelaprecoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -152,11 +168,18 @@ class ProdutoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
         tipo = attrs.get('tipo_produto', getattr(self.instance, 'tipo_produto', None))
         grade = attrs.get('grade', getattr(self.instance, 'grade', None))
         colecao = attrs.get('colecao', getattr(self.instance, 'colecao', None))
         grupo = attrs.get('grupo', getattr(self.instance, 'grupo', None))
+        subgrupo = attrs.get('subgrupo', getattr(self.instance, 'subgrupo', None))
         ncm_raw = attrs.get('ncm', getattr(self.instance, 'ncm', None))
+
+        for campo, obj in (('colecao', colecao), ('grupo', grupo), ('subgrupo', subgrupo)):
+            obj_empresa_id = getattr(obj, 'empresa_id', None)
+            if empresa and obj_empresa_id and obj_empresa_id != empresa.id:
+                raise serializers.ValidationError({campo: 'O cadastro selecionado pertence a outra empresa.'})
 
         if tipo == '1':  # Revenda
             if 'referencia' in self.initial_data and self.initial_data.get('referencia'):

@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django.utils import timezone
 from django.db import models, transaction
@@ -62,6 +63,89 @@ class BaseViewSet(viewsets.ModelViewSet):
     read_roles = ["Admin", "Diretor", "Gerente"]
     write_roles = ["Admin", "Diretor", "Gerente"]
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id and self._model_has_field(qs.model, 'empresa'):
+            return qs.filter(empresa_id=empresa_id)
+        if not (self.request.user.is_superuser or self.request.user.is_staff) and self._model_has_field(qs.model, 'empresa'):
+            return qs.none()
+        return qs
+
+    def perform_create(self, serializer):
+        model = serializer.Meta.model
+        user = self.request.user
+        empresa_id = getattr(user, 'empresa_id', None)
+        if not empresa_id and not (user.is_superuser or user.is_staff):
+            raise ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
+        if empresa_id:
+            self._validar_vinculos_empresa(serializer.validated_data, empresa_id)
+        if self._model_has_field(model, 'empresa') and empresa_id:
+            empresa = serializer.validated_data.get('empresa')
+            if empresa and empresa.id != empresa_id:
+                raise ValidationError({'empresa': 'O cadastro pertence a outra empresa.'})
+            serializer.save(empresa=user.empresa)
+            return
+        serializer.save()
+
+    def perform_update(self, serializer):
+        empresa_id = getattr(self.request.user, 'empresa_id', None)
+        if not empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+            raise ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
+        if empresa_id:
+            self._validar_vinculos_empresa(serializer.validated_data, empresa_id)
+        serializer.save()
+
+    def _empresa_id_usuario(self):
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return self.request.query_params.get('empresa')
+        return getattr(user, 'empresa_id', None)
+
+    def _model_has_field(self, model, field_name):
+        try:
+            model._meta.get_field(field_name)
+            return True
+        except Exception:
+            return False
+
+    def _validar_vinculos_empresa(self, data, empresa_id):
+        for campo in ('idloja', 'loja'):
+            loja = data.get(campo)
+            if loja and getattr(loja, 'empresa_id', None) and loja.empresa_id != empresa_id:
+                raise ValidationError({campo: 'A loja informada pertence a outra empresa.'})
+        cliente = data.get('idcliente') or data.get('cliente')
+        if cliente and getattr(cliente, 'empresa_id', None) and cliente.empresa_id != empresa_id:
+            raise ValidationError({'cliente': 'O cliente informado pertence a outra empresa.'})
+        fornecedor = data.get('idfornecedor') or data.get('fornecedor')
+        if fornecedor and getattr(fornecedor, 'empresa_id', None) and fornecedor.empresa_id != empresa_id:
+            raise ValidationError({'fornecedor': 'O fornecedor informado pertence a outra empresa.'})
+        forma = data.get('forma')
+        if forma and getattr(forma, 'empresa_id', None) and forma.empresa_id != empresa_id:
+            raise ValidationError({'forma': 'A forma de pagamento pertence a outra empresa.'})
+        caixa = data.get('caixa')
+        if caixa and getattr(caixa, 'empresa_id', None) and caixa.empresa_id != empresa_id:
+            raise ValidationError({'caixa': 'O caixa informado pertence a outra empresa.'})
+        conta = data.get('conta_bancaria')
+        if conta and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa_id:
+            raise ValidationError({'conta_bancaria': 'A conta bancária pertence a outra empresa.'})
+        vale = data.get('vale')
+        if vale and getattr(vale, 'empresa_id', None) and vale.empresa_id != empresa_id:
+            raise ValidationError({'vale': 'O vale-troca pertence a outra empresa.'})
+        for campo in ('Idpagar', 'Idreceber'):
+            titulo = data.get(campo)
+            if titulo and getattr(titulo, 'empresa_id', None) and titulo.empresa_id != empresa_id:
+                raise ValidationError({campo: 'O título pertence a outra empresa.'})
+        for campo in ('Idpagaritem', 'Idreceberitem'):
+            item = data.get(campo)
+            titulo = getattr(item, 'Idpagar', None) or getattr(item, 'Idreceber', None)
+            if titulo and getattr(titulo, 'empresa_id', None) and titulo.empresa_id != empresa_id:
+                raise ValidationError({campo: 'A parcela pertence a outra empresa.'})
+        for campo in ('venda_origem', 'venda_uso'):
+            venda = data.get(campo)
+            if venda and getattr(venda, 'empresa_id', None) and venda.empresa_id != empresa_id:
+                raise ValidationError({campo: 'A venda pertence a outra empresa.'})
+
 
 class FormaPagamentoViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
@@ -89,8 +173,11 @@ class FormaPagamentoParcelaViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         forma = self.request.query_params.get('forma')
         codigo = self.request.query_params.get('codigo')
+        if empresa_id:
+            qs = qs.filter(forma__empresa_id=empresa_id)
         if forma:
             qs = qs.filter(forma_id=forma)
         if codigo:
@@ -106,9 +193,14 @@ class CashbackConfigViewSet(BaseViewSet):
 
     @action(detail=False, methods=['get'], url_path='ativa')
     def ativa(self, request):
-        config = CashbackConfig.regra_ativa() or CashbackConfig.objects.order_by('Idcashbackconfig').first()
+        empresa_id = self._empresa_id_usuario()
+        empresa = None
+        if empresa_id:
+            from cadastros.models import Empresa
+            empresa = Empresa.objects.filter(pk=empresa_id).first()
+        config = CashbackConfig.regra_ativa(empresa) or self.get_queryset().order_by('Idcashbackconfig').first()
         if not config:
-            config = CashbackConfig.objects.create(nome='Regra padrão', ativo=False, percentual=0)
+            config = CashbackConfig.objects.create(empresa=empresa, nome='Regra padrão', ativo=False, percentual=0)
         return Response(self.get_serializer(config).data)
 
 
@@ -119,7 +211,10 @@ class CashbackMovimentoViewSet(BaseViewSet):
     serializer_class = CashbackMovimentoSerializer
 
     def perform_create(self, serializer):
-        serializer.save(criado_por=self.request.user if self.request.user.is_authenticated else None)
+        kwargs = {'criado_por': self.request.user if self.request.user.is_authenticated else None}
+        if getattr(self.request.user, 'empresa_id', None):
+            kwargs['empresa'] = self.request.user.empresa
+        serializer.save(**kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -145,7 +240,8 @@ class CashbackMovimentoViewSet(BaseViewSet):
         cliente = request.query_params.get('cliente')
         if not cliente:
             return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'cliente': int(cliente), 'saldo': str(saldo_cashback_cliente(cliente))})
+        empresa_id = self._empresa_id_usuario()
+        return Response({'cliente': int(cliente), 'saldo': str(saldo_cashback_cliente(cliente, empresa=empresa_id))})
 
 
 class ValeTrocaViewSet(BaseViewSet):
@@ -175,7 +271,8 @@ class ValeTrocaViewSet(BaseViewSet):
         cliente = request.query_params.get('cliente')
         if not cliente:
             return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'cliente': int(cliente), 'saldo': str(saldo_vale_troca_cliente(cliente))})
+        empresa_id = self._empresa_id_usuario()
+        return Response({'cliente': int(cliente), 'saldo': str(saldo_vale_troca_cliente(cliente, empresa=empresa_id))})
 
     @action(detail=False, methods=['get'], url_path='disponiveis')
     def disponiveis(self, request):
@@ -200,6 +297,9 @@ class ValeTrocaMovimentoViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(vale__empresa_id=empresa_id)
         vale = self.request.query_params.get('vale')
         cliente = self.request.query_params.get('cliente')
         if vale:
@@ -319,6 +419,9 @@ class PagarItemViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idpagar__empresa_id=empresa_id)
         pagar = self.request.query_params.get('pagar')
         status_q = self.request.query_params.get('status')
         if pagar:
@@ -389,6 +492,9 @@ class PagarRateioViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idpagaritem__Idpagar__empresa_id=empresa_id)
         parcela = self.request.query_params.get('pagar_item')
         if parcela:
             qs = qs.filter(Idpagaritem_id=parcela)
@@ -424,6 +530,9 @@ class ReceberItemViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idreceber__empresa_id=empresa_id)
         receber = self.request.query_params.get('receber')
         status_q = self.request.query_params.get('status')
         if receber:
@@ -494,6 +603,9 @@ class ReceberRateioViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idreceberitem__Idreceber__empresa_id=empresa_id)
         parcela = self.request.query_params.get('receber_item')
         if parcela:
             qs = qs.filter(Idreceberitem_id=parcela)

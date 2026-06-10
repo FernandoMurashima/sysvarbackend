@@ -1,7 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from financeiro.models import CashbackConfig
 from financeiro.models import Receber
 from fiscal.models import VendaPdv
 from fiscal.views.venda_pdv import VendaPdvViewSet
@@ -20,11 +19,6 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         documento = (options.get("documento") or "").strip()
-        config = CashbackConfig.regra_ativa()
-        if not config:
-            self.stdout.write(self.style.WARNING(
-                "Não existe regra de cashback ativa. O financeiro será reprocessado, mas cashback não será gerado."
-            ))
         qs = VendaPdv.objects.filter(status=VendaPdv.Status.FINALIZADA).prefetch_related("pagamentos")
         if documento:
             qs = qs.filter(documento=documento)
@@ -34,7 +28,7 @@ class Command(BaseCommand):
         cashback = 0
 
         for venda in qs.order_by("id"):
-            if not Receber.objects.filter(pedido_venda=venda.pk).exists():
+            if not Receber.objects.filter(empresa=venda.empresa, pedido_venda=venda.pk).exists():
                 view._registrar_financeiro(venda)
                 financeiro += 1
             antes_creditos = venda.cashback_creditos.count()

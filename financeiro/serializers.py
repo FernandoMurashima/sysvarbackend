@@ -43,7 +43,7 @@ class CashbackConfigSerializer(serializers.ModelSerializer):
     def save(self, **kwargs):
         instance = super().save(**kwargs)
         if instance.ativo:
-            CashbackConfig.objects.exclude(pk=instance.pk).update(ativo=False)
+            CashbackConfig.objects.filter(empresa=instance.empresa).exclude(pk=instance.pk).update(ativo=False)
         return instance
 
 

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
 from .validators import (
     cpf_validator,
     cnpj_validator,
@@ -18,13 +18,53 @@ def _norm_digits(v: Optional[str]) -> Optional[str]:
     d = only_digits(v or "")
     return d or None
 
+class EmpresaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Empresa
+        fields = "__all__"
+
+    def validate_documento(self, value):
+        if not value:
+            return value
+        cnpj_validator(value)
+        return _norm_digits(value)
+
+
 # ---------------------------
 # Loja
 # ---------------------------
 class LojaSerializer(serializers.ModelSerializer):
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+
     class Meta:
         model = Loja
-        fields = "__all__"
+        fields = (
+            "id",
+            "empresa",
+            "empresa_nome",
+            "nome_loja",
+            "apelido_loja",
+            "cnpj",
+            "logradouro",
+            "endereco",
+            "numero",
+            "complemento",
+            "cep",
+            "bairro",
+            "cidade",
+            "estado",
+            "telefone1",
+            "telefone2",
+            "email",
+            "EstoqueNegativo",
+            "Rede",
+            "DataAbertura",
+            "ContaContabil",
+            "DataEnceramento",
+            "Matriz",
+            "ativo",
+            "data_cadastro",
+        )
 
     # Validações field-level com normalização
     def validate_cnpj(self, value):
@@ -146,6 +186,7 @@ class FuncionariosSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         categoria = (attrs.get("categoria", getattr(self.instance, "categoria", "")) or "").strip().lower()
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         loja = attrs.get("idloja", getattr(self.instance, "idloja", None))
         categorias_exigem_loja = {
             "vendedor",
@@ -162,6 +203,12 @@ class FuncionariosSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "idloja": "Vincule este funcionário a uma filial ou matriz."
             })
+        if loja and empresa and loja.empresa_id and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({
+                "idloja": "A loja selecionada pertence a outra empresa."
+            })
+        if loja and not empresa:
+            attrs["empresa"] = loja.empresa
         return attrs
 
     def validate_cpf(self, value):
