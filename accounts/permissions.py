@@ -11,7 +11,7 @@ def user_type(user) -> str:
 def has_role(user, allowed_roles) -> bool:
     if not user or not user.is_authenticated:
         return False
-    if user.is_superuser or user.is_staff:
+    if user.is_superuser:
         return True
     current = user_type(user)
     return current in set(allowed_roles or [])
@@ -23,7 +23,7 @@ class HasModuleRole(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if request.user.is_superuser or request.user.is_staff:
+        if request.user.is_superuser:
             return True
 
         action_roles = getattr(view, "action_roles", {}) or {}

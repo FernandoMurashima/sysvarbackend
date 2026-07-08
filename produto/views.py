@@ -60,7 +60,7 @@ class BaseViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
         empresa = self.request.query_params.get("empresa")
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             if empresa and self._model_has_field(qs.model, "empresa"):
                 return qs.filter(empresa_id=empresa)
             return qs
@@ -72,9 +72,20 @@ class BaseViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        self._save_with_empresa_scope(serializer)
+
+    def perform_update(self, serializer):
+        self._save_with_empresa_scope(serializer)
+
+    def _save_with_empresa_scope(self, serializer):
         model = serializer.Meta.model
         user = self.request.user
-        if self._model_has_field(model, "empresa") and not getattr(user, "empresa_id", None) and not (user.is_superuser or user.is_staff):
+        if self._model_has_field(model, "empresa") and user.is_superuser:
+            if not serializer.validated_data.get("empresa"):
+                raise ValidationError({"empresa": "Informe a empresa do cadastro."})
+            serializer.save()
+            return
+        if self._model_has_field(model, "empresa") and not getattr(user, "empresa_id", None) and not user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if self._model_has_field(model, "empresa") and getattr(user, "empresa_id", None):
             empresa = serializer.validated_data.get("empresa")
@@ -86,7 +97,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 
     def _empresa_id_usuario(self):
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return self.request.query_params.get("empresa")
         return getattr(user, "empresa_id", None)
 
@@ -391,7 +402,7 @@ class ProdutoDetalheViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(produto__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         pid = self.request.query_params.get('produto')
         cor = self.request.query_params.get('idcor')
@@ -478,7 +489,7 @@ class TabelaprecoProdutoViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(Q(tabela__empresa_id=empresa_id) | Q(produto__empresa_id=empresa_id))
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         return qs
 
@@ -581,7 +592,7 @@ class PackItemViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(pack__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         pack_id = self.request.query_params.get('pack')
         if pack_id:
@@ -601,7 +612,7 @@ class EstoqueViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(Idloja__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         loja = self.request.query_params.get('loja')
         referencia = self.request.query_params.get('referencia')
@@ -639,7 +650,7 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(Idloja__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         loja = self.request.query_params.get('loja')
         referencia = self.request.query_params.get('referencia')
@@ -663,7 +674,7 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         ean = serializer.validated_data['CodigodeBarra']
         loja = serializer.validated_data['Idloja']
         empresa_id = getattr(self.request.user, "empresa_id", None)
-        if not empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+        if not empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if empresa_id and loja.empresa_id != empresa_id:
             raise ValidationError({"Idloja": "A loja informada pertence a outra empresa."})
@@ -705,7 +716,7 @@ class InventarioEstoqueViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(Idloja__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         loja = self.request.query_params.get('loja')
         status_q = self.request.query_params.get('status')
@@ -779,7 +790,7 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(inventario__Idloja__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         inventario = self.request.query_params.get('inventario')
         if inventario:

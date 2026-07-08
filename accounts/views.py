@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 from rest_framework import viewsets, permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -17,15 +18,25 @@ from .serializers import TIPOS_EXIGEM_LOJA, UserSerializer
 
 User = get_user_model()
 
+
+class CanManageCompanyUsers(permissions.BasePermission):
+    message = "Usuário sem permissão para administrar usuários."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        return user.is_superuser or getattr(user, "type", None) == "Admin"
+
 # ---- Health (público) ----
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
 def health(request):
     return JsonResponse({"status": "ok", "app": "sysvar2"})
 
-# ---- Register (público) ----
+# ---- Register legado (bloqueado para uso público) ----
 class RegisterView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [CanManageCompanyUsers]
 
     def post(self, request):
         data = request.data or {}
@@ -59,6 +70,7 @@ class RegisterView(APIView):
 
         loja_key = data.get("Idloja") or data.get("loja") or data.get("loja_id")
         empresa_key = data.get("Idempresa") or data.get("empresa") or data.get("empresa_id")
+        lojas_keys = data.get("Idlojas") or data.get("lojas") or []
         if user_type in TIPOS_EXIGEM_LOJA and not loja_key:
             return Response({"Idloja": ["Vincule este usuário a uma filial ou matriz."]}, status=400)
 
@@ -85,6 +97,7 @@ class RegisterView(APIView):
                 user.loja = loja
                 user.empresa = loja.empresa
                 user.save(update_fields=["loja", "empresa"])
+                user.lojas.add(loja)
             except Exception:
                 pass
         elif empresa_key:
@@ -92,6 +105,17 @@ class RegisterView(APIView):
                 from cadastros.models import Empresa
                 user.empresa = Empresa.objects.get(pk=int(empresa_key))
                 user.save(update_fields=["empresa"])
+            except Exception:
+                pass
+        if isinstance(lojas_keys, list) and lojas_keys:
+            try:
+                from cadastros.models import Loja
+                qs = Loja.objects.filter(pk__in=[int(pk) for pk in lojas_keys])
+                if user.empresa_id:
+                    qs = qs.filter(empresa_id=user.empresa_id)
+                user.lojas.set(qs)
+                if user.loja_id and not user.lojas.filter(pk=user.loja_id).exists():
+                    user.lojas.add(user.loja)
             except Exception:
                 pass
 
@@ -126,6 +150,7 @@ class RegisterView(APIView):
                     "empresa_nome": getattr(getattr(user, "empresa", None), "nome", None),
                     "Idloja": getattr(user, "loja_id", None),
                     "loja_nome": getattr(getattr(user, "loja", None), "nome_loja", None),
+                    "Idlojas": list(user.lojas.values_list("id", flat=True)),
                 },
                 "token": token.key,
             },
@@ -187,12 +212,28 @@ class UserViewSet(viewsets.ModelViewSet):
     /api/accounts/users/ -> CRUD (somente staff)
     /api/accounts/users/me/ -> dados do usuário logado (qualquer autenticado)
     """
-    queryset = User.objects.all().order_by("id")
+    queryset = User.objects.select_related("empresa", "loja").prefetch_related("lojas").all().order_by("id")
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanManageCompanyUsers]
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ["username", "email", "first_name", "last_name"]
     ordering_fields = ["id", "username", "date_joined"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_superuser:
+            return qs
+        empresa_id = getattr(user, "empresa_id", None)
+        if empresa_id:
+            return qs.filter(empresa_id=empresa_id)
+        return qs.none()
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if not user.is_superuser and instance.empresa_id != getattr(user, "empresa_id", None):
+            raise PermissionDenied("Você só pode excluir usuários da sua empresa.")
+        instance.delete()
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):

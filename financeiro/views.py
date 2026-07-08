@@ -4,7 +4,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django.utils import timezone
 from django.db import models, transaction
+from decimal import Decimal, InvalidOperation
 from accounts.permissions import HasModuleRole
+from cadastros.models import Nat_Lancamento
 
 try:
     from auditoria.models import AuditLog
@@ -12,20 +14,27 @@ except Exception:
     AuditLog = None
 
 from .models import (
-    Caixa, ContaBancaria, MovimentacaoFinanceira,
+    Caixa, ContaBancaria, MovimentacaoFinanceira, LancamentoContabil,
     CashbackConfig, CashbackMovimento, saldo_cashback_cliente,
     ValeTroca, ValeTrocaMovimento, saldo_vale_troca_cliente,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
+    AntecipacaoRecebivel, AntecipacaoRecebivelItem,
     FormaPagamento, FormaPagamentoParcela
 )
 from .serializers import (
     CaixaSerializer, ContaBancariaSerializer, MovimentacaoFinanceiraSerializer,
+    LancamentoContabilSerializer,
     CashbackConfigSerializer, CashbackMovimentoSerializer,
     ValeTrocaSerializer, ValeTrocaMovimentoSerializer,
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
+    AntecipacaoRecebivelSerializer,
     FormaPagamentoSerializer, FormaPagamentoParcelaSerializer
+)
+from .services import (
+    estornar_lancamento_contabil_movimentacao,
+    gerar_lancamento_contabil_movimentacao,
 )
 
 
@@ -58,6 +67,59 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "
         pass
 
 
+def _natureza_transferencia(empresa):
+    natureza = (
+        Nat_Lancamento.objects
+        .filter(empresa=empresa, natureza_operacao='TRANSFERENCIA', ativo=True)
+        .order_by('codigo')
+        .first()
+    )
+    if natureza:
+        return natureza
+    return Nat_Lancamento.objects.create(
+        empresa=empresa,
+        codigo='9.01',
+        categoria_principal='Transferências',
+        subcategoria='Caixa e bancos',
+        descricao='Transferência entre caixas e bancos',
+        tipo='TRANSFERENCIA',
+        status='ATIVO',
+        tipo_natureza='NEUTRO',
+        natureza_operacao='TRANSFERENCIA',
+        categoria_gerencial='Transferências',
+        movimenta_financeiro=True,
+        entra_dre=False,
+        ativo=True,
+    )
+
+
+def _natureza_taxa_antecipacao(empresa):
+    natureza = (
+        Nat_Lancamento.objects
+        .filter(empresa=empresa, natureza_operacao='DESPESA', ativo=True)
+        .filter(models.Q(descricao__icontains='antecip') | models.Q(descricao__icontains='financeira'))
+        .order_by('codigo')
+        .first()
+    )
+    if natureza:
+        return natureza
+    return Nat_Lancamento.objects.create(
+        empresa=empresa,
+        codigo='3.90',
+        categoria_principal='Despesas financeiras',
+        subcategoria='Taxas de cartão',
+        descricao='Taxa de antecipação de recebíveis',
+        tipo='DESPESA',
+        status='ATIVO',
+        tipo_natureza='DEBITO',
+        natureza_operacao='DESPESA',
+        categoria_gerencial='Financeiro',
+        movimenta_financeiro=True,
+        entra_dre=True,
+        ativo=True,
+    )
+
+
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
     read_roles = ["Admin", "Diretor", "Gerente"]
@@ -68,7 +130,7 @@ class BaseViewSet(viewsets.ModelViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id and self._model_has_field(qs.model, 'empresa'):
             return qs.filter(empresa_id=empresa_id)
-        if not (self.request.user.is_superuser or self.request.user.is_staff) and self._model_has_field(qs.model, 'empresa'):
+        if not self.request.user.is_superuser and self._model_has_field(qs.model, 'empresa'):
             return qs.none()
         return qs
 
@@ -76,7 +138,13 @@ class BaseViewSet(viewsets.ModelViewSet):
         model = serializer.Meta.model
         user = self.request.user
         empresa_id = getattr(user, 'empresa_id', None)
-        if not empresa_id and not (user.is_superuser or user.is_staff):
+        if self._model_has_field(model, 'empresa') and user.is_superuser:
+            if not serializer.validated_data.get('empresa'):
+                raise ValidationError({'empresa': 'Informe a empresa do cadastro.'})
+            self._validar_vinculos_empresa(serializer.validated_data, serializer.validated_data['empresa'].id)
+            serializer.save()
+            return
+        if not empresa_id and not user.is_superuser:
             raise ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
         if empresa_id:
             self._validar_vinculos_empresa(serializer.validated_data, empresa_id)
@@ -90,7 +158,15 @@ class BaseViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         empresa_id = getattr(self.request.user, 'empresa_id', None)
-        if not empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+        if self.request.user.is_superuser:
+            empresa = serializer.validated_data.get('empresa', getattr(serializer.instance, 'empresa', None))
+            if not empresa and self._model_has_field(serializer.Meta.model, 'empresa'):
+                raise ValidationError({'empresa': 'Informe a empresa do cadastro.'})
+            if empresa:
+                self._validar_vinculos_empresa(serializer.validated_data, empresa.id)
+            serializer.save()
+            return
+        if not empresa_id and not self.request.user.is_superuser:
             raise ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
         if empresa_id:
             self._validar_vinculos_empresa(serializer.validated_data, empresa_id)
@@ -98,7 +174,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 
     def _empresa_id_usuario(self):
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return self.request.query_params.get('empresa')
         return getattr(user, 'empresa_id', None)
 
@@ -126,9 +202,13 @@ class BaseViewSet(viewsets.ModelViewSet):
         caixa = data.get('caixa')
         if caixa and getattr(caixa, 'empresa_id', None) and caixa.empresa_id != empresa_id:
             raise ValidationError({'caixa': 'O caixa informado pertence a outra empresa.'})
-        conta = data.get('conta_bancaria')
-        if conta and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa_id:
-            raise ValidationError({'conta_bancaria': 'A conta bancária pertence a outra empresa.'})
+        for campo in ('conta_bancaria', 'conta_liquidacao'):
+            conta = data.get(campo)
+            if conta and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa_id:
+                raise ValidationError({campo: 'A conta bancária pertence a outra empresa.'})
+        natureza = data.get('Idnatureza')
+        if natureza and getattr(natureza, 'empresa_id', None) and natureza.empresa_id != empresa_id:
+            raise ValidationError({'Idnatureza': 'A natureza informada pertence a outra empresa.'})
         vale = data.get('vale')
         if vale and getattr(vale, 'empresa_id', None) and vale.empresa_id != empresa_id:
             raise ValidationError({'vale': 'O vale-troca pertence a outra empresa.'})
@@ -328,6 +408,111 @@ class CaixaViewSet(BaseViewSet):
             qs = qs.filter(tipo_caixa=tipo_caixa)
         return qs
 
+    @action(detail=False, methods=['post'], url_path='transferir')
+    def transferir(self, request):
+        origem_id = request.data.get('caixa_origem')
+        destino_id = request.data.get('caixa_destino')
+        data_movimento = request.data.get('data_movimento') or timezone.localdate().isoformat()
+        documento_informado = (request.data.get('documento') or '').strip()
+        observacao = (request.data.get('observacao') or '').strip()
+        try:
+            valor = Decimal(str(request.data.get('valor')))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'detail': 'Informe valor numérico.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if valor <= 0:
+            return Response({'detail': 'Informe valor maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not origem_id or not destino_id:
+            return Response({'detail': 'Informe caixa de origem e destino.'}, status=status.HTTP_400_BAD_REQUEST)
+        if str(origem_id) == str(destino_id):
+            return Response({'detail': 'Caixa de origem e destino devem ser diferentes.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        empresa_id = self._empresa_id_usuario()
+        with transaction.atomic():
+            caixas = (
+                Caixa.objects
+                .select_for_update()
+                .select_related('idloja', 'empresa')
+                .filter(pk__in=[origem_id, destino_id], ativo=True)
+            )
+            if empresa_id:
+                caixas = caixas.filter(empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                caixas = caixas.none()
+
+            caixas_por_id = {str(caixa.pk): caixa for caixa in caixas}
+            origem = caixas_por_id.get(str(origem_id))
+            destino = caixas_por_id.get(str(destino_id))
+            if not origem or not destino:
+                return Response({'detail': 'Caixa de origem ou destino não encontrado/ativo para a empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+            if origem.empresa_id != destino.empresa_id:
+                return Response({'detail': 'Transferência entre empresas diferentes não é permitida.'}, status=status.HTTP_400_BAD_REQUEST)
+            if Decimal(origem.saldo_atual or 0) < valor:
+                return Response({'detail': 'Saldo insuficiente no caixa de origem.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            agora = timezone.localtime()
+            documento = (documento_informado[:50] or f"TRANSF-{agora:%Y%m%d%H%M%S}-{request.user.pk or '0'}")
+            loja_saida = origem.idloja or destino.idloja
+            loja_entrada = destino.idloja or origem.idloja
+            if not loja_saida or not loja_entrada:
+                return Response({'detail': 'A transferência precisa ter ao menos uma loja vinculada nos caixas.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            origem.saldo_atual = Decimal(origem.saldo_atual or 0) - valor
+            destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
+            origem.save(update_fields=['saldo_atual'])
+            destino.save(update_fields=['saldo_atual'])
+
+            hist_saida = f"Transferência para {destino.codigo} - {destino.descricao}"
+            hist_entrada = f"Transferência de {origem.codigo} - {origem.descricao}"
+            if observacao:
+                hist_saida = f"{hist_saida} | {observacao}"
+                hist_entrada = f"{hist_entrada} | {observacao}"
+            natureza = _natureza_transferencia(origem.empresa)
+
+            mov_saida = MovimentacaoFinanceira.objects.create(
+                empresa=origem.empresa,
+                idloja=loja_saida,
+                data_movimento=data_movimento,
+                tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_TRANSFERENCIA,
+                valor=valor,
+                historico=hist_saida[:255],
+                documento=documento,
+                Idnatureza=natureza,
+                caixa=origem,
+            )
+            mov_entrada = MovimentacaoFinanceira.objects.create(
+                empresa=destino.empresa,
+                idloja=loja_entrada,
+                data_movimento=data_movimento,
+                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_TRANSFERENCIA,
+                valor=valor,
+                historico=hist_entrada[:255],
+                documento=documento,
+                Idnatureza=natureza,
+                caixa=destino,
+            )
+            gerar_lancamento_contabil_movimentacao(mov_saida)
+            gerar_lancamento_contabil_movimentacao(mov_entrada)
+
+        _audit('caixa', origem.pk, {
+            'documento': documento,
+            'origem': origem.pk,
+            'destino': destino.pk,
+            'valor': str(valor),
+            'movimentacoes': [mov_saida.pk, mov_entrada.pk],
+        }, request, action='transferir')
+        return Response({
+            'documento': documento,
+            'saida': MovimentacaoFinanceiraSerializer(mov_saida).data,
+            'entrada': MovimentacaoFinanceiraSerializer(mov_entrada).data,
+            'caixa_origem': CaixaSerializer(origem).data,
+            'caixa_destino': CaixaSerializer(destino).data,
+        }, status=status.HTTP_201_CREATED)
+
 
 class ContaBancariaViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
@@ -345,6 +530,118 @@ class ContaBancariaViewSet(BaseViewSet):
             qs = qs.filter(ativo=ativo in ('true', '1'))
         return qs
 
+    @action(detail=False, methods=['post'], url_path='transferir')
+    def transferir(self, request):
+        origem_tipo = (request.data.get('origem_tipo') or '').upper()
+        destino_tipo = (request.data.get('destino_tipo') or '').upper()
+        origem_id = request.data.get('origem_id')
+        destino_id = request.data.get('destino_id')
+        data_movimento = request.data.get('data_movimento') or timezone.localdate().isoformat()
+        documento_informado = (request.data.get('documento') or '').strip()
+        observacao = (request.data.get('observacao') or '').strip()
+        try:
+            valor = Decimal(str(request.data.get('valor')))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'detail': 'Informe valor numérico.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if valor <= 0:
+            return Response({'detail': 'Informe valor maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+        if origem_tipo not in ('CAIXA', 'CONTA') or destino_tipo not in ('CAIXA', 'CONTA'):
+            return Response({'detail': 'Informe origem e destino válidos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not origem_id or not destino_id:
+            return Response({'detail': 'Informe origem e destino.'}, status=status.HTTP_400_BAD_REQUEST)
+        if origem_tipo == destino_tipo and str(origem_id) == str(destino_id):
+            return Response({'detail': 'Origem e destino devem ser diferentes.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        empresa_id = self._empresa_id_usuario()
+        with transaction.atomic():
+            origem = self._buscar_destino_transferencia(origem_tipo, origem_id, empresa_id)
+            destino = self._buscar_destino_transferencia(destino_tipo, destino_id, empresa_id)
+            if not origem or not destino:
+                return Response({'detail': 'Origem ou destino não encontrado/ativo para a empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+            if origem.empresa_id != destino.empresa_id:
+                return Response({'detail': 'Transferência entre empresas diferentes não é permitida.'}, status=status.HTTP_400_BAD_REQUEST)
+            if Decimal(origem.saldo_atual or 0) < valor:
+                return Response({'detail': 'Saldo insuficiente na origem.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            agora = timezone.localtime()
+            documento = (documento_informado[:50] or f"TRANSF-{agora:%Y%m%d%H%M%S}-{request.user.pk or '0'}")
+            origem.saldo_atual = Decimal(origem.saldo_atual or 0) - valor
+            destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
+            origem.save(update_fields=['saldo_atual'])
+            destino.save(update_fields=['saldo_atual'])
+
+            origem_nome = self._destino_label(origem_tipo, origem)
+            destino_nome = self._destino_label(destino_tipo, destino)
+            loja_saida = origem.idloja or destino.idloja
+            loja_entrada = destino.idloja or origem.idloja
+            hist_saida = f"Transferência para {destino_nome}"
+            hist_entrada = f"Transferência de {origem_nome}"
+            if observacao:
+                hist_saida = f"{hist_saida} | {observacao}"
+                hist_entrada = f"{hist_entrada} | {observacao}"
+            natureza = _natureza_transferencia(origem.empresa)
+
+            mov_saida = MovimentacaoFinanceira.objects.create(
+                empresa=origem.empresa,
+                idloja=loja_saida,
+                data_movimento=data_movimento,
+                tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_TRANSFERENCIA,
+                valor=valor,
+                historico=hist_saida[:255],
+                documento=documento,
+                Idnatureza=natureza,
+                caixa=origem if origem_tipo == 'CAIXA' else None,
+                conta_bancaria=origem if origem_tipo == 'CONTA' else None,
+            )
+            mov_entrada = MovimentacaoFinanceira.objects.create(
+                empresa=destino.empresa,
+                idloja=loja_entrada,
+                data_movimento=data_movimento,
+                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_TRANSFERENCIA,
+                valor=valor,
+                historico=hist_entrada[:255],
+                documento=documento,
+                Idnatureza=natureza,
+                caixa=destino if destino_tipo == 'CAIXA' else None,
+                conta_bancaria=destino if destino_tipo == 'CONTA' else None,
+            )
+            gerar_lancamento_contabil_movimentacao(mov_saida)
+            gerar_lancamento_contabil_movimentacao(mov_entrada)
+
+        _audit('contabancaria', destino.pk if destino_tipo == 'CONTA' else origem.pk, {
+            'documento': documento,
+            'origem_tipo': origem_tipo,
+            'origem_id': origem.pk,
+            'destino_tipo': destino_tipo,
+            'destino_id': destino.pk,
+            'valor': str(valor),
+            'movimentacoes': [mov_saida.pk, mov_entrada.pk],
+        }, request, action='transferir')
+        return Response({
+            'documento': documento,
+            'saida': MovimentacaoFinanceiraSerializer(mov_saida).data,
+            'entrada': MovimentacaoFinanceiraSerializer(mov_entrada).data,
+        }, status=status.HTTP_201_CREATED)
+
+    def _buscar_destino_transferencia(self, tipo, pk, empresa_id):
+        model = Caixa if tipo == 'CAIXA' else ContaBancaria
+        qs = model.objects.select_for_update().select_related('idloja', 'empresa').filter(pk=pk, ativo=True)
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            qs = qs.none()
+        return qs.first()
+
+    def _destino_label(self, tipo, obj):
+        if tipo == 'CAIXA':
+            return f"{obj.codigo} - {obj.descricao}"
+        return f"{obj.descricao} - {obj.banco} Ag {obj.agencia} Cc {obj.conta}"
+
 
 class MovimentacaoFinanceiraViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "AssistenteReceber", "AssistentePagar"]
@@ -361,6 +658,8 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
         status_q = self.request.query_params.get('status')
         caixa = self.request.query_params.get('caixa')
         conta = self.request.query_params.get('conta_bancaria')
+        forma_pagamento = self.request.query_params.get('forma_pagamento')
+        data_movimento = self.request.query_params.get('data_movimento')
         data_ini = self.request.query_params.get('data_ini')
         data_fim = self.request.query_params.get('data_fim')
         if loja:
@@ -373,11 +672,315 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
             qs = qs.filter(caixa_id=caixa)
         if conta:
             qs = qs.filter(conta_bancaria_id=conta)
+        if forma_pagamento:
+            qs = qs.filter(FormaPagamento=forma_pagamento)
+        if data_movimento:
+            qs = qs.filter(data_movimento=data_movimento)
         if data_ini:
             qs = qs.filter(data_movimento__gte=data_ini)
         if data_fim:
             qs = qs.filter(data_movimento__lte=data_fim)
         return qs
+
+    def _valor_consulta_natureza(self, mov):
+        valor = Decimal(mov.valor or 0)
+        operacao = ((mov.Idnatureza.natureza_operacao if mov.Idnatureza_id else '') or '').upper()
+        receita = Decimal('0.00')
+        despesa = Decimal('0.00')
+        transferencia = Decimal('0.00')
+
+        if operacao == 'TRANSFERENCIA':
+            if mov.tipo == MovimentacaoFinanceira.TIPO_SAIDA:
+                transferencia = valor
+        elif mov.tipo == MovimentacaoFinanceira.TIPO_ENTRADA:
+            receita = valor
+        elif mov.tipo == MovimentacaoFinanceira.TIPO_SAIDA:
+            despesa = valor
+
+        return receita, despesa, transferencia
+
+    def _money(self, value):
+        return str(Decimal(value or 0).quantize(Decimal('0.01')))
+
+    @action(detail=False, methods=['get'], url_path='consulta-naturezas')
+    def consulta_naturezas(self, request):
+        qs = self.get_queryset().select_related('Idnatureza', 'idloja').filter(Idnatureza__isnull=False)
+
+        natureza = request.query_params.get('natureza')
+        operacao = (request.query_params.get('operacao') or '').upper()
+        status_q = (request.query_params.get('status') or '').upper()
+
+        if natureza:
+            qs = qs.filter(Idnatureza_id=natureza)
+        if operacao:
+            qs = qs.filter(Idnatureza__natureza_operacao=operacao)
+        if status_q and status_q != 'TODOS':
+            qs = qs.filter(status=status_q)
+        elif not status_q:
+            qs = qs.filter(status=MovimentacaoFinanceira.STATUS_EFETIVA)
+
+        totais = {
+            'receitas': Decimal('0.00'),
+            'despesas': Decimal('0.00'),
+            'transferencias': Decimal('0.00'),
+            'resultado': Decimal('0.00'),
+            'movimentacoes': 0,
+        }
+        por_natureza = {}
+        por_categoria = {}
+        detalhes = []
+
+        for mov in qs.order_by('-data_movimento', '-Idmovimentacao'):
+            nat = mov.Idnatureza
+            receita, despesa, transferencia = self._valor_consulta_natureza(mov)
+            resultado = receita - despesa
+            categoria = nat.categoria_gerencial or nat.categoria_principal or 'Sem categoria'
+            nat_key = nat.pk
+            cat_key = categoria
+
+            totais['receitas'] += receita
+            totais['despesas'] += despesa
+            totais['transferencias'] += transferencia
+            totais['resultado'] += resultado
+            totais['movimentacoes'] += 1
+
+            if nat_key not in por_natureza:
+                por_natureza[nat_key] = {
+                    'natureza_id': nat.pk,
+                    'codigo': nat.codigo,
+                    'descricao': nat.descricao,
+                    'operacao': nat.natureza_operacao,
+                    'categoria_gerencial': categoria,
+                    'receitas': Decimal('0.00'),
+                    'despesas': Decimal('0.00'),
+                    'transferencias': Decimal('0.00'),
+                    'resultado': Decimal('0.00'),
+                    'quantidade': 0,
+                }
+            por_natureza[nat_key]['receitas'] += receita
+            por_natureza[nat_key]['despesas'] += despesa
+            por_natureza[nat_key]['transferencias'] += transferencia
+            por_natureza[nat_key]['resultado'] += resultado
+            por_natureza[nat_key]['quantidade'] += 1
+
+            if cat_key not in por_categoria:
+                por_categoria[cat_key] = {
+                    'categoria_gerencial': categoria,
+                    'receitas': Decimal('0.00'),
+                    'despesas': Decimal('0.00'),
+                    'transferencias': Decimal('0.00'),
+                    'resultado': Decimal('0.00'),
+                    'quantidade': 0,
+                }
+            por_categoria[cat_key]['receitas'] += receita
+            por_categoria[cat_key]['despesas'] += despesa
+            por_categoria[cat_key]['transferencias'] += transferencia
+            por_categoria[cat_key]['resultado'] += resultado
+            por_categoria[cat_key]['quantidade'] += 1
+
+            detalhes.append({
+                'id': mov.Idmovimentacao,
+                'data_movimento': mov.data_movimento,
+                'loja': getattr(mov.idloja, 'nome_loja', ''),
+                'documento': mov.documento or '',
+                'historico': mov.historico,
+                'tipo': mov.tipo,
+                'status': mov.status,
+                'origem': mov.origem,
+                'natureza': f'{nat.codigo} - {nat.descricao}',
+                'categoria_gerencial': categoria,
+                'valor': self._money(mov.valor),
+                'receita': self._money(receita),
+                'despesa': self._money(despesa),
+                'transferencia': self._money(transferencia),
+            })
+
+        def serialize_rows(rows):
+            out = []
+            for row in rows:
+                item = row.copy()
+                item['receitas'] = self._money(item['receitas'])
+                item['despesas'] = self._money(item['despesas'])
+                item['transferencias'] = self._money(item['transferencias'])
+                item['resultado'] = self._money(item['resultado'])
+                out.append(item)
+            return out
+
+        return Response({
+            'periodo': {
+                'data_ini': request.query_params.get('data_ini') or '',
+                'data_fim': request.query_params.get('data_fim') or '',
+            },
+            'totais': {
+                'receitas': self._money(totais['receitas']),
+                'despesas': self._money(totais['despesas']),
+                'transferencias': self._money(totais['transferencias']),
+                'resultado': self._money(totais['resultado']),
+                'movimentacoes': totais['movimentacoes'],
+            },
+            'por_natureza': serialize_rows(
+                sorted(por_natureza.values(), key=lambda x: (x['operacao'], x['codigo'] or ''))
+            ),
+            'por_categoria': serialize_rows(
+                sorted(por_categoria.values(), key=lambda x: x['categoria_gerencial'] or '')
+            ),
+            'detalhes': detalhes,
+        })
+
+    def _classificar_linha_dre(self, natureza, mov):
+        operacao = ((natureza.natureza_operacao if natureza else '') or '').upper()
+        texto = ' '.join([
+            getattr(natureza, 'categoria_principal', '') or '',
+            getattr(natureza, 'subcategoria', '') or '',
+            getattr(natureza, 'descricao', '') or '',
+            getattr(natureza, 'categoria_gerencial', '') or '',
+        ]).lower()
+
+        if operacao == 'RECEITA':
+            return 'RECEITA_BRUTA'
+        if operacao == 'DESPESA':
+            if any(palavra in texto for palavra in ('devolu', 'desconto', 'abatimento', 'cancelamento')):
+                return 'DEDUCOES'
+            if any(palavra in texto for palavra in ('cmv', 'custo', 'mercadoria vendida')):
+                return 'CUSTOS'
+            if getattr(mov, 'origem', '') == MovimentacaoFinanceira.ORIGEM_COMISSAO or any(
+                palavra in texto for palavra in ('comiss', 'venda', 'marketing', 'frete')
+            ):
+                return 'DESPESAS_VENDAS'
+            if any(palavra in texto for palavra in ('financeir', 'taxa', 'tarifa', 'juros', 'cartao', 'cartão', 'bancar')):
+                return 'DESPESAS_FINANCEIRAS'
+            if any(palavra in texto for palavra in ('tribut', 'imposto', 'icms', 'pis', 'cofins', 'csll', 'irpj', 'simples')):
+                return 'TRIBUTOS'
+            return 'DESPESAS_ADMINISTRATIVAS'
+        return 'OUTROS'
+
+    @action(detail=False, methods=['get'], url_path='dre')
+    def dre(self, request):
+        qs = (
+            self.get_queryset()
+            .select_related('Idnatureza', 'idloja')
+            .filter(
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                Idnatureza__isnull=False,
+                Idnatureza__entra_dre=True,
+            )
+            .exclude(Idnatureza__natureza_operacao='TRANSFERENCIA')
+            .exclude(origem=MovimentacaoFinanceira.ORIGEM_MANUAL, historico__startswith='Consolidacao master PDV')
+        )
+
+        grupos = {
+            'RECEITA_BRUTA': {'codigo': '1', 'grupo': 'Receita bruta', 'valor': Decimal('0.00'), 'linhas': {}},
+            'DEDUCOES': {'codigo': '2', 'grupo': 'Deduções da receita', 'valor': Decimal('0.00'), 'linhas': {}},
+            'CUSTOS': {'codigo': '3', 'grupo': 'Custos', 'valor': Decimal('0.00'), 'linhas': {}},
+            'DESPESAS_VENDAS': {'codigo': '4', 'grupo': 'Despesas com vendas', 'valor': Decimal('0.00'), 'linhas': {}},
+            'DESPESAS_ADMINISTRATIVAS': {'codigo': '5', 'grupo': 'Despesas administrativas', 'valor': Decimal('0.00'), 'linhas': {}},
+            'DESPESAS_FINANCEIRAS': {'codigo': '6', 'grupo': 'Despesas financeiras', 'valor': Decimal('0.00'), 'linhas': {}},
+            'TRIBUTOS': {'codigo': '7', 'grupo': 'Tributos', 'valor': Decimal('0.00'), 'linhas': {}},
+            'OUTROS': {'codigo': '8', 'grupo': 'Outros resultados', 'valor': Decimal('0.00'), 'linhas': {}},
+        }
+        detalhes = []
+
+        for mov in qs.order_by('-data_movimento', '-Idmovimentacao'):
+            nat = mov.Idnatureza
+            grupo_key = self._classificar_linha_dre(nat, mov)
+            valor = Decimal(mov.valor or 0)
+            if grupo_key == 'RECEITA_BRUTA':
+                sinal = Decimal('-1.00') if mov.tipo == MovimentacaoFinanceira.TIPO_SAIDA else Decimal('1.00')
+            else:
+                sinal = Decimal('1.00') if mov.tipo == MovimentacaoFinanceira.TIPO_ENTRADA else Decimal('-1.00')
+            valor_dre = valor * sinal
+            categoria = nat.categoria_gerencial or nat.categoria_principal or 'Sem categoria'
+            linha_key = nat.pk
+
+            grupo = grupos[grupo_key]
+            grupo['valor'] += valor_dre
+            if linha_key not in grupo['linhas']:
+                grupo['linhas'][linha_key] = {
+                    'natureza_id': nat.pk,
+                    'codigo': nat.codigo,
+                    'descricao': nat.descricao,
+                    'categoria_gerencial': categoria,
+                    'valor': Decimal('0.00'),
+                    'quantidade': 0,
+                }
+            grupo['linhas'][linha_key]['valor'] += valor_dre
+            grupo['linhas'][linha_key]['quantidade'] += 1
+
+            detalhes.append({
+                'id': mov.Idmovimentacao,
+                'data_movimento': mov.data_movimento,
+                'loja': getattr(mov.idloja, 'nome_loja', ''),
+                'documento': mov.documento or '',
+                'historico': mov.historico,
+                'origem': mov.origem,
+                'grupo': grupo['grupo'],
+                'natureza': f'{nat.codigo} - {nat.descricao}',
+                'categoria_gerencial': categoria,
+                'valor': self._money(valor_dre),
+            })
+
+        receita_bruta = grupos['RECEITA_BRUTA']['valor']
+        deducoes = grupos['DEDUCOES']['valor']
+        receita_liquida = receita_bruta + deducoes
+        custos = grupos['CUSTOS']['valor']
+        lucro_bruto = receita_liquida + custos
+        despesas_vendas = grupos['DESPESAS_VENDAS']['valor']
+        despesas_administrativas = grupos['DESPESAS_ADMINISTRATIVAS']['valor']
+        despesas_financeiras = grupos['DESPESAS_FINANCEIRAS']['valor']
+        tributos = grupos['TRIBUTOS']['valor']
+        despesas = despesas_vendas + despesas_administrativas + despesas_financeiras + tributos
+        outros = grupos['OUTROS']['valor']
+        resultado = lucro_bruto + despesas + outros
+
+        def serialize_grupos():
+            saida = []
+            for key in (
+                'RECEITA_BRUTA',
+                'DEDUCOES',
+                'CUSTOS',
+                'DESPESAS_VENDAS',
+                'DESPESAS_ADMINISTRATIVAS',
+                'DESPESAS_FINANCEIRAS',
+                'TRIBUTOS',
+                'OUTROS',
+            ):
+                grupo = grupos[key]
+                linhas = []
+                for linha in sorted(grupo['linhas'].values(), key=lambda x: x['codigo'] or ''):
+                    item = linha.copy()
+                    item['valor'] = self._money(item['valor'])
+                    linhas.append(item)
+                saida.append({
+                    'codigo': grupo['codigo'],
+                    'grupo': grupo['grupo'],
+                    'valor': self._money(grupo['valor']),
+                    'linhas': linhas,
+                })
+            return saida
+
+        return Response({
+            'periodo': {
+                'data_ini': request.query_params.get('data_ini') or '',
+                'data_fim': request.query_params.get('data_fim') or '',
+            },
+            'totais': {
+                'receita_bruta': self._money(receita_bruta),
+                'deducoes': self._money(deducoes),
+                'receita_liquida': self._money(receita_liquida),
+                'custos': self._money(custos),
+                'lucro_bruto': self._money(lucro_bruto),
+                'despesas_vendas': self._money(despesas_vendas),
+                'despesas_administrativas': self._money(despesas_administrativas),
+                'despesas_financeiras': self._money(despesas_financeiras),
+                'tributos': self._money(tributos),
+                'despesas': self._money(despesas),
+                'outros': self._money(outros),
+                'resultado': self._money(resultado),
+                'movimentacoes': len(detalhes),
+            },
+            'grupos': serialize_grupos(),
+            'detalhes': detalhes,
+        })
 
     @action(detail=True, methods=['post'], url_path='cancelar')
     def cancelar(self, request, pk=None):
@@ -386,8 +989,435 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
         if obj.status != MovimentacaoFinanceira.STATUS_CANCELADA:
             obj.status = MovimentacaoFinanceira.STATUS_CANCELADA
             obj.save(update_fields=['status'])
+            estornar_lancamento_contabil_movimentacao(obj, 'Movimentação financeira cancelada.')
             _audit('movimentacaofinanceira', obj.pk, {'status': [before, obj.status]}, request, action='cancelar')
         return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=['post'], url_path='conciliar')
+    def conciliar(self, request, pk=None):
+        data_conciliacao = request.data.get('data_conciliacao') or timezone.localdate().isoformat()
+        try:
+            valor_conciliado = Decimal(str(request.data.get('valor_conciliado', request.data.get('valor', ''))))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'detail': 'Informe valor_conciliado numérico.'}, status=status.HTTP_400_BAD_REQUEST)
+        if valor_conciliado <= 0:
+            return Response({'detail': 'Informe valor_conciliado maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            obj = (
+                MovimentacaoFinanceira.objects
+                .select_for_update()
+                .select_related('caixa', 'conta_bancaria')
+                .get(pk=self.get_object().pk)
+            )
+            if obj.status != MovimentacaoFinanceira.STATUS_PREVISTA:
+                return Response({'detail': 'Apenas movimentações previstas podem ser conciliadas.'}, status=status.HTTP_400_BAD_REQUEST)
+            destino = obj.conta_bancaria or obj.caixa
+            if not destino:
+                return Response({'detail': 'Movimentação sem caixa ou conta bancária vinculada.'}, status=status.HTTP_400_BAD_REQUEST)
+            if obj.tipo == MovimentacaoFinanceira.TIPO_ENTRADA:
+                destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor_conciliado
+            elif obj.tipo == MovimentacaoFinanceira.TIPO_SAIDA:
+                destino.saldo_atual = Decimal(destino.saldo_atual or 0) - valor_conciliado
+            else:
+                return Response({'detail': 'Tipo de movimentação inválido para conciliação.'}, status=status.HTTP_400_BAD_REQUEST)
+            destino.save(update_fields=['saldo_atual'])
+            before = obj.status
+            obj.status = MovimentacaoFinanceira.STATUS_EFETIVA
+            obj.data_conciliacao = data_conciliacao
+            obj.valor_conciliado = valor_conciliado
+            obj.save(update_fields=['status', 'data_conciliacao', 'valor_conciliado'])
+            gerar_lancamento_contabil_movimentacao(obj)
+            if obj.receber_item_id:
+                obj.receber_item.status = ReceberItem.STATUS_BAIXADO
+                obj.receber_item.data_baixa = data_conciliacao
+                obj.receber_item.valor_baixa = valor_conciliado
+                obj.receber_item.save(update_fields=['status', 'data_baixa', 'valor_baixa'])
+
+        _audit('movimentacaofinanceira', obj.pk, {
+            'status': [before, obj.status],
+            'data_conciliacao': data_conciliacao,
+            'valor_conciliado': str(valor_conciliado),
+        }, request, action='conciliar')
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=False, methods=['get'], url_path='pendentes-conciliacao')
+    def pendentes_conciliacao(self, request):
+        data_movimento = request.query_params.get('data_movimento')
+        forma_pagamento = request.query_params.get('forma_pagamento')
+        conta = request.query_params.get('conta_bancaria')
+        if not data_movimento:
+            return Response({'detail': 'Informe a data da conciliação.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not forma_pagamento:
+            return Response({'detail': 'Informe a forma de pagamento.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = (
+            self.get_queryset()
+            .filter(
+                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+                status=MovimentacaoFinanceira.STATUS_PREVISTA,
+                data_movimento=data_movimento,
+                FormaPagamento=forma_pagamento,
+                conta_bancaria__isnull=False,
+            )
+            .order_by('data_movimento', 'documento', 'Idmovimentacao')
+        )
+        if conta:
+            qs = qs.filter(conta_bancaria_id=conta)
+        return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=False, methods=['post'], url_path='conciliar-lote')
+    def conciliar_lote(self, request):
+        ids = request.data.get('ids') or []
+        data_conciliacao = request.data.get('data_conciliacao') or timezone.localdate().isoformat()
+        valores = request.data.get('valores') or {}
+        if not isinstance(ids, list) or not ids:
+            return Response({'detail': 'Selecione ao menos uma movimentação para conciliar.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            ids = [int(item) for item in ids]
+        except (TypeError, ValueError):
+            return Response({'detail': 'Lista de movimentações inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        conciliadas = []
+        with transaction.atomic():
+            qs = (
+                self.get_queryset()
+                .select_for_update()
+                .select_related('caixa', 'conta_bancaria', 'receber_item')
+                .filter(pk__in=ids)
+            )
+            movimentos = {mov.pk: mov for mov in qs}
+            if len(movimentos) != len(set(ids)):
+                return Response({'detail': 'Uma ou mais movimentações não foram encontradas.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            for mov_id in ids:
+                obj = movimentos[mov_id]
+                if obj.status != MovimentacaoFinanceira.STATUS_PREVISTA:
+                    return Response({'detail': f'Movimentação {obj.pk} não está prevista.'}, status=status.HTTP_400_BAD_REQUEST)
+                if obj.tipo != MovimentacaoFinanceira.TIPO_ENTRADA:
+                    return Response({'detail': f'Movimentação {obj.pk} não é uma entrada.'}, status=status.HTTP_400_BAD_REQUEST)
+                destino = obj.conta_bancaria or obj.caixa
+                if not destino:
+                    return Response({'detail': f'Movimentação {obj.pk} sem conta ou caixa vinculado.'}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    valor = Decimal(str(valores.get(str(obj.pk), valores.get(obj.pk, obj.valor))))
+                except (TypeError, ValueError, InvalidOperation):
+                    return Response({'detail': f'Valor conciliado inválido na movimentação {obj.pk}.'}, status=status.HTTP_400_BAD_REQUEST)
+                if valor <= 0:
+                    return Response({'detail': f'Valor conciliado deve ser maior que zero na movimentação {obj.pk}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
+                destino.save(update_fields=['saldo_atual'])
+                before = obj.status
+                obj.status = MovimentacaoFinanceira.STATUS_EFETIVA
+                obj.data_conciliacao = data_conciliacao
+                obj.valor_conciliado = valor
+                obj.save(update_fields=['status', 'data_conciliacao', 'valor_conciliado'])
+                gerar_lancamento_contabil_movimentacao(obj)
+                if obj.receber_item_id:
+                    obj.receber_item.status = ReceberItem.STATUS_BAIXADO
+                    obj.receber_item.data_baixa = data_conciliacao
+                    obj.receber_item.valor_baixa = valor
+                    obj.receber_item.save(update_fields=['status', 'data_baixa', 'valor_baixa'])
+
+                _audit('movimentacaofinanceira', obj.pk, {
+                    'status': [before, obj.status],
+                    'data_conciliacao': data_conciliacao,
+                    'valor_conciliado': str(valor),
+                }, request, action='conciliar_lote')
+                conciliadas.append(obj)
+
+        return Response({
+            'quantidade': len(conciliadas),
+            'total': self._money(sum((Decimal(mov.valor_conciliado or 0) for mov in conciliadas), Decimal('0.00'))),
+            'movimentacoes': self.get_serializer(conciliadas, many=True).data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='desfazer-conciliacao')
+    def desfazer_conciliacao(self, request, pk=None):
+        with transaction.atomic():
+            obj = (
+                MovimentacaoFinanceira.objects
+                .select_for_update()
+                .select_related('caixa', 'conta_bancaria')
+                .get(pk=self.get_object().pk)
+            )
+            conciliacao_antiga_cartao = (
+                obj.status == MovimentacaoFinanceira.STATUS_EFETIVA
+                and obj.origem == MovimentacaoFinanceira.ORIGEM_CARTAO
+                and obj.conta_bancaria_id
+                and not obj.data_conciliacao
+            )
+            if obj.status != MovimentacaoFinanceira.STATUS_EFETIVA or (not obj.data_conciliacao and not conciliacao_antiga_cartao):
+                return Response({'detail': 'Apenas movimentações conciliadas podem ser desfeitas.'}, status=status.HTTP_400_BAD_REQUEST)
+            destino = obj.conta_bancaria or obj.caixa
+            if not destino:
+                return Response({'detail': 'Movimentação sem caixa ou conta bancária vinculada.'}, status=status.HTTP_400_BAD_REQUEST)
+            valor = Decimal(obj.valor_conciliado or obj.valor or 0)
+            if obj.tipo == MovimentacaoFinanceira.TIPO_ENTRADA:
+                destino.saldo_atual = Decimal(destino.saldo_atual or 0) - valor
+            elif obj.tipo == MovimentacaoFinanceira.TIPO_SAIDA:
+                destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
+            else:
+                return Response({'detail': 'Tipo de movimentação inválido para desfazer conciliação.'}, status=status.HTTP_400_BAD_REQUEST)
+            destino.save(update_fields=['saldo_atual'])
+
+            before = {
+                'status': obj.status,
+                'data_conciliacao': str(obj.data_conciliacao),
+                'valor_conciliado': str(obj.valor_conciliado),
+            }
+            obj.status = MovimentacaoFinanceira.STATUS_PREVISTA
+            obj.data_conciliacao = None
+            obj.valor_conciliado = None
+            obj.save(update_fields=['status', 'data_conciliacao', 'valor_conciliado'])
+            estornar_lancamento_contabil_movimentacao(obj, 'Conciliação desfeita.')
+            if obj.receber_item_id:
+                obj.receber_item.status = ReceberItem.STATUS_EFETIVO
+                obj.receber_item.data_baixa = None
+                obj.receber_item.valor_baixa = None
+                obj.receber_item.save(update_fields=['status', 'data_baixa', 'valor_baixa'])
+
+        _audit('movimentacaofinanceira', obj.pk, {
+            'before': before,
+            'after': {'status': obj.status, 'data_conciliacao': None, 'valor_conciliado': None},
+            'valor_estornado': str(valor),
+        }, request, action='desfazer_conciliacao')
+        return Response(self.get_serializer(obj).data)
+
+
+class LancamentoContabilViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor"]
+    queryset = LancamentoContabil.objects.select_related(
+        'empresa', 'idloja', 'movimentacao', 'natureza', 'conta_debito', 'conta_credito'
+    ).all()
+    serializer_class = LancamentoContabilSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        loja = self.request.query_params.get('loja')
+        status_q = self.request.query_params.get('status')
+        origem = self.request.query_params.get('origem')
+        data_ini = self.request.query_params.get('data_ini')
+        data_fim = self.request.query_params.get('data_fim')
+        if loja:
+            qs = qs.filter(idloja_id=loja)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if origem:
+            qs = qs.filter(origem=origem)
+        if data_ini:
+            qs = qs.filter(data_lancamento__gte=data_ini)
+        if data_fim:
+            qs = qs.filter(data_lancamento__lte=data_fim)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='pendentes')
+    def pendentes(self, request):
+        qs = self.get_queryset().filter(status=LancamentoContabil.STATUS_PENDENTE)
+        return Response(self.get_serializer(qs, many=True).data)
+
+
+class AntecipacaoRecebivelViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber"]
+    write_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber"]
+    queryset = AntecipacaoRecebivel.objects.select_related('idloja', 'conta_bancaria').prefetch_related('itens').all()
+    serializer_class = AntecipacaoRecebivelSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        loja = self.request.query_params.get('loja')
+        conta = self.request.query_params.get('conta_bancaria')
+        data_ini = self.request.query_params.get('data_ini')
+        data_fim = self.request.query_params.get('data_fim')
+        if loja:
+            qs = qs.filter(idloja_id=loja)
+        if conta:
+            qs = qs.filter(conta_bancaria_id=conta)
+        if data_ini:
+            qs = qs.filter(data_antecipacao__gte=data_ini)
+        if data_fim:
+            qs = qs.filter(data_antecipacao__lte=data_fim)
+        return qs
+
+    def _money(self, value):
+        return Decimal(value or 0).quantize(Decimal('0.01'))
+
+    @action(detail=False, methods=['get'], url_path='recebiveis')
+    def recebiveis(self, request):
+        qs = (
+            MovimentacaoFinanceira.objects
+            .select_related('idloja', 'conta_bancaria', 'receber_item')
+            .filter(
+                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+                status=MovimentacaoFinanceira.STATUS_PREVISTA,
+                origem=MovimentacaoFinanceira.ORIGEM_CARTAO,
+                conta_bancaria__isnull=False,
+                receber_item__isnull=False,
+            )
+        )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not request.user.is_superuser:
+            qs = qs.none()
+
+        loja = request.query_params.get('loja')
+        conta = request.query_params.get('conta_bancaria')
+        forma = request.query_params.get('forma_pagamento')
+        data_ini = request.query_params.get('data_ini')
+        data_fim = request.query_params.get('data_fim')
+        if loja:
+            qs = qs.filter(idloja_id=loja)
+        if conta:
+            qs = qs.filter(conta_bancaria_id=conta)
+        if forma:
+            qs = qs.filter(FormaPagamento=forma)
+        if data_ini:
+            qs = qs.filter(data_movimento__gte=data_ini)
+        if data_fim:
+            qs = qs.filter(data_movimento__lte=data_fim)
+
+        return Response(MovimentacaoFinanceiraSerializer(qs.order_by('data_movimento', 'documento'), many=True).data)
+
+    @action(detail=False, methods=['post'], url_path='executar')
+    def executar(self, request):
+        ids = request.data.get('movimentacoes') or request.data.get('ids') or []
+        data_antecipacao = request.data.get('data_antecipacao') or timezone.localdate().isoformat()
+        documento = (request.data.get('documento') or '').strip()
+        observacao = (request.data.get('observacao') or '').strip()
+        try:
+            taxa_percentual = Decimal(str(request.data.get('taxa_percentual', '0')))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'detail': 'Informe uma taxa percentual válida.'}, status=status.HTTP_400_BAD_REQUEST)
+        if taxa_percentual < 0:
+            return Response({'detail': 'A taxa percentual não pode ser negativa.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(ids, list) or not ids:
+            return Response({'detail': 'Selecione ao menos um recebível para antecipar.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ids = [int(item) for item in ids]
+        except (TypeError, ValueError):
+            return Response({'detail': 'Lista de recebíveis inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            qs = (
+                MovimentacaoFinanceira.objects
+                .select_for_update()
+                .select_related('idloja', 'conta_bancaria', 'receber_item', 'Idnatureza', 'empresa')
+                .filter(pk__in=ids)
+            )
+            empresa_id = self._empresa_id_usuario()
+            if empresa_id:
+                qs = qs.filter(empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                qs = qs.none()
+            movimentos = {mov.pk: mov for mov in qs}
+            if len(movimentos) != len(set(ids)):
+                return Response({'detail': 'Um ou mais recebíveis não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            primeiro = movimentos[ids[0]]
+            conta = primeiro.conta_bancaria
+            loja = primeiro.idloja
+            empresa = primeiro.empresa
+            for mov_id in ids:
+                mov = movimentos[mov_id]
+                if mov.status != MovimentacaoFinanceira.STATUS_PREVISTA or mov.origem != MovimentacaoFinanceira.ORIGEM_CARTAO:
+                    return Response({'detail': f'Recebível {mov.pk} não está disponível para antecipação.'}, status=status.HTTP_400_BAD_REQUEST)
+                if mov.conta_bancaria_id != conta.pk:
+                    return Response({'detail': 'Antecipe apenas recebíveis da mesma conta bancária.'}, status=status.HTTP_400_BAD_REQUEST)
+                if mov.idloja_id != loja.pk:
+                    return Response({'detail': 'Antecipe apenas recebíveis da mesma loja.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            valor_bruto = sum((Decimal(movimentos[mov_id].valor or 0) for mov_id in ids), Decimal('0.00'))
+            taxa_valor = self._money(valor_bruto * taxa_percentual / Decimal('100'))
+            valor_liquido = self._money(valor_bruto - taxa_valor)
+            if valor_liquido <= 0:
+                return Response({'detail': 'O valor líquido da antecipação deve ser maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not documento:
+                agora = timezone.localtime()
+                documento = f"ANT-{agora:%Y%m%d%H%M%S}-{request.user.pk or '0'}"
+
+            antecipacao = AntecipacaoRecebivel.objects.create(
+                empresa=empresa,
+                idloja=loja,
+                conta_bancaria=conta,
+                documento=documento[:50],
+                data_antecipacao=data_antecipacao,
+                taxa_percentual=taxa_percentual,
+                valor_bruto=self._money(valor_bruto),
+                taxa_valor=taxa_valor,
+                valor_liquido=valor_liquido,
+                observacao=observacao[:255],
+                criado_por=request.user if request.user.is_authenticated else None,
+            )
+
+            taxa_natureza = _natureza_taxa_antecipacao(empresa)
+            conta.saldo_atual = Decimal(conta.saldo_atual or 0) + valor_bruto - taxa_valor
+            conta.save(update_fields=['saldo_atual'])
+
+            mov_entrada_antecipacao = MovimentacaoFinanceira.objects.create(
+                empresa=empresa,
+                idloja=loja,
+                data_movimento=data_antecipacao,
+                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_ANTECIPACAO,
+                valor=self._money(valor_bruto),
+                historico=f"Antecipação de recebíveis {documento}"[:255],
+                documento=documento[:50],
+                Idnatureza=primeiro.Idnatureza,
+                FormaPagamento='ANTECIPACAO',
+                conta_bancaria=conta,
+            )
+            gerar_lancamento_contabil_movimentacao(mov_entrada_antecipacao)
+            if taxa_valor > 0:
+                mov_taxa_antecipacao = MovimentacaoFinanceira.objects.create(
+                    empresa=empresa,
+                    idloja=loja,
+                    data_movimento=data_antecipacao,
+                    tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+                    status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                    origem=MovimentacaoFinanceira.ORIGEM_ANTECIPACAO,
+                    valor=taxa_valor,
+                    historico=f"Taxa de antecipação {documento}"[:255],
+                    documento=documento[:50],
+                    Idnatureza=taxa_natureza,
+                    FormaPagamento='ANTECIPACAO',
+                    conta_bancaria=conta,
+                )
+                gerar_lancamento_contabil_movimentacao(mov_taxa_antecipacao)
+
+            for mov_id in ids:
+                mov = movimentos[mov_id]
+                item_bruto = self._money(mov.valor)
+                item_taxa = self._money(item_bruto * taxa_percentual / Decimal('100'))
+                item_liquido = self._money(item_bruto - item_taxa)
+                AntecipacaoRecebivelItem.objects.create(
+                    antecipacao=antecipacao,
+                    movimentacao=mov,
+                    receber_item=mov.receber_item,
+                    valor_bruto=item_bruto,
+                    taxa_valor=item_taxa,
+                    valor_liquido=item_liquido,
+                )
+                mov.status = MovimentacaoFinanceira.STATUS_ANTECIPADA
+                mov.save(update_fields=['status'])
+                mov.receber_item.status = ReceberItem.STATUS_ANTECIPADO
+                mov.receber_item.data_baixa = data_antecipacao
+                mov.receber_item.valor_baixa = item_bruto
+                mov.receber_item.save(update_fields=['status', 'data_baixa', 'valor_baixa'])
+
+        _audit('antecipacaorecebivel', antecipacao.pk, {
+            'documento': antecipacao.documento,
+            'movimentacoes': ids,
+            'valor_bruto': str(antecipacao.valor_bruto),
+            'taxa_valor': str(antecipacao.taxa_valor),
+            'valor_liquido': str(antecipacao.valor_liquido),
+        }, request, action='executar')
+        return Response(self.get_serializer(antecipacao).data, status=status.HTTP_201_CREATED)
 
 
 class PagarViewSet(BaseViewSet):
@@ -447,18 +1477,84 @@ class PagarItemViewSet(BaseViewSet):
         valor_baixa = request.data.get('valor_baixa')
         data_baixa = request.data.get('data_baixa') or timezone.now().date().isoformat()
         try:
-            valor_baixa = float(valor_baixa)
-        except (TypeError, ValueError):
+            valor_baixa = Decimal(str(valor_baixa))
+        except (TypeError, ValueError, InvalidOperation):
             return Response({'detail': 'Informe valor_baixa numérico.'}, status=status.HTTP_400_BAD_REQUEST)
-        before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
-        obj.valor_baixa = valor_baixa
-        obj.data_baixa = data_baixa
-        obj.status = PagarItem.STATUS_BAIXADO
-        obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
+        if valor_baixa <= 0:
+            return Response({'detail': 'Informe valor_baixa maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            obj = (
+                PagarItem.objects
+                .select_for_update()
+                .select_related('Idpagar', 'Idpagar__idloja', 'Idpagar__idfornecedor', 'Idnatureza')
+                .get(pk=obj.pk)
+            )
+            before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
+            obj.valor_baixa = valor_baixa
+            obj.data_baixa = data_baixa
+            obj.status = PagarItem.STATUS_BAIXADO
+            obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
+            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa)
+
         _audit('pagaritem', obj.pk, {'before': before, 'after': {
-            'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa)
+            'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa),
+            'movimentacao': movimento.pk if movimento else None,
         }}, request, action='baixar')
         return Response(self.get_serializer(obj).data)
+
+    def _documento_parcela(self, item):
+        titulo = str(item.Idpagar.Titulo or item.Idpagar_id)
+        sufixo = f"-{item.parcela_n}"
+        return titulo if titulo.endswith(sufixo) else f"{titulo}{sufixo}"
+
+    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa):
+        existente = (
+            MovimentacaoFinanceira.objects
+            .filter(pagar_item=item, status=MovimentacaoFinanceira.STATUS_EFETIVA)
+            .first()
+        )
+        if existente:
+            return existente
+
+        titulo = item.Idpagar
+        caixa = (
+            Caixa.objects
+            .select_for_update()
+            .filter(
+                empresa=titulo.empresa,
+                idloja=titulo.idloja,
+                tipo_caixa=Caixa.TIPO_LOJA,
+                ativo=True,
+            )
+            .order_by('Idcaixa')
+            .first()
+        )
+        if not caixa:
+            raise ValidationError({'caixa': 'Nenhum caixa ativo encontrado para a loja do título.'})
+
+        caixa.saldo_atual = Decimal(caixa.saldo_atual or 0) - Decimal(valor_baixa)
+        caixa.save(update_fields=['saldo_atual'])
+
+        documento = self._documento_parcela(item)
+        fornecedor = getattr(titulo.idfornecedor, 'nome_fornecedor', '') or getattr(titulo.idfornecedor, 'apelido', '')
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=titulo.empresa,
+            idloja=titulo.idloja,
+            data_movimento=data_baixa,
+            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_PAGAR,
+            valor=valor_baixa,
+            historico=f"Baixa contas a pagar {documento}" + (f" - {fornecedor}" if fornecedor else ""),
+            documento=documento,
+            Idnatureza=item.Idnatureza or titulo.Idnatureza,
+            FormaPagamento=item.FormaPagamento or titulo.FormaPagamento,
+            caixa=caixa,
+            pagar_item=item,
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
+        return movimento
 
     @action(detail=True, methods=['post'], url_path='cancelar')
     def cancelar(self, request, pk=None):
@@ -509,6 +1605,9 @@ class ReceberViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
         loja = self.request.query_params.get('loja')
         cliente = self.request.query_params.get('cliente')
         previsao = self.request.query_params.get('previsao')
@@ -558,18 +1657,88 @@ class ReceberItemViewSet(BaseViewSet):
         valor_baixa = request.data.get('valor_baixa')
         data_baixa = request.data.get('data_baixa') or timezone.now().date().isoformat()
         try:
-            valor_baixa = float(valor_baixa)
-        except (TypeError, ValueError):
+            valor_baixa = Decimal(str(valor_baixa))
+        except (TypeError, ValueError, InvalidOperation):
             return Response({'detail': 'Informe valor_baixa numérico.'}, status=status.HTTP_400_BAD_REQUEST)
-        before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
-        obj.valor_baixa = valor_baixa
-        obj.data_baixa = data_baixa
-        obj.status = ReceberItem.STATUS_BAIXADO
-        obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
+        if valor_baixa <= 0:
+            return Response({'detail': 'Informe valor_baixa maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            obj = (
+                ReceberItem.objects
+                .select_for_update()
+                .select_related('Idreceber', 'Idreceber__idloja', 'Idreceber__idcliente', 'Idnatureza')
+                .get(pk=obj.pk)
+            )
+            before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
+            obj.valor_baixa = valor_baixa
+            obj.data_baixa = data_baixa
+            obj.status = ReceberItem.STATUS_BAIXADO
+            obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
+            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa)
+
         _audit('receberitem', obj.pk, {'before': before, 'after': {
-            'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa)
+            'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa),
+            'movimentacao': movimento.pk if movimento else None,
         }}, request, action='baixar')
         return Response(self.get_serializer(obj).data)
+
+    def _documento_parcela(self, item):
+        titulo = str(item.Idreceber.Titulo or item.Idreceber_id)
+        sufixo = f"-{item.parcela_n}"
+        return titulo if titulo.endswith(sufixo) else f"{titulo}{sufixo}"
+
+    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa):
+        existente = (
+            MovimentacaoFinanceira.objects
+            .filter(receber_item=item, status=MovimentacaoFinanceira.STATUS_EFETIVA)
+            .first()
+        )
+        if existente:
+            return existente
+
+        titulo = item.Idreceber
+        caixa = (
+            Caixa.objects
+            .select_for_update()
+            .filter(
+                empresa=titulo.empresa,
+                idloja=titulo.idloja,
+                tipo_caixa=Caixa.TIPO_LOJA,
+                ativo=True,
+            )
+            .order_by('Idcaixa')
+            .first()
+        )
+        if not caixa:
+            raise ValidationError({'caixa': 'Nenhum caixa ativo encontrado para a loja do título.'})
+
+        caixa.saldo_atual = Decimal(caixa.saldo_atual or 0) + Decimal(valor_baixa)
+        caixa.save(update_fields=['saldo_atual'])
+
+        documento = self._documento_parcela(item)
+        cliente = (
+            getattr(titulo.idcliente, 'nome_cliente', '')
+            or getattr(titulo.idcliente, 'nome', '')
+            or getattr(titulo.idcliente, 'apelido', '')
+        )
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=titulo.empresa,
+            idloja=titulo.idloja,
+            data_movimento=data_baixa,
+            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_RECEBER,
+            valor=valor_baixa,
+            historico=f"Baixa contas a receber {documento}" + (f" - {cliente}" if cliente else ""),
+            documento=documento,
+            Idnatureza=item.Idnatureza or titulo.Idnatureza,
+            FormaPagamento=item.FormaPagamento or titulo.FormaPagamento,
+            caixa=caixa,
+            receber_item=item,
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
+        return movimento
 
     @action(detail=True, methods=['post'], url_path='cancelar')
     def cancelar(self, request, pk=None):

@@ -1,9 +1,10 @@
 from rest_framework import viewsets, permissions, filters
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from django.db.models import ProtectedError
 from django_filters.rest_framework import DjangoFilterBackend
 from accounts.permissions import HasModuleRole
 
-from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
 from .serializers import (
     EmpresaSerializer,
     LojaSerializer,
@@ -11,6 +12,7 @@ from .serializers import (
     FornecedorSerializer,
     FuncionariosSerializer,
     NatLancamentoSerializer,
+    PlanoContabilSerializer,
 )
 
 
@@ -25,7 +27,7 @@ class BaseCadastroViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         model = getattr(qs, "model", None)
         user = self.request.user
-        if not model or user.is_superuser or user.is_staff:
+        if not model or user.is_superuser:
             empresa = self.request.query_params.get("empresa")
             if empresa and self._model_has_field(model, "empresa"):
                 return qs.filter(empresa_id=empresa)
@@ -38,14 +40,25 @@ class BaseCadastroViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        self._save_with_empresa_scope(serializer)
+
+    def perform_update(self, serializer):
+        self._save_with_empresa_scope(serializer)
+
+    def _save_with_empresa_scope(self, serializer):
         model = serializer.Meta.model
         user = self.request.user
-        if self._model_has_field(model, "empresa") and not getattr(user, "empresa_id", None) and not (user.is_superuser or user.is_staff):
+        if self._model_has_field(model, "empresa") and user.is_superuser:
+            if not serializer.validated_data.get("empresa"):
+                raise ValidationError({"empresa": "Informe a empresa do cadastro."})
+            serializer.save()
+            return
+        if self._model_has_field(model, "empresa") and not getattr(user, "empresa_id", None) and not user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if self._model_has_field(model, "empresa") and getattr(user, "empresa_id", None):
             empresa = serializer.validated_data.get("empresa")
             if empresa and empresa.id != user.empresa_id:
-                raise ValidationError({"empresa": "O cadastro pertence a outra empresa."})
+                raise ValidationError({"empresa": "Você só pode cadastrar lojas e registros na empresa vinculada ao seu usuário."})
             serializer.save(empresa=user.empresa)
             return
         serializer.save()
@@ -73,12 +86,28 @@ class EmpresaViewSet(BaseCadastroViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return qs
         empresa_id = getattr(user, "empresa_id", None)
         if empresa_id:
             return qs.filter(pk=empresa_id)
         return qs.none()
+
+    def _exigir_superusuario(self):
+        if not self.request.user.is_superuser:
+            raise PermissionDenied("Somente superusuário pode cadastrar ou alterar empresas.")
+
+    def perform_create(self, serializer):
+        self._exigir_superusuario()
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._exigir_superusuario()
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._exigir_superusuario()
+        instance.delete()
 
 
 class LojaViewSet(BaseCadastroViewSet):
@@ -93,7 +122,7 @@ class LojaViewSet(BaseCadastroViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             empresa = self.request.query_params.get("empresa")
             return qs.filter(empresa_id=empresa) if empresa else qs
         empresa_id = getattr(user, "empresa_id", None)
@@ -135,6 +164,18 @@ class FuncionariosViewSet(BaseCadastroViewSet):
     ordering_fields = ["nomefuncionario", "categoria", "data_cadastro", "meta"]
     ordering = ["nomefuncionario"]
 
+
+class PlanoContabilViewSet(BaseCadastroViewSet):
+    queryset = PlanoContabil.objects.select_related("empresa", "conta_pai").all()
+    serializer_class = PlanoContabilSerializer
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor"]
+    filterset_fields = ["empresa", "classe", "natureza", "analitica", "ativa", "conta_pai"]
+    search_fields = ["codigo", "descricao", "classe", "natureza", "conta_pai__codigo", "conta_pai__descricao"]
+    ordering_fields = ["codigo", "descricao", "classe", "natureza", "nivel", "analitica", "ativa"]
+    ordering = ["codigo"]
+
+
 class NatLancamentoViewSet(viewsets.ModelViewSet):
     queryset = Nat_Lancamento.objects.all().order_by("codigo")
     serializer_class = NatLancamentoSerializer
@@ -145,9 +186,45 @@ class NatLancamentoViewSet(viewsets.ModelViewSet):
     search_fields = [
         "codigo", "categoria_principal", "subcategoria",
         "descricao", "tipo", "status", "tipo_natureza",
+        "natureza_operacao", "categoria_gerencial", "conta_contabil",
     ]
     ordering_fields = [
         "codigo", "categoria_principal", "subcategoria",
-        "tipo", "status", "tipo_natureza", "idnatureza",
+        "tipo", "status", "tipo_natureza", "natureza_operacao",
+        "categoria_gerencial", "ativo", "idnatureza",
     ]
     ordering = ["codigo"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_superuser:
+            empresa = self.request.query_params.get("empresa")
+            return qs.filter(empresa_id=empresa) if empresa else qs
+        empresa_id = getattr(user, "empresa_id", None)
+        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_superuser:
+            if not serializer.validated_data.get("empresa"):
+                raise ValidationError({"empresa": "Informe a empresa da natureza."})
+            serializer.save()
+            return
+        if not getattr(user, "empresa_id", None):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa = serializer.validated_data.get("empresa")
+        if empresa and empresa.id != user.empresa_id:
+            raise ValidationError({"empresa": "Você só pode cadastrar natureza na sua empresa."})
+        serializer.save(empresa=user.empresa)
+
+    def perform_update(self, serializer):
+        self.perform_create(serializer)
+
+    def perform_destroy(self, instance):
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                "detail": "Natureza já utilizada em lançamentos. Inative o cadastro em vez de excluir."
+            })

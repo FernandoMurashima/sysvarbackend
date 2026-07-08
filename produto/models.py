@@ -17,6 +17,7 @@ def ean13_check_digit(base12: str) -> str:
 # Configuração EAN (fixo 789 + empresa 4 dígitos) — com 'ativo'
 # ===========================
 class ConfigEan(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='configs_ean', db_index=True)
     country_prefix = models.CharField(
         max_length=3,
         default='789',
@@ -41,7 +42,7 @@ class ConfigEan(models.Model):
         verbose_name = 'Configuração EAN'
         verbose_name_plural = 'Configuração EAN'
         constraints = [
-            models.UniqueConstraint(fields=['country_prefix', 'company_prefix'], name='uq_country_company_prefix'),
+            models.UniqueConstraint(fields=['empresa', 'country_prefix', 'company_prefix'], name='uq_empresa_country_company_prefix'),
         ]
         indexes = [
             models.Index(fields=['ativo']),
@@ -56,6 +57,7 @@ class ConfigEan(models.Model):
 # Tabelas auxiliares (mestre)
 # ===========================
 class Ncm(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='ncms', db_index=True)
     # Guardaremos também no Produto como CHAR(10) no formato ####.##.##
     ncm = models.CharField(
         max_length=10, null=True, blank=True,
@@ -71,6 +73,7 @@ class Ncm(models.Model):
 
 class Grade(models.Model):  # HAD
     Idgrade = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='grades_produto', db_index=True)
     Descricao = models.CharField(max_length=100)
     Status = models.CharField(max_length=10, null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
@@ -81,6 +84,7 @@ class Grade(models.Model):  # HAD
 
 class Tamanho(models.Model):
     Idtamanho = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='tamanhos_produto', db_index=True)
     idgrade = models.ForeignKey(Grade, on_delete=models.CASCADE)
     Tamanho = models.CharField(max_length=10)  # ex.: PP, P, M, G, 38, 40...
     Descricao = models.CharField(max_length=100, default="Tamanho")
@@ -93,6 +97,7 @@ class Tamanho(models.Model):
 
 class Cor(models.Model):
     Idcor = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='cores_produto', db_index=True)
     Descricao = models.CharField(max_length=100)
     Codigo = models.CharField(max_length=12, null=True, blank=True)  # ex.: AZ, PR, BR, etc.
     Cor = models.CharField(max_length=30)  # nome completo
@@ -110,6 +115,7 @@ class Cor(models.Model):
 
 class Material(models.Model):
     Idmaterial = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='materiais_produto', db_index=True)
     Descricao = models.CharField(max_length=100)
     Codigo = models.CharField(max_length=10, null=True, blank=True)
     Status = models.CharField(max_length=10, null=True, blank=True)
@@ -145,7 +151,7 @@ class Colecao(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['Codigo', 'Estacao'], name='uq_colecao_codigo_estacao')
+            models.UniqueConstraint(fields=['empresa', 'Codigo', 'Estacao'], name='uq_empresa_colecao_codigo_estacao')
         ]
 
     def __str__(self):
@@ -154,6 +160,7 @@ class Colecao(models.Model):
 
 class Unidade(models.Model):
     Idunidade = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='unidades_produto', db_index=True)
     Descricao = models.CharField(max_length=100)
     Codigo = models.CharField(max_length=10, null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
@@ -208,13 +215,14 @@ class Tabelapreco(models.Model):
 class Codigos(models.Model):
     # Sequencial para gerar referência por (colecao, estacao)
     Idcodigo = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='sequenciais_produto', db_index=True)
     colecao = models.CharField(max_length=2, null=False, blank=False, default="00")
     estacao = models.CharField(max_length=2, null=False, blank=False, default="00")
     valor_var = models.IntegerField(default=1)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['colecao', 'estacao'], name='unique_colecao_estacao')
+            models.UniqueConstraint(fields=['empresa', 'colecao', 'estacao'], name='unique_empresa_colecao_estacao')
         ]
 
     def __str__(self):
@@ -233,7 +241,7 @@ class Produto(models.Model):
     Idproduto = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='produtos', db_index=True)
     tipo_produto = models.CharField(max_length=1, choices=TIPO_CHOICES, default='1')
-    referencia = models.CharField(max_length=11, null=True, blank=True, unique=True,
+    referencia = models.CharField(max_length=11, null=True, blank=True,
                                   help_text='Gerada automaticamente: AA-BB-CCDDD')
     descricao = models.CharField(max_length=120)
     descricao_reduzida = models.CharField(max_length=60, null=True, blank=True)
@@ -288,7 +296,7 @@ class Produto(models.Model):
 
         with transaction.atomic():
             cod_row, _ = Codigos.objects.select_for_update().get_or_create(
-                colecao=aa, estacao=bb, defaults={'valor_var': 1}
+                empresa=self.empresa, colecao=aa, estacao=bb, defaults={'valor_var': 1}
             )
             ddd_val = cod_row.valor_var
             cod_row.valor_var = ddd_val + 1
@@ -303,6 +311,9 @@ class Produto(models.Model):
         super().save(*args, **kwargs)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'referencia'], name='uq_empresa_produto_referencia'),
+        ]
         indexes = [
             models.Index(fields=['tipo_produto']),
             models.Index(fields=['ncm']),
@@ -346,6 +357,8 @@ class ProdutoDetalhe(models.Model):
     )
 
     ativo = models.BooleanField(default=True)
+    custo_original = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_ultima_compra = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     # >>> ADDED
     bloqueado_venda = models.BooleanField(
         default=False,
@@ -375,7 +388,11 @@ class ProdutoDetalhe(models.Model):
         with transaction.atomic():
             # 1) Escolher prefixo ativo se não vier
             if not self.config_ean_id:
-                cfg = ConfigEan.objects.select_for_update().filter(ativo=True).order_by('id').first()
+                empresa_id = getattr(getattr(self, 'produto', None), 'empresa_id', None)
+                cfg_qs = ConfigEan.objects.select_for_update().filter(ativo=True)
+                if empresa_id:
+                    cfg_qs = cfg_qs.filter(empresa_id=empresa_id)
+                cfg = cfg_qs.order_by('id').first()
                 if not cfg:
                     raise ValueError('Nenhum prefixo GS1 ativo encontrado em ConfigEan.')
                 self.config_ean = cfg

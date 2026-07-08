@@ -222,13 +222,54 @@ class FuncionariosSerializer(serializers.ModelSerializer):
         return _norm_digits(value)
 
 from rest_framework import serializers
-from .models import Nat_Lancamento
+from .models import Nat_Lancamento, PlanoContabil
+
+
+class PlanoContabilSerializer(serializers.ModelSerializer):
+    conta_pai_codigo = serializers.CharField(source="conta_pai.codigo", read_only=True)
+    conta_pai_descricao = serializers.CharField(source="conta_pai.descricao", read_only=True)
+
+    class Meta:
+        model = PlanoContabil
+        fields = [
+            "id",
+            "empresa",
+            "codigo",
+            "descricao",
+            "classe",
+            "natureza",
+            "conta_pai",
+            "conta_pai_codigo",
+            "conta_pai_descricao",
+            "nivel",
+            "analitica",
+            "ativa",
+            "data_cadastro",
+        ]
+        read_only_fields = ["data_cadastro"]
+
+    def validate(self, attrs):
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        conta_pai = attrs.get("conta_pai", getattr(self.instance, "conta_pai", None))
+        if conta_pai and empresa and conta_pai.empresa_id != empresa.id:
+            raise serializers.ValidationError({"conta_pai": "A conta pai deve pertencer à mesma empresa."})
+        if conta_pai and self.instance and conta_pai.pk == self.instance.pk:
+            raise serializers.ValidationError({"conta_pai": "A conta não pode ser pai dela mesma."})
+        if conta_pai and not attrs.get("nivel"):
+            attrs["nivel"] = int(conta_pai.nivel or 1) + 1
+        elif not conta_pai and not attrs.get("nivel"):
+            attrs["nivel"] = 1
+        return attrs
 
 class NatLancamentoSerializer(serializers.ModelSerializer):
+    plano_contabil_codigo = serializers.CharField(source="plano_contabil.codigo", read_only=True)
+    plano_contabil_descricao = serializers.CharField(source="plano_contabil.descricao", read_only=True)
+
     class Meta:
         model = Nat_Lancamento
         fields = [
             "idnatureza",
+            "empresa",
             "codigo",
             "categoria_principal",
             "subcategoria",
@@ -236,4 +277,36 @@ class NatLancamentoSerializer(serializers.ModelSerializer):
             "tipo",
             "status",
             "tipo_natureza",
+            "natureza_operacao",
+            "categoria_gerencial",
+            "movimenta_financeiro",
+            "entra_dre",
+            "plano_contabil",
+            "plano_contabil_codigo",
+            "plano_contabil_descricao",
+            "conta_contabil",
+            "ativo",
         ]
+
+    def validate(self, attrs):
+        natureza_operacao = (attrs.get("natureza_operacao", getattr(self.instance, "natureza_operacao", "")) or "").upper()
+        tipo_natureza = attrs.get("tipo_natureza", getattr(self.instance, "tipo_natureza", ""))
+        if natureza_operacao not in {"RECEITA", "DESPESA", "TRANSFERENCIA", "AJUSTE"}:
+            raise serializers.ValidationError({
+                "natureza_operacao": "Use RECEITA, DESPESA, TRANSFERENCIA ou AJUSTE."
+            })
+        if natureza_operacao == "RECEITA" and not tipo_natureza:
+            attrs["tipo_natureza"] = "CREDITO"
+        if natureza_operacao == "DESPESA" and not tipo_natureza:
+            attrs["tipo_natureza"] = "DEBITO"
+        if natureza_operacao == "TRANSFERENCIA":
+            attrs["entra_dre"] = False
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        plano = attrs.get("plano_contabil", getattr(self.instance, "plano_contabil", None))
+        if plano and empresa and plano.empresa_id != empresa.id:
+            raise serializers.ValidationError({
+                "plano_contabil": "A conta contábil deve pertencer à mesma empresa da natureza."
+            })
+        if plano:
+            attrs["conta_contabil"] = plano.codigo
+        return attrs

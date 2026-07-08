@@ -80,7 +80,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 
     def _empresa_id_usuario(self):
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return self.request.query_params.get("empresa")
         return getattr(user, "empresa_id", None)
 
@@ -99,7 +99,7 @@ class PedidoCompraViewSet(BaseViewSet):
         fornecedor = self.request.query_params.get("fornecedor")
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         if tipo in ("1", "2"):
             qs = qs.filter(tipo=tipo)
@@ -115,7 +115,7 @@ class PedidoCompraViewSet(BaseViewSet):
         loja = serializer.validated_data.get("loja")
         fornecedor = serializer.validated_data.get("fornecedor")
         empresa_id = self._empresa_id_usuario()
-        if not empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+        if not empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if empresa_id and loja.empresa_id != int(empresa_id):
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
@@ -128,7 +128,7 @@ class PedidoCompraViewSet(BaseViewSet):
         fornecedor = serializer.validated_data.get("fornecedor") or serializer.instance.fornecedor
         empresa_id = serializer.instance.empresa_id or getattr(loja, "empresa_id", None)
         user_empresa_id = self._empresa_id_usuario()
-        if not user_empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+        if not user_empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
             raise ValidationError({"empresa": "Pedido pertence a outra empresa."})
@@ -397,7 +397,7 @@ class PedidoCompraItemViewSet(BaseViewSet):
         pedido = self.request.query_params.get("pedido")
         if empresa_id:
             qs = qs.filter(pedido__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         if pedido:
             qs = qs.filter(pedido_id=pedido)
@@ -421,7 +421,7 @@ class PedidoCompraItemViewSet(BaseViewSet):
         pack = data.get("pack")
         empresa_id = pedido.empresa_id if pedido else None
         user_empresa_id = self._empresa_id_usuario()
-        if not user_empresa_id and not (self.request.user.is_superuser or self.request.user.is_staff):
+        if not user_empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
             raise ValidationError({"pedido": "Pedido pertence a outra empresa."})
@@ -442,7 +442,7 @@ class PedidoCompraEntregaViewSet(BaseViewSet):
         pedido = self.request.query_params.get("pedido")
         if empresa_id:
             qs = qs.filter(item__pedido__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         if pedido:
             qs = qs.filter(item__pedido_id=pedido)
@@ -460,7 +460,7 @@ class PedidoCompraParcelaViewSet(BaseViewSet):
         pedido = self.request.query_params.get("pedido")
         if empresa_id:
             qs = qs.filter(pedido__empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         if pedido:
             qs = qs.filter(pedido_id=pedido)

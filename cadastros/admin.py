@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
 
 
 @admin.register(Empresa)
@@ -103,6 +103,16 @@ class FuncionariosAdmin(admin.ModelAdmin):
 
 @admin.register(Nat_Lancamento)
 class NatLancamentoAdmin(admin.ModelAdmin):
-    list_display = ("idnatureza", "codigo", "categoria_principal", "subcategoria", "tipo", "status", "tipo_natureza")
-    list_filter = ("status", "tipo", "tipo_natureza", "categoria_principal", "subcategoria")
-    search_fields = ("codigo", "descricao", "categoria_principal", "subcategoria")
+    list_display = ("idnatureza", "empresa", "codigo", "categoria_principal", "subcategoria", "natureza_operacao", "tipo_natureza", "plano_contabil", "entra_dre", "movimenta_financeiro", "ativo")
+    list_filter = ("empresa", "ativo", "natureza_operacao", "entra_dre", "movimenta_financeiro", "tipo_natureza", "categoria_principal", "subcategoria")
+    search_fields = ("codigo", "descricao", "categoria_principal", "subcategoria", "categoria_gerencial", "conta_contabil", "plano_contabil__codigo", "plano_contabil__descricao")
+    list_select_related = ("empresa", "plano_contabil")
+
+
+@admin.register(PlanoContabil)
+class PlanoContabilAdmin(admin.ModelAdmin):
+    list_display = ("id", "empresa", "codigo", "descricao", "classe", "natureza", "conta_pai", "nivel", "analitica", "ativa")
+    list_filter = ("empresa", "classe", "natureza", "analitica", "ativa")
+    search_fields = ("codigo", "descricao", "conta_pai__codigo", "conta_pai__descricao")
+    list_select_related = ("empresa", "conta_pai")
+    ordering = ("empresa", "codigo")

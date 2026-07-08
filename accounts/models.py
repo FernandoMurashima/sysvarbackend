@@ -25,6 +25,7 @@ class User(AbstractUser):
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
     # Loja do usuário (opcional, pode ficar vazia)
     loja = models.ForeignKey('cadastros.Loja', on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
+    lojas = models.ManyToManyField('cadastros.Loja', blank=True, related_name='usuarios_permitidos')
 
     def __str__(self):
         return f"{self.username} ({self.type})"

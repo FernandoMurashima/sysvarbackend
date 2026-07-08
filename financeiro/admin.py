@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    Caixa, ContaBancaria, MovimentacaoFinanceira,
+    Caixa, ContaBancaria, MovimentacaoFinanceira, LancamentoContabil,
     CashbackConfig, CashbackMovimento,
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
@@ -96,6 +96,18 @@ class MovimentacaoFinanceiraAdmin(admin.ModelAdmin):
     list_filter = ("idloja", "tipo", "status", "origem", "data_movimento")
     search_fields = ("historico", "documento")
     date_hierarchy = "data_movimento"
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(LancamentoContabil)
+class LancamentoContabilAdmin(admin.ModelAdmin):
+    list_display = (
+        "Idlancamentocontabil", "empresa", "idloja", "data_lancamento",
+        "documento", "origem", "valor", "status",
+    )
+    list_filter = ("empresa", "idloja", "origem", "status", "data_lancamento")
+    search_fields = ("documento", "historico", "observacao")
+    date_hierarchy = "data_lancamento"
     readonly_fields = ("data_cadastro",)
 
 

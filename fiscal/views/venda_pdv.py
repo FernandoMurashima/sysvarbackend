@@ -17,6 +17,7 @@ from financeiro.models import (
     Caixa,
     CashbackConfig,
     CashbackMovimento,
+    FormaPagamento,
     MovimentacaoFinanceira,
     Receber,
     ReceberItem,
@@ -25,6 +26,7 @@ from financeiro.models import (
     saldo_cashback_cliente,
     saldo_vale_troca_cliente,
 )
+from financeiro.services import gerar_lancamento_contabil_movimentacao
 from fiscal.models import NFCe, NFeDevolucao, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
@@ -57,6 +59,13 @@ def _limpar_numero(value: str) -> str:
 def _proximo_numero_nfce() -> int:
     atual = NFCe.objects.aggregate(max_numero=Max("numero")).get("max_numero") or 0
     return atual + 1
+
+
+def _proximo_documento_pdv() -> str:
+    numero = _proximo_numero_nfce()
+    while VendaPdv.objects.filter(documento=str(numero)).exists() or NFCe.objects.filter(numero=numero).exists():
+        numero += 1
+    return str(numero)
 
 
 def _proximo_numero_nfe_devolucao() -> int:
@@ -95,7 +104,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         loja = self.request.query_params.get("loja")
         cliente = self.request.query_params.get("cliente")
@@ -110,7 +119,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
     def _empresa_id_usuario(self):
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return self.request.query_params.get("empresa")
         return getattr(user, "empresa_id", None)
 
@@ -292,7 +301,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         vendedor = request.query_params.get("vendedor")
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (request.user.is_superuser or request.user.is_staff):
+        elif not request.user.is_superuser:
             return []
         if loja:
             qs = qs.filter(loja_id=loja)
@@ -333,7 +342,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Informe loja, caixa, cliente e vendedor."}, status=status.HTTP_400_BAD_REQUEST)
 
         empresa_id = self._empresa_id_usuario()
-        if not empresa_id and not (request.user.is_superuser or request.user.is_staff):
+        if not empresa_id and not request.user.is_superuser:
             return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         caixa = (
             Caixa.objects.select_for_update()
@@ -358,7 +367,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if empresa_id and vendedor.empresa_id and vendedor.empresa_id != int(empresa_id):
             return Response({"detail": "O vendedor informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
 
-        documento = data.get("documento") or f"PDV-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+        documento = data.get("documento") or _proximo_documento_pdv()
         venda = VendaPdv.objects.create(
             empresa=caixa.idloja.empresa,
             loja_id=loja_id,
@@ -413,6 +422,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         self._registrar_pagamentos(venda, pagamentos_payload)
 
         self._registrar_financeiro(venda)
+        self._registrar_cmv(venda)
+        self._registrar_comissao(venda)
         self._registrar_uso_vale_troca(venda, pagamentos_payload)
         self._registrar_cashback(venda, pagamentos_payload)
         nfce = self._autorizar_nfce(venda)
@@ -651,13 +662,33 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             quantidade=quantidade,
             preco_unitario=preco,
             desconto=desconto,
+            custo_unitario=self._custo_sku(sku),
         )
 
-    def _natureza_venda(self) -> Nat_Lancamento:
-        natureza = Nat_Lancamento.objects.filter(codigo__startswith="1.").order_by("codigo").first()
+    def _custo_sku(self, sku: ProdutoDetalhe) -> Decimal:
+        custo = Decimal(sku.custo_ultima_compra or sku.custo_original or 0)
+        if custo > 0:
+            return custo
+        referencia = (
+            ProdutoDetalhe.objects
+            .filter(produto_id=sku.produto_id, custo_ultima_compra__gt=0)
+            .order_by("-custo_ultima_compra")
+            .values_list("custo_ultima_compra", flat=True)
+            .first()
+        )
+        return Decimal(referencia or 0)
+
+    def _natureza_venda(self, empresa=None) -> Nat_Lancamento:
+        natureza = (
+            Nat_Lancamento.objects
+            .filter(empresa=empresa, natureza_operacao="RECEITA", ativo=True)
+            .order_by("codigo")
+            .first()
+        )
         if natureza:
             return natureza
         return Nat_Lancamento.objects.create(
+            empresa=empresa,
             codigo="1.01",
             categoria_principal="Vendas",
             subcategoria="Mercadorias",
@@ -665,52 +696,171 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             tipo="RECEITA",
             status="ATIVO",
             tipo_natureza="CREDITO",
+            natureza_operacao="RECEITA",
+            categoria_gerencial="Vendas",
+            movimenta_financeiro=True,
+            entra_dre=True,
+            ativo=True,
         )
+
+    def _natureza_cmv(self, empresa=None) -> Nat_Lancamento:
+        natureza = (
+            Nat_Lancamento.objects
+            .filter(empresa=empresa, ativo=True, natureza_operacao="DESPESA")
+            .filter(models.Q(codigo="2100") | models.Q(descricao__icontains="CMV") | models.Q(descricao__icontains="mercadoria vendida"))
+            .order_by("codigo")
+            .first()
+        )
+        if natureza:
+            return natureza
+
+        plano = None
+        try:
+            from cadastros.models import PlanoContabil
+            plano = (
+                PlanoContabil.objects
+                .filter(empresa=empresa, ativa=True, classe=PlanoContabil.CLASSE_CUSTO)
+                .filter(models.Q(codigo="5.1.01") | models.Q(descricao__icontains="CMV"))
+                .order_by("codigo")
+                .first()
+            )
+        except Exception:
+            plano = None
+
+        return Nat_Lancamento.objects.create(
+            empresa=empresa,
+            codigo="2100",
+            categoria_principal="CUSTOS DAS MERCADORIAS",
+            subcategoria="CMV",
+            descricao="CMV - Custo da mercadoria vendida",
+            tipo="DESPESA",
+            status="ATIVO",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+            categoria_gerencial="CMV",
+            movimenta_financeiro=False,
+            entra_dre=True,
+            plano_contabil=plano,
+            conta_contabil=plano.codigo if plano else None,
+            ativo=True,
+        )
+
+    def _natureza_comissao(self, empresa=None) -> Nat_Lancamento:
+        natureza = (
+            Nat_Lancamento.objects
+            .filter(empresa=empresa, ativo=True, natureza_operacao="DESPESA")
+            .filter(models.Q(codigo="3103") | models.Q(descricao__icontains="Comiss"))
+            .order_by("codigo")
+            .first()
+        )
+        if natureza:
+            return natureza
+
+        plano = None
+        try:
+            from cadastros.models import PlanoContabil
+            plano = (
+                PlanoContabil.objects
+                .filter(empresa=empresa, ativa=True, classe=PlanoContabil.CLASSE_DESPESA)
+                .filter(models.Q(codigo="6.3.02") | models.Q(descricao__icontains="Comiss"))
+                .order_by("codigo")
+                .first()
+            )
+        except Exception:
+            plano = None
+
+        return Nat_Lancamento.objects.create(
+            empresa=empresa,
+            codigo="3103",
+            categoria_principal="DESPESAS OPERACIONAIS",
+            subcategoria="Vendas",
+            descricao="Comissões",
+            tipo="DESPESA",
+            status="ATIVO",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+            categoria_gerencial="Despesas com vendas",
+            movimenta_financeiro=False,
+            entra_dre=True,
+            plano_contabil=plano,
+            conta_contabil=plano.codigo if plano else None,
+            ativo=True,
+        )
+
+    def _registrar_cmv(self, venda: VendaPdv):
+        if MovimentacaoFinanceira.objects.filter(
+            empresa=venda.empresa,
+            origem=MovimentacaoFinanceira.ORIGEM_CMV,
+            documento=venda.documento,
+        ).exists():
+            return
+
+        total_cmv = money(sum((Decimal(item.cmv_total or 0) for item in venda.itens.all()), Decimal("0.00")))
+        if total_cmv <= 0:
+            return
+
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
+            idloja=venda.loja,
+            data_movimento=timezone.localdate(),
+            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_CMV,
+            valor=total_cmv,
+            historico=f"CMV venda PDV {venda.documento}",
+            documento=venda.documento,
+            Idnatureza=self._natureza_cmv(venda.empresa),
+            FormaPagamento="CMV",
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
+
+    def _registrar_comissao(self, venda: VendaPdv):
+        if MovimentacaoFinanceira.objects.filter(
+            empresa=venda.empresa,
+            origem=MovimentacaoFinanceira.ORIGEM_COMISSAO,
+            documento=venda.documento,
+        ).exists():
+            return
+
+        percentual = Decimal(getattr(venda.vendedor, "comissao_percentual", 0) or 0)
+        if percentual <= 0:
+            return
+        valor = money(Decimal(venda.total or 0) * percentual / Decimal("100"))
+        if valor <= 0:
+            return
+
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
+            idloja=venda.loja,
+            data_movimento=timezone.localdate(),
+            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_COMISSAO,
+            valor=valor,
+            historico=f"Comissão venda PDV {venda.documento} - {venda.vendedor.nomefuncionario}",
+            documento=venda.documento,
+            Idnatureza=self._natureza_comissao(venda.empresa),
+            FormaPagamento="COMISSAO",
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
 
     def _registrar_financeiro(self, venda: VendaPdv):
         if Receber.objects.filter(pedido_venda=venda.pk).exists():
             return
 
-        natureza = self._natureza_venda()
+        natureza = self._natureza_venda(venda.empresa)
         pagamentos = list(venda.pagamentos.all())
-        total_pago = money(sum((money(pagamento.valor) for pagamento in pagamentos), Decimal("0")))
         valor_venda = money(venda.total)
-        valor_baixado = money(min(total_pago, valor_venda))
-        valor_receber = money(valor_venda - valor_baixado)
-
-        saldo_para_caixa = money(venda.total)
-        for pagamento in pagamentos:
-            if pagamento.forma in ("CASHBACK", "TROCA"):
-                continue
-            valor_caixa = money(min(money(pagamento.valor), saldo_para_caixa))
-            if valor_caixa <= 0:
-                continue
-            saldo_para_caixa = money(saldo_para_caixa - valor_caixa)
-            caixa = venda.caixa
-            if not caixa:
-                continue
-            caixa.saldo_atual = money(caixa.saldo_atual) + valor_caixa
-            caixa.save(update_fields=["saldo_atual"])
-            MovimentacaoFinanceira.objects.create(
-                empresa=venda.empresa,
-                idloja=venda.loja,
-                data_movimento=timezone.localdate(),
-                tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
-                status=MovimentacaoFinanceira.STATUS_EFETIVA,
-                origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
-                valor=valor_caixa,
-                historico=f"Venda PDV {venda.documento} - {pagamento.descricao or pagamento.forma}",
-                documento=venda.documento,
-                Idnatureza=natureza,
-                FormaPagamento=pagamento.forma,
-                caixa=caixa,
-            )
-            self._consolidar_caixa_master(venda, natureza, valor_caixa)
+        formas_liquidacao = {
+            forma.codigo.upper(): forma
+            for forma in FormaPagamento.objects.select_related("conta_liquidacao")
+            .filter(empresa=venda.empresa, ativo=True, gera_recebivel_bancario=True, conta_liquidacao__isnull=False)
+        }
         receber = Receber.objects.create(
             empresa=venda.empresa,
             idloja=venda.loja,
             idcliente=venda.cliente,
-            Titulo=f"Venda PDV {venda.documento}",
+            Titulo=str(venda.documento),
             Documento=venda.documento,
             Data_emissao=timezone.localdate(),
             Valor_total=valor_venda,
@@ -719,25 +869,118 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             Idnatureza=natureza,
             pedido_venda=venda.pk,
         )
-        parcela_status = ReceberItem.STATUS_BAIXADO if valor_receber <= 0 else ReceberItem.STATUS_EFETIVO
-        baixa_fields = {}
-        if valor_baixado > 0:
-            baixa_fields = {
-                "data_baixa": timezone.localdate(),
-                "valor_baixa": valor_baixado,
-            }
 
-        ReceberItem.objects.create(
-            Idreceber=receber,
-            parcela_n=1,
-            status=parcela_status,
-            Data_vencimento=timezone.localdate(),
-            valor_parcela=valor_venda,
-            FormaPagamento=venda.forma_pagamento,
-            Previsao=False,
+        saldo_financeiro = valor_venda
+        parcela_n = 1
+        for pagamento in pagamentos:
+            if pagamento.forma in ("CASHBACK", "TROCA"):
+                continue
+            valor_pagamento = money(min(money(pagamento.valor), saldo_financeiro))
+            if valor_pagamento <= 0:
+                continue
+            saldo_financeiro = money(saldo_financeiro - valor_pagamento)
+            forma_config = formas_liquidacao.get(str(pagamento.forma or "").upper())
+            if forma_config:
+                item = ReceberItem.objects.create(
+                    Idreceber=receber,
+                    parcela_n=parcela_n,
+                    status=ReceberItem.STATUS_EFETIVO,
+                    Data_vencimento=timezone.localdate() + timedelta(days=int(forma_config.prazo_credito_dias or 0)),
+                    valor_parcela=valor_pagamento,
+                    FormaPagamento=pagamento.forma,
+                    Previsao=True,
+                    Idnatureza=natureza,
+                )
+                self._registrar_recebivel_bancario(venda, natureza, pagamento, forma_config, valor_pagamento, item)
+            else:
+                item = ReceberItem.objects.create(
+                    Idreceber=receber,
+                    parcela_n=parcela_n,
+                    status=ReceberItem.STATUS_BAIXADO,
+                    Data_vencimento=timezone.localdate(),
+                    valor_parcela=valor_pagamento,
+                    FormaPagamento=pagamento.forma,
+                    Previsao=False,
+                    Idnatureza=natureza,
+                    data_baixa=timezone.localdate(),
+                    valor_baixa=valor_pagamento,
+                )
+                self._registrar_recebimento_imediato(venda, natureza, pagamento, valor_pagamento, item)
+            parcela_n += 1
+
+        if not receber.itens.exists():
+            ReceberItem.objects.create(
+                Idreceber=receber,
+                parcela_n=1,
+                status=ReceberItem.STATUS_BAIXADO,
+                Data_vencimento=timezone.localdate(),
+                valor_parcela=valor_venda,
+                FormaPagamento=venda.forma_pagamento,
+                Previsao=False,
+                Idnatureza=natureza,
+                data_baixa=timezone.localdate(),
+                valor_baixa=valor_venda,
+            )
+
+    def _registrar_recebimento_imediato(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, valor: Decimal, item: ReceberItem):
+        caixa = venda.caixa
+        if not caixa:
+            return
+        caixa.saldo_atual = money(caixa.saldo_atual) + valor
+        caixa.save(update_fields=["saldo_atual"])
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
+            idloja=venda.loja,
+            data_movimento=timezone.localdate(),
+            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_RECEBER,
+            valor=valor,
+            historico=f"Venda PDV {venda.documento} - {pagamento.descricao or pagamento.forma}",
+            documento=venda.documento,
             Idnatureza=natureza,
-            **baixa_fields,
+            FormaPagamento=pagamento.forma,
+            caixa=caixa,
+            receber_item=item,
         )
+        gerar_lancamento_contabil_movimentacao(movimento)
+        self._consolidar_caixa_master(venda, natureza, valor)
+
+    def _registrar_recebivel_bancario(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, forma: FormaPagamento, valor_bruto: Decimal, item: ReceberItem):
+        taxa_percentual = Decimal(forma.taxa_percentual or 0)
+        taxa_fixa = Decimal(forma.taxa_fixa or 0)
+        taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa)
+        valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - taxa))
+        data_prevista = timezone.localdate() + timedelta(days=int(forma.prazo_credito_dias or 0))
+        historico = f"Recebivel {forma.descricao} PDV {venda.documento}"
+        if forma.adquirente:
+            historico = f"{historico} - {forma.adquirente}"
+        if taxa > 0:
+            historico = f"{historico} | bruto {money(valor_bruto)} taxa {taxa}"
+        prazo = int(forma.prazo_credito_dias or 0)
+        status_movimento = MovimentacaoFinanceira.STATUS_EFETIVA if prazo <= 0 else MovimentacaoFinanceira.STATUS_PREVISTA
+        origem_movimento = MovimentacaoFinanceira.ORIGEM_RECEBER if prazo <= 0 else MovimentacaoFinanceira.ORIGEM_CARTAO
+        if prazo <= 0 and forma.conta_liquidacao_id:
+            conta = forma.conta_liquidacao
+            conta.saldo_atual = money(conta.saldo_atual) + valor_liquido
+            conta.save(update_fields=["saldo_atual"])
+
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
+            idloja=venda.loja,
+            data_movimento=data_prevista,
+            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            status=status_movimento,
+            origem=origem_movimento,
+            valor=valor_liquido,
+            historico=historico[:255],
+            documento=venda.documento,
+            Idnatureza=natureza,
+            FormaPagamento=pagamento.forma,
+            conta_bancaria=forma.conta_liquidacao,
+            receber_item=item,
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
 
     def _consolidar_caixa_master(self, venda: VendaPdv, natureza: Nat_Lancamento, valor: Decimal):
         master = (
@@ -760,7 +1003,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         master.saldo_atual = money(master.saldo_atual) + money(valor)
         master.save(update_fields=["saldo_atual"])
-        MovimentacaoFinanceira.objects.create(
+        movimento = MovimentacaoFinanceira.objects.create(
             empresa=venda.empresa,
             idloja=venda.loja,
             data_movimento=timezone.localdate(),
@@ -774,9 +1017,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             FormaPagamento=venda.forma_pagamento,
             caixa=master,
         )
+        gerar_lancamento_contabil_movimentacao(movimento)
 
     def _autorizar_nfce(self, venda: VendaPdv) -> NFCe:
-        nfce = NFCe.objects.create(venda=venda, numero=_proximo_numero_nfce(), status=NFCe.Status.EMITINDO)
+        numero = int(venda.documento) if str(venda.documento or "").isdigit() else _proximo_numero_nfce()
+        nfce = NFCe.objects.create(venda=venda, numero=numero, status=NFCe.Status.EMITINDO)
         nfce.chave_acesso = _gerar_chave(nfce)
         nfce.protocolo = f"135{timezone.now().strftime('%y%m%d%H%M%S')}"
         nfce.qr_code_url = f"https://homologacao.nfce.sysvar.local/consulta?p={nfce.chave_acesso}"
@@ -841,10 +1086,10 @@ class NFCeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        empresa_id = self.request.query_params.get("empresa") if user.is_superuser or user.is_staff else getattr(user, "empresa_id", None)
+        empresa_id = self.request.query_params.get("empresa") if user.is_superuser else getattr(user, "empresa_id", None)
         if empresa_id:
             qs = qs.filter(venda__empresa_id=empresa_id)
-        elif not (user.is_superuser or user.is_staff):
+        elif not user.is_superuser:
             return qs.none()
         return qs
 
@@ -874,7 +1119,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         venda = self.request.query_params.get("venda")
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (self.request.user.is_superuser or self.request.user.is_staff):
+        elif not self.request.user.is_superuser:
             return qs.none()
         if loja:
             qs = qs.filter(loja_id=loja)
@@ -886,7 +1131,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
 
     def _empresa_id_usuario(self):
         user = self.request.user
-        if user.is_superuser or user.is_staff:
+        if user.is_superuser:
             return self.request.query_params.get("empresa")
         return getattr(user, "empresa_id", None)
 
@@ -905,7 +1150,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         ean = (request.query_params.get("ean") or "").strip()
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (request.user.is_superuser or request.user.is_staff):
+        elif not request.user.is_superuser:
             return Response([], status=status.HTTP_200_OK)
         if loja:
             qs = qs.filter(loja_id=loja)
@@ -944,7 +1189,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        elif not (request.user.is_superuser or request.user.is_staff):
+        elif not request.user.is_superuser:
             return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         venda = qs.filter(pk=venda_id).first() if venda_id else qs.filter(documento=documento).first()
         if not venda:
@@ -971,7 +1216,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             venda_qs = venda_qs.filter(empresa_id=empresa_id)
-        elif not (request.user.is_superuser or request.user.is_staff):
+        elif not request.user.is_superuser:
             return Response({"detail": "Usuário sem empresa vinculada."}, status=status.HTTP_400_BAD_REQUEST)
         venda = venda_qs.filter(pk=venda_id).first() if venda_id else venda_qs.filter(documento=documento).first()
         if not venda:
@@ -1017,6 +1262,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
 
         self._registrar_credito_cliente(devolucao)
         self._estornar_financeiro(devolucao)
+        self._estornar_cmv(devolucao)
         self._registrar_nfe_devolucao(devolucao)
 
         payload = VendaDevolucaoSerializer(devolucao, context={"request": request}).data
@@ -1101,7 +1347,77 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             quantidade=quantidade,
             preco_unitario=venda_item.preco_unitario,
             desconto=desconto,
+            custo_unitario=venda_item.custo_unitario,
         )
+
+    def _natureza_cmv(self, empresa=None) -> Nat_Lancamento:
+        natureza = (
+            Nat_Lancamento.objects
+            .filter(empresa=empresa, ativo=True, natureza_operacao="DESPESA")
+            .filter(models.Q(codigo="2100") | models.Q(descricao__icontains="CMV") | models.Q(descricao__icontains="mercadoria vendida"))
+            .order_by("codigo")
+            .first()
+        )
+        if natureza:
+            return natureza
+
+        plano = None
+        try:
+            from cadastros.models import PlanoContabil
+            plano = (
+                PlanoContabil.objects
+                .filter(empresa=empresa, ativa=True, classe=PlanoContabil.CLASSE_CUSTO)
+                .filter(models.Q(codigo="5.1.01") | models.Q(descricao__icontains="CMV"))
+                .order_by("codigo")
+                .first()
+            )
+        except Exception:
+            plano = None
+
+        return Nat_Lancamento.objects.create(
+            empresa=empresa,
+            codigo="2100",
+            categoria_principal="CUSTOS DAS MERCADORIAS",
+            subcategoria="CMV",
+            descricao="CMV - Custo da mercadoria vendida",
+            tipo="DESPESA",
+            status="ATIVO",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+            categoria_gerencial="CMV",
+            movimenta_financeiro=False,
+            entra_dre=True,
+            plano_contabil=plano,
+            conta_contabil=plano.codigo if plano else None,
+            ativo=True,
+        )
+
+    def _estornar_cmv(self, devolucao: VendaDevolucao):
+        if MovimentacaoFinanceira.objects.filter(
+            empresa=devolucao.empresa,
+            origem=MovimentacaoFinanceira.ORIGEM_CMV,
+            documento=devolucao.documento,
+        ).exists():
+            return
+
+        total_cmv = money(sum((Decimal(item.cmv_total or 0) for item in devolucao.itens.all()), Decimal("0.00")))
+        if total_cmv <= 0:
+            return
+
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=devolucao.empresa,
+            idloja=devolucao.loja,
+            data_movimento=timezone.localdate(),
+            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_CMV,
+            valor=total_cmv,
+            historico=f"Estorno CMV devolução {devolucao.documento}",
+            documento=devolucao.documento,
+            Idnatureza=self._natureza_cmv(devolucao.empresa),
+            FormaPagamento="CMV",
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
 
     def _registrar_credito_cliente(self, devolucao: VendaDevolucao):
         vale, created = ValeTroca.objects.get_or_create(

@@ -152,14 +152,27 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             qtd_pedido = Decimal(pedido_item.qtd or 0)
             saldo_total = qtd_pedido - qtd_outras_notas
             saldo_pendente = saldo_total - qtd_na_nota
+            pack_itens = list(PackItem.objects.filter(pack_id=pedido_item.pack_id)) if pedido_item.pack_id else []
+            qtd_pack = sum(int(item.qtd or 0) for item in pack_itens)
+            quantidades_validas = []
+            if qtd_pack and pedido_item.n_packs:
+                quantidades_validas = [
+                    str(Decimal(qtd_pack * pack_num))
+                    for pack_num in range(1, int(pedido_item.n_packs or 0) + 1)
+                    if Decimal(qtd_pack * pack_num) <= saldo_total
+                ]
 
             payload.append(
                 {
                     "pedido_item": pedido_item.pk,
                     "nota_item": getattr(item_nota, "pk", None),
                     "produto": getattr(pedido_item, "produto_id", None),
+                    "produto_descricao": getattr(getattr(pedido_item, "produto", None), "descricao", None),
+                    "produto_referencia": getattr(getattr(pedido_item, "produto", None), "referencia", None),
                     "cor": getattr(pedido_item, "cor_id", None),
+                    "cor_nome": getattr(getattr(pedido_item, "cor", None), "Descricao", None),
                     "pack": getattr(pedido_item, "pack_id", None),
+                    "pack_nome": getattr(getattr(pedido_item, "pack", None), "nome", None),
                     "descricao_livre": pedido_item.descricao_livre,
                     "qtd_pedido": str(qtd_pedido),
                     "qtd_recebida_outras_notas": str(qtd_outras_notas),
@@ -167,6 +180,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     "saldo_total_recebivel": str(saldo_total),
                     "saldo_pendente": str(saldo_pendente),
                     "preco_unit_pedido": str(pedido_item.preco_unit),
+                    "qtd_pack": str(qtd_pack or ""),
+                    "n_packs": pedido_item.n_packs or 0,
+                    "quantidades_validas": quantidades_validas,
                 }
             )
 
@@ -233,7 +249,17 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         for pack_item in pack_itens:
             qtd_decimal = Decimal(pack_item.qtd or 0) * Decimal(pedido_item.n_packs or 0) * fator_recebido
             if qtd_decimal != qtd_decimal.to_integral_value():
-                raise ValueError("Quantidade recebida não fecha com a composição do pack.")
+                qtd_pack = sum(int(item.qtd or 0) for item in pack_itens)
+                validas = [
+                    str(qtd_pack * pack_num)
+                    for pack_num in range(1, int(pedido_item.n_packs or 0) + 1)
+                ] if qtd_pack and pedido_item.n_packs else []
+                produto = getattr(pedido_item.produto, "descricao", f"produto {pedido_item.produto_id}")
+                complemento = f" Quantidades válidas para este item: {', '.join(validas)}." if validas else ""
+                raise ValueError(
+                    f"Item {pedido_item.pk} ({produto}): a quantidade recebida {qtd_recebida} não fecha com a composição do pack."
+                    f" O pedido tem {qtd_pedido} peça(s) neste item.{complemento}"
+                )
 
             qtd = int(qtd_decimal)
             if qtd <= 0:
@@ -248,6 +274,12 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 raise ValueError(
                     f"SKU não encontrado para produto {pedido_item.produto_id}, cor {pedido_item.cor_id}, tamanho {pack_item.tamanho_id}."
                 )
+            if sinal > 0:
+                custo = Decimal(item_nf.preco_unit_nf or 0)
+                sku.custo_ultima_compra = custo
+                if not Decimal(sku.custo_original or 0):
+                    sku.custo_original = custo
+                sku.save(update_fields=["custo_original", "custo_ultima_compra"])
 
             estoque, _ = Estoque.objects.select_for_update().get_or_create(
                 CodigodeBarra=sku.ean13,

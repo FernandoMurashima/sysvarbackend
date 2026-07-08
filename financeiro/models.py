@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import models
 from django.db.models import Case, DecimalField, Sum, Value, When
 from django.utils import timezone
-from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento
+from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento, PlanoContabil
 
 # =========================
 # Formas de Pagamento
@@ -11,14 +11,29 @@ from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento
 class FormaPagamento(models.Model):
     Idformapagamento = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='formas_pagamento', db_index=True)
-    codigo = models.CharField(max_length=10, unique=True)   # ex.: 'AV', '30/60', '01'
+    codigo = models.CharField(max_length=10)   # ex.: 'AV', '30/60', '01'
     descricao = models.CharField(max_length=120)
     num_parcelas = models.IntegerField(default=1)
     ativo = models.BooleanField(default=True)
+    adquirente = models.CharField(max_length=80, null=True, blank=True)
+    conta_liquidacao = models.ForeignKey(
+        'financeiro.ContaBancaria',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='formas_liquidacao',
+    )
+    gera_recebivel_bancario = models.BooleanField(default=False)
+    prazo_credito_dias = models.PositiveIntegerField(default=0)
+    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     class Meta:
         db_table = 'financeiro_forma_pagamento'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'codigo'], name='uq_empresa_forma_pagamento_codigo')
+        ]
         ordering = ['codigo']
 
     def __str__(self):
@@ -322,19 +337,31 @@ class MovimentacaoFinanceira(models.Model):
     STATUS_PREVISTA = 'PREVISTA'
     STATUS_EFETIVA = 'EFETIVA'
     STATUS_CANCELADA = 'CANCELADA'
+    STATUS_ANTECIPADA = 'ANTECIPADA'
     STATUS_CHOICES = [
         (STATUS_PREVISTA, 'Prevista'),
         (STATUS_EFETIVA, 'Efetiva'),
         (STATUS_CANCELADA, 'Cancelada'),
+        (STATUS_ANTECIPADA, 'Antecipada'),
     ]
 
     ORIGEM_MANUAL = 'MANUAL'
     ORIGEM_PAGAR = 'PAGAR'
     ORIGEM_RECEBER = 'RECEBER'
+    ORIGEM_TRANSFERENCIA = 'TRANSFERENCIA'
+    ORIGEM_CARTAO = 'CARTAO'
+    ORIGEM_ANTECIPACAO = 'ANTECIPACAO'
+    ORIGEM_CMV = 'CMV'
+    ORIGEM_COMISSAO = 'COMISSAO'
     ORIGEM_CHOICES = [
         (ORIGEM_MANUAL, 'Manual'),
         (ORIGEM_PAGAR, 'Contas a pagar'),
         (ORIGEM_RECEBER, 'Contas a receber'),
+        (ORIGEM_TRANSFERENCIA, 'Transferência entre caixas'),
+        (ORIGEM_CARTAO, 'Recebível de cartão'),
+        (ORIGEM_ANTECIPACAO, 'Antecipação de recebíveis'),
+        (ORIGEM_CMV, 'Custo da mercadoria vendida'),
+        (ORIGEM_COMISSAO, 'Comissão de venda'),
     ]
 
     Idmovimentacao = models.BigAutoField(primary_key=True)
@@ -343,7 +370,7 @@ class MovimentacaoFinanceira(models.Model):
     data_movimento = models.DateField(default=timezone.now, db_index=True)
     tipo = models.CharField(max_length=15, choices=TIPO_CHOICES)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_EFETIVA, db_index=True)
-    origem = models.CharField(max_length=10, choices=ORIGEM_CHOICES, default=ORIGEM_MANUAL, db_index=True)
+    origem = models.CharField(max_length=15, choices=ORIGEM_CHOICES, default=ORIGEM_MANUAL, db_index=True)
 
     valor = models.DecimalField(max_digits=18, decimal_places=2)
     historico = models.CharField(max_length=255)
@@ -356,6 +383,8 @@ class MovimentacaoFinanceira(models.Model):
     pagar_item = models.ForeignKey('PagarItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='movimentacoes')
     receber_item = models.ForeignKey('ReceberItem', on_delete=models.SET_NULL, null=True, blank=True, related_name='movimentacoes')
 
+    data_conciliacao = models.DateField(null=True, blank=True, db_index=True)
+    valor_conciliado = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -370,6 +399,45 @@ class MovimentacaoFinanceira(models.Model):
 
     def __str__(self):
         return f'{self.Idmovimentacao} - {self.tipo} - {self.valor}'
+
+
+class LancamentoContabil(models.Model):
+    STATUS_GERADO = 'GERADO'
+    STATUS_PENDENTE = 'PENDENTE'
+    STATUS_ESTORNADO = 'ESTORNADO'
+    STATUS_CHOICES = [
+        (STATUS_GERADO, 'Gerado'),
+        (STATUS_PENDENTE, 'Pendente'),
+        (STATUS_ESTORNADO, 'Estornado'),
+    ]
+
+    Idlancamentocontabil = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='lancamentos_contabeis', db_index=True)
+    idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, db_index=True)
+    movimentacao = models.OneToOneField(MovimentacaoFinanceira, on_delete=models.PROTECT, related_name='lancamento_contabil')
+    data_lancamento = models.DateField(db_index=True)
+    documento = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    historico = models.CharField(max_length=255)
+    origem = models.CharField(max_length=30, db_index=True)
+    natureza = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='lancamentos_contabeis')
+    conta_debito = models.ForeignKey(PlanoContabil, on_delete=models.PROTECT, null=True, blank=True, related_name='lancamentos_debito')
+    conta_credito = models.ForeignKey(PlanoContabil, on_delete=models.PROTECT, null=True, blank=True, related_name='lancamentos_credito')
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_GERADO, db_index=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_lancamento_contabil'
+        ordering = ['-data_lancamento', '-Idlancamentocontabil']
+        indexes = [
+            models.Index(fields=['empresa', 'data_lancamento']),
+            models.Index(fields=['status']),
+            models.Index(fields=['origem']),
+        ]
+
+    def __str__(self):
+        return f'{self.documento or self.pk} - {self.valor}'
 
 
 # =========================
@@ -503,11 +571,13 @@ class ReceberItem(models.Model):
     STATUS_EFETIVO = 'EFETIVO'
     STATUS_BAIXADO = 'BAIXADO'
     STATUS_CANCELADO = 'CANCELADO'
+    STATUS_ANTECIPADO = 'ANTECIPADO'
     STATUS_CHOICES = [
         (STATUS_PREVISTO, 'Previsto'),
         (STATUS_EFETIVO, 'Efetivo'),
         (STATUS_BAIXADO, 'Baixado'),
         (STATUS_CANCELADO, 'Cancelado'),
+        (STATUS_ANTECIPADO, 'Antecipado'),
     ]
 
     Idreceberitem = models.BigAutoField(primary_key=True)
@@ -554,3 +624,58 @@ class ReceberRateio(models.Model):
 
     def __str__(self):
         return f'Rateio {self.Idrateio} - Parcela {self.Idreceberitem_id}'
+
+
+class AntecipacaoRecebivel(models.Model):
+    STATUS_EFETIVA = 'EFETIVA'
+    STATUS_CANCELADA = 'CANCELADA'
+    STATUS_CHOICES = [
+        (STATUS_EFETIVA, 'Efetiva'),
+        (STATUS_CANCELADA, 'Cancelada'),
+    ]
+
+    Idantecipacao = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='antecipacoes_recebiveis', db_index=True)
+    idloja = models.ForeignKey(Loja, on_delete=models.PROTECT, db_index=True)
+    conta_bancaria = models.ForeignKey(ContaBancaria, on_delete=models.PROTECT, related_name='antecipacoes')
+    documento = models.CharField(max_length=50, db_index=True)
+    data_antecipacao = models.DateField(default=timezone.now, db_index=True)
+    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    valor_bruto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    taxa_valor = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_liquido = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_EFETIVA, db_index=True)
+    observacao = models.CharField(max_length=255, blank=True, default='')
+    criado_por = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_antecipacao_recebivel'
+        ordering = ['-data_antecipacao', '-Idantecipacao']
+        indexes = [
+            models.Index(fields=['empresa', 'data_antecipacao']),
+            models.Index(fields=['conta_bancaria', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.documento} - {self.valor_liquido}'
+
+
+class AntecipacaoRecebivelItem(models.Model):
+    Idantecipacaoitem = models.BigAutoField(primary_key=True)
+    antecipacao = models.ForeignKey(AntecipacaoRecebivel, on_delete=models.PROTECT, related_name='itens')
+    movimentacao = models.OneToOneField(MovimentacaoFinanceira, on_delete=models.PROTECT, related_name='antecipacao_item')
+    receber_item = models.ForeignKey(ReceberItem, on_delete=models.PROTECT, related_name='antecipacoes')
+    valor_bruto = models.DecimalField(max_digits=18, decimal_places=2)
+    taxa_valor = models.DecimalField(max_digits=18, decimal_places=2)
+    valor_liquido = models.DecimalField(max_digits=18, decimal_places=2)
+
+    class Meta:
+        db_table = 'financeiro_antecipacao_recebivel_item'
+        indexes = [
+            models.Index(fields=['antecipacao']),
+            models.Index(fields=['receber_item']),
+        ]
+
+    def __str__(self):
+        return f'{self.antecipacao_id} - {self.movimentacao_id}'

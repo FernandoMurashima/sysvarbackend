@@ -2,10 +2,12 @@ from rest_framework import serializers
 from .models import (
     FormaPagamento, FormaPagamentoParcela,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
+    LancamentoContabil,
     CashbackConfig, CashbackMovimento,
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
+    AntecipacaoRecebivel, AntecipacaoRecebivelItem,
 )
 
 class FormaPagamentoParcelaSerializer(serializers.ModelSerializer):
@@ -19,6 +21,16 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormaPagamento
         fields = '__all__'
+
+    def validate(self, attrs):
+        gera = attrs.get('gera_recebivel_bancario', getattr(self.instance, 'gera_recebivel_bancario', False))
+        conta = attrs.get('conta_liquidacao', getattr(self.instance, 'conta_liquidacao', None))
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        if gera and not conta:
+            raise serializers.ValidationError({'conta_liquidacao': 'Informe a conta de liquidação.'})
+        if conta and empresa and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa.id:
+            raise serializers.ValidationError({'conta_liquidacao': 'A conta de liquidação pertence a outra empresa.'})
+        return attrs
 
 
 class CashbackConfigSerializer(serializers.ModelSerializer):
@@ -101,6 +113,17 @@ class PagarSerializer(serializers.ModelSerializer):
         model = Pagar
         fields = '__all__'
 
+    def validate(self, attrs):
+        natureza = attrs.get('Idnatureza', getattr(self.instance, 'Idnatureza', None))
+        if not natureza:
+            raise serializers.ValidationError({'Idnatureza': 'Informe a natureza de lançamento.'})
+        if natureza and getattr(natureza, 'ativo', True) is False:
+            raise serializers.ValidationError({'Idnatureza': 'A natureza selecionada está inativa.'})
+        operacao = str(getattr(natureza, 'natureza_operacao', '') or '').upper()
+        if operacao not in {'DESPESA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Contas a pagar deve usar natureza de despesa ou ajuste.'})
+        return attrs
+
 
 class CaixaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -138,11 +161,42 @@ class MovimentacaoFinanceiraSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         caixa = attrs.get('caixa', getattr(self.instance, 'caixa', None))
         conta = attrs.get('conta_bancaria', getattr(self.instance, 'conta_bancaria', None))
+        natureza = attrs.get('Idnatureza', getattr(self.instance, 'Idnatureza', None))
         if not caixa and not conta:
             raise serializers.ValidationError('Informe um caixa ou uma conta bancária.')
         if caixa and conta:
             raise serializers.ValidationError('Informe apenas um destino: caixa ou conta bancária.')
+        if not natureza:
+            raise serializers.ValidationError({'Idnatureza': 'Informe a natureza de lançamento.'})
+        if natureza and getattr(natureza, 'ativo', True) is False:
+            raise serializers.ValidationError({'Idnatureza': 'A natureza selecionada está inativa.'})
+        tipo = attrs.get('tipo', getattr(self.instance, 'tipo', None))
+        operacao = str(getattr(natureza, 'natureza_operacao', '') or '').upper()
+        if tipo == MovimentacaoFinanceira.TIPO_ENTRADA and operacao not in {'RECEITA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Entrada deve usar natureza de receita ou ajuste.'})
+        if tipo == MovimentacaoFinanceira.TIPO_SAIDA and operacao not in {'DESPESA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Saída deve usar natureza de despesa ou ajuste.'})
+        if tipo == MovimentacaoFinanceira.TIPO_TRANSFERENCIA and operacao not in {'TRANSFERENCIA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Transferência deve usar natureza de transferência ou ajuste.'})
         return attrs
+
+
+class LancamentoContabilSerializer(serializers.ModelSerializer):
+    loja_nome = serializers.CharField(source='idloja.nome_loja', read_only=True)
+    natureza_descricao = serializers.CharField(source='natureza.descricao', read_only=True)
+    conta_debito_codigo = serializers.CharField(source='conta_debito.codigo', read_only=True)
+    conta_debito_descricao = serializers.CharField(source='conta_debito.descricao', read_only=True)
+    conta_credito_codigo = serializers.CharField(source='conta_credito.codigo', read_only=True)
+    conta_credito_descricao = serializers.CharField(source='conta_credito.descricao', read_only=True)
+
+    class Meta:
+        model = LancamentoContabil
+        fields = '__all__'
+        read_only_fields = (
+            'empresa', 'idloja', 'movimentacao', 'data_lancamento', 'documento',
+            'historico', 'origem', 'natureza', 'conta_debito', 'conta_credito',
+            'valor', 'status', 'observacao', 'data_cadastro',
+        )
 
 
 class ReceberRateioSerializer(serializers.ModelSerializer):
@@ -163,3 +217,35 @@ class ReceberSerializer(serializers.ModelSerializer):
     class Meta:
         model = Receber
         fields = '__all__'
+
+    def validate(self, attrs):
+        natureza = attrs.get('Idnatureza', getattr(self.instance, 'Idnatureza', None))
+        if not natureza:
+            raise serializers.ValidationError({'Idnatureza': 'Informe a natureza de lançamento.'})
+        if natureza and getattr(natureza, 'ativo', True) is False:
+            raise serializers.ValidationError({'Idnatureza': 'A natureza selecionada está inativa.'})
+        operacao = str(getattr(natureza, 'natureza_operacao', '') or '').upper()
+        if operacao not in {'RECEITA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Contas a receber deve usar natureza de receita ou ajuste.'})
+        return attrs
+
+
+class AntecipacaoRecebivelItemSerializer(serializers.ModelSerializer):
+    documento = serializers.CharField(source='movimentacao.documento', read_only=True)
+    vencimento = serializers.DateField(source='movimentacao.data_movimento', read_only=True)
+    forma_pagamento = serializers.CharField(source='movimentacao.FormaPagamento', read_only=True)
+
+    class Meta:
+        model = AntecipacaoRecebivelItem
+        fields = '__all__'
+
+
+class AntecipacaoRecebivelSerializer(serializers.ModelSerializer):
+    itens = AntecipacaoRecebivelItemSerializer(many=True, read_only=True)
+    loja_nome = serializers.CharField(source='idloja.nome_loja', read_only=True)
+    conta_nome = serializers.CharField(source='conta_bancaria.descricao', read_only=True)
+
+    class Meta:
+        model = AntecipacaoRecebivel
+        fields = '__all__'
+        read_only_fields = ('criado_por', 'criado_em')

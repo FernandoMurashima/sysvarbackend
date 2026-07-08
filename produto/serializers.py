@@ -19,8 +19,11 @@ def ean13_check_digit(base12: str) -> str:
             s += 3 * n
     return str((10 - (s % 10)) % 10)
 
-def _alocar_itemref_do_prefixo_ativo():
-    cfg = ConfigEan.objects.select_for_update().filter(ativo=True).order_by('id').first()
+def _alocar_itemref_do_prefixo_ativo(empresa=None):
+    qs = ConfigEan.objects.select_for_update().filter(ativo=True)
+    if empresa is not None:
+        qs = qs.filter(empresa=empresa)
+    cfg = qs.order_by('id').first()
     if not cfg:
         raise serializers.ValidationError('Nenhum prefixo GS1 ativo encontrado. Cadastre/ative em ConfigEan.')
     val = cfg.next_itemref or 1
@@ -48,7 +51,7 @@ def _normalize_ncm_dotted(raw: str) -> str:
 def _empresa_request(serializer):
     request = serializer.context.get('request') if getattr(serializer, 'context', None) else None
     user = getattr(request, 'user', None)
-    if user and user.is_authenticated and not (user.is_superuser or user.is_staff):
+    if user and user.is_authenticated and not user.is_superuser:
         return getattr(user, 'empresa', None)
     return None
 
@@ -72,6 +75,15 @@ class TamanhoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tamanho
         fields = '__all__'
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        grade = attrs.get('idgrade', getattr(self.instance, 'idgrade', None))
+        if grade and empresa and grade.empresa_id and grade.empresa_id != empresa.id:
+            raise serializers.ValidationError({'idgrade': 'A grade selecionada pertence a outra empresa.'})
+        if grade and not attrs.get('empresa') and not empresa:
+            attrs['empresa'] = grade.empresa
+        return attrs
 
 class CorSerializer(serializers.ModelSerializer):
     class Meta:
@@ -127,10 +139,28 @@ class PackSerializer(serializers.ModelSerializer):
         model = Pack
         fields = '__all__'
 
+    def validate(self, attrs):
+        grade = attrs.get('grade') or getattr(self.instance, 'grade', None)
+        empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        if grade and empresa and grade.empresa_id and grade.empresa_id != empresa.id:
+            raise serializers.ValidationError({'grade': 'A grade selecionada pertence a outra empresa.'})
+        return attrs
+
 class PackItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PackItem
         fields = '__all__'
+
+    def validate(self, attrs):
+        pack = attrs.get('pack') or getattr(self.instance, 'pack', None)
+        tamanho = attrs.get('tamanho') or getattr(self.instance, 'tamanho', None)
+
+        if pack and tamanho:
+            if pack.empresa_id and tamanho.empresa_id and pack.empresa_id != tamanho.empresa_id:
+                raise serializers.ValidationError({'tamanho': 'O tamanho selecionado pertence a outra empresa.'})
+            if pack.grade_id and tamanho.idgrade_id != pack.grade_id:
+                raise serializers.ValidationError({'tamanho': 'O tamanho selecionado não pertence à grade do pack.'})
+        return attrs
 
 class EstoqueSerializer(serializers.ModelSerializer):
     class Meta:
@@ -171,12 +201,21 @@ class ProdutoSerializer(serializers.ModelSerializer):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
         tipo = attrs.get('tipo_produto', getattr(self.instance, 'tipo_produto', None))
         grade = attrs.get('grade', getattr(self.instance, 'grade', None))
+        unidade = attrs.get('unidade', getattr(self.instance, 'unidade', None))
+        material = attrs.get('material', getattr(self.instance, 'material', None))
         colecao = attrs.get('colecao', getattr(self.instance, 'colecao', None))
         grupo = attrs.get('grupo', getattr(self.instance, 'grupo', None))
         subgrupo = attrs.get('subgrupo', getattr(self.instance, 'subgrupo', None))
         ncm_raw = attrs.get('ncm', getattr(self.instance, 'ncm', None))
 
-        for campo, obj in (('colecao', colecao), ('grupo', grupo), ('subgrupo', subgrupo)):
+        for campo, obj in (
+            ('unidade', unidade),
+            ('grade', grade),
+            ('material', material),
+            ('colecao', colecao),
+            ('grupo', grupo),
+            ('subgrupo', subgrupo),
+        ):
             obj_empresa_id = getattr(obj, 'empresa_id', None)
             if empresa and obj_empresa_id and obj_empresa_id != empresa.id:
                 raise serializers.ValidationError({campo: 'O cadastro selecionado pertence a outra empresa.'})
@@ -191,7 +230,10 @@ class ProdutoSerializer(serializers.ModelSerializer):
             if grade is None:
                 raise serializers.ValidationError({'grade': 'Obrigatória para produto de Revenda.'})
             ncm_fmt = _normalize_ncm_dotted(ncm_raw)
-            if not Ncm.objects.filter(ncm=ncm_fmt).exists():
+            ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
+            if empresa:
+                ncm_qs = ncm_qs.filter(empresa=empresa)
+            if not ncm_qs.exists():
                 raise serializers.ValidationError({'ncm': f'NCM {ncm_fmt} não cadastrado.'})
             attrs['ncm'] = ncm_fmt
         elif tipo == '2':  # Uso/Consumo
@@ -201,7 +243,10 @@ class ProdutoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'grade': 'Não deve ser informada para Uso/Consumo.'})
             if ncm_raw:
                 ncm_fmt = _normalize_ncm_dotted(ncm_raw)
-                if not Ncm.objects.filter(ncm=ncm_fmt).exists():
+                ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
+                if empresa:
+                    ncm_qs = ncm_qs.filter(empresa=empresa)
+                if not ncm_qs.exists():
                     raise serializers.ValidationError({'ncm': f'NCM {ncm_fmt} não cadastrado.'})
                 attrs['ncm'] = ncm_fmt
         else:
@@ -226,6 +271,7 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({f: 'É gerado automaticamente; não envie manualmente.'})
 
         produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
+        cor = attrs.get('idcor') or getattr(self.instance, 'idcor', None)
         tamanho = attrs.get('idtamanho') or getattr(self.instance, 'idtamanho', None)
 
         if not produto or not tamanho:
@@ -236,12 +282,18 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
 
         if produto.grade_id and tamanho.idgrade_id != produto.grade_id:
             raise serializers.ValidationError('Tamanho não pertence à grade do produto.')
+        if produto.empresa_id:
+            if cor and cor.empresa_id and cor.empresa_id != produto.empresa_id:
+                raise serializers.ValidationError({'idcor': 'A cor selecionada pertence a outra empresa.'})
+            if tamanho and tamanho.empresa_id and tamanho.empresa_id != produto.empresa_id:
+                raise serializers.ValidationError({'idtamanho': 'O tamanho selecionado pertence a outra empresa.'})
 
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
-        cfg, item = _alocar_itemref_do_prefixo_ativo()
+        produto = validated_data.get('produto')
+        cfg, item = _alocar_itemref_do_prefixo_ativo(getattr(produto, 'empresa', None))
         validated_data['config_ean'] = cfg
         validated_data['codigo_item_ref'] = item
 

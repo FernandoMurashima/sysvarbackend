@@ -70,6 +70,8 @@ class VendaPdvItem(models.Model):
     preco_unitario = models.DecimalField(max_digits=18, decimal_places=4)
     desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    custo_unitario = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    cmv_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     class Meta:
         db_table = "fiscal_venda_pdv_item"
@@ -82,6 +84,7 @@ class VendaPdvItem(models.Model):
     def save(self, *args, **kwargs):
         bruto = Decimal(self.quantidade or 0) * Decimal(self.preco_unitario or 0)
         self.total_item = money(bruto - Decimal(self.desconto or 0))
+        self.cmv_total = money(Decimal(self.quantidade or 0) * Decimal(self.custo_unitario or 0))
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -160,6 +163,8 @@ class VendaDevolucaoItem(models.Model):
     preco_unitario = models.DecimalField(max_digits=18, decimal_places=4)
     desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    custo_unitario = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    cmv_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     class Meta:
         db_table = "fiscal_venda_devolucao_item"
@@ -175,6 +180,7 @@ class VendaDevolucaoItem(models.Model):
             Decimal(self.desconto or 0) / Decimal(self.quantidade or 1)
         )
         self.total_item = money(Decimal(self.quantidade or 0) * valor_unitario_liquido)
+        self.cmv_total = money(Decimal(self.quantidade or 0) * Decimal(self.custo_unitario or 0))
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:

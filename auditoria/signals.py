@@ -10,6 +10,14 @@ from .middleware import get_current_request, get_current_user, get_current_ip
 # Só auditamos esses apps de domínio (evita ruído/loops)
 ALLOWED_APPS = {"cadastros", "produto"}  # adicione outros apps quando quiser
 
+
+def _safe_create_audit(**payload):
+    try:
+        AuditLog.objects.create(**payload)
+    except Exception:
+        # A auditoria nao pode impedir migracoes, testes ou a operacao principal.
+        pass
+
 # ----------------- helpers -----------------
 def _model_ident(instance):
     meta = instance._meta
@@ -71,7 +79,7 @@ def audit_postsave(sender, instance, created, **kwargs):
     old_data = getattr(instance, "__audit_old__", {})
 
     if created:
-        AuditLog.objects.create(
+        _safe_create_audit(
             action="create",
             app_label=app_label,
             model=model,
@@ -84,7 +92,7 @@ def audit_postsave(sender, instance, created, **kwargs):
     else:
         changes = _diff(old_data, new_data)
         if changes:
-            AuditLog.objects.create(
+            _safe_create_audit(
                 action="update",
                 app_label=app_label,
                 model=model,
@@ -108,7 +116,7 @@ def audit_predelete(sender, instance, **kwargs):
     ip, ua = _ctx_from_request(req)
     snapshot = _dict_clean(instance)
 
-    AuditLog.objects.create(
+    _safe_create_audit(
         action="delete",
         app_label=app_label,
         model=model,
@@ -123,7 +131,7 @@ def audit_predelete(sender, instance, **kwargs):
 @receiver(user_logged_in)
 def audit_user_logged_in(sender, request, user, **kwargs):
     ip, ua = _ctx_from_request(request)
-    AuditLog.objects.create(
+    _safe_create_audit(
         action="login",
         app_label="accounts",
         model="session",
@@ -137,7 +145,7 @@ def audit_user_logged_in(sender, request, user, **kwargs):
 @receiver(user_logged_out)
 def audit_user_logged_out(sender, request, user, **kwargs):
     ip, ua = _ctx_from_request(request)
-    AuditLog.objects.create(
+    _safe_create_audit(
         action="logout",
         app_label="accounts",
         model="session",
@@ -151,7 +159,7 @@ def audit_user_logged_out(sender, request, user, **kwargs):
 @receiver(user_login_failed)
 def audit_user_login_failed(sender, credentials, request, **kwargs):
     ip, ua = _ctx_from_request(request)
-    AuditLog.objects.create(
+    _safe_create_audit(
         action="custom",
         app_label="accounts",
         model="session",
