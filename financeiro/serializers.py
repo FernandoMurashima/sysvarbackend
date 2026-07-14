@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import (
     FormaPagamento, FormaPagamentoParcela,
+    ConfigFinanceira,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     LancamentoContabil,
     CashbackConfig, CashbackMovimento,
@@ -9,6 +10,13 @@ from .models import (
     Receber, ReceberItem, ReceberRateio,
     AntecipacaoRecebivel, AntecipacaoRecebivelItem,
 )
+
+class ConfigFinanceiraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigFinanceira
+        fields = '__all__'
+        read_only_fields = ('empresa', 'atualizado_em')
+
 
 class FormaPagamentoParcelaSerializer(serializers.ModelSerializer):
     class Meta:

@@ -274,6 +274,11 @@ class PedidoCompraViewSet(BaseViewSet):
                 {"detail": f"Natureza de lançamento {idnat} não encontrada."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if natureza.empresa_id and obj.empresa_id and natureza.empresa_id != obj.empresa_id:
+            return Response(
+                {"detail": "A natureza informada pertence a outra empresa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # 5) Recalcula totais para garantir consistência
         obj.recomputa_totais()
@@ -349,6 +354,83 @@ class PedidoCompraViewSet(BaseViewSet):
             {"status": [before, "AP"], "pagar_id": getattr(pagar, "Idpagar", pagar.pk)},
             request,
             action="aprovar",
+        )
+
+        return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="alterar-natureza")
+    @transaction.atomic
+    def alterar_natureza(self, request, pk=None):
+        """
+        Altera a natureza do contas a pagar gerado pelo pedido.
+        Parcelas já baixadas não são alteradas para preservar o histórico financeiro.
+        """
+        obj: PedidoCompra = self.get_object()
+        if not FIN_OK:
+            return Response(
+                {"detail": "Financeiro indisponível."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (obj.status or "").upper() not in ("AP", "AT"):
+            return Response(
+                {"detail": "A natureza só pode ser alterada em pedido aprovado ou atendido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_idnat = request.data.get("idnatureza")
+        try:
+            idnat = int(raw_idnat)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": 'Informe "idnatureza" numérico no corpo da requisição.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            natureza = Nat_Lancamento.objects.get(pk=idnat)
+        except Nat_Lancamento.DoesNotExist:
+            return Response(
+                {"detail": f"Natureza de lançamento {idnat} não encontrada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if natureza.empresa_id and obj.empresa_id and natureza.empresa_id != obj.empresa_id:
+            return Response(
+                {"detail": "A natureza informada pertence a outra empresa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pagar = (
+            Pagar.objects
+            .select_for_update()
+            .filter(empresa=obj.empresa, pedido_compra=obj.id)
+            .order_by("-Idpagar")
+            .first()
+        )
+        if not pagar:
+            return Response(
+                {"detail": "Não existe contas a pagar gerado para este pedido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        anterior = pagar.Idnatureza_id
+        pagar.Idnatureza = natureza
+        pagar.save(update_fields=["Idnatureza"])
+
+        itens_editaveis = pagar.itens.exclude(status=getattr(PagarItem, "STATUS_BAIXADO", "BAIXADO"))
+        alteradas = itens_editaveis.update(Idnatureza=natureza)
+        baixadas = pagar.itens.filter(status=getattr(PagarItem, "STATUS_BAIXADO", "BAIXADO")).count()
+
+        _audit(
+            "pedidocompra",
+            obj.pk,
+            {
+                "natureza": [anterior, natureza.pk],
+                "pagar_id": getattr(pagar, "Idpagar", pagar.pk),
+                "parcelas_alteradas": alteradas,
+                "parcelas_baixadas_preservadas": baixadas,
+            },
+            request,
+            action="alt_natureza",
         )
 
         return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)

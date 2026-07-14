@@ -11,10 +11,54 @@ from cadastros.validators import (
 
 
 class Empresa(models.Model):
+    REGIME_SIMPLES = "SIMPLES"
+    REGIME_LUCRO_PRESUMIDO = "LUCRO_PRESUMIDO"
+    REGIME_LUCRO_REAL = "LUCRO_REAL"
+    REGIME_TRIBUTARIO_CHOICES = [
+        (REGIME_SIMPLES, "Simples Nacional"),
+        (REGIME_LUCRO_PRESUMIDO, "Lucro Presumido"),
+        (REGIME_LUCRO_REAL, "Lucro Real"),
+    ]
+
+    AMBIENTE_HOMOLOGACAO = "HOMOLOGACAO"
+    AMBIENTE_PRODUCAO = "PRODUCAO"
+    AMBIENTE_FISCAL_CHOICES = [
+        (AMBIENTE_HOMOLOGACAO, "Homologação"),
+        (AMBIENTE_PRODUCAO, "Produção"),
+    ]
+
     nome = models.CharField(max_length=120, db_index=True)
     nome_fantasia = models.CharField(max_length=120, null=True, blank=True, db_index=True)
     documento = models.CharField(max_length=18, null=True, blank=True, unique=True)
     ativo = models.BooleanField(default=True, db_index=True)
+    licenca_master = models.BooleanField(default=False, db_index=True)
+    usa_vendas = models.BooleanField(default=False, db_index=True)
+    usa_compras = models.BooleanField(default=False, db_index=True)
+    usa_estoque = models.BooleanField(default=False, db_index=True)
+    usa_financeiro = models.BooleanField(default=False, db_index=True)
+    usa_fiscal = models.BooleanField(default=False, db_index=True)
+    regime_tributario = models.CharField(
+        max_length=20,
+        choices=REGIME_TRIBUTARIO_CHOICES,
+        default=REGIME_SIMPLES,
+        db_index=True,
+    )
+    ambiente_fiscal = models.CharField(
+        max_length=12,
+        choices=AMBIENTE_FISCAL_CHOICES,
+        default=AMBIENTE_HOMOLOGACAO,
+        db_index=True,
+    )
+    uf_fiscal = models.CharField(max_length=2, null=True, blank=True, db_index=True)
+    inscricao_estadual = models.CharField(max_length=20, null=True, blank=True)
+    serie_nfce = models.PositiveIntegerField(default=1)
+    proximo_numero_nfce = models.PositiveIntegerField(default=1)
+    serie_nfe = models.PositiveIntegerField(default=1)
+    proximo_numero_nfe = models.PositiveIntegerField(default=1)
+    usa_producao = models.BooleanField(default=False, db_index=True)
+    usa_ficha_tecnica = models.BooleanField(default=False, db_index=True)
+    usa_faccao = models.BooleanField(default=False, db_index=True)
+    usa_distribuicao_producao = models.BooleanField(default=False, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
@@ -22,14 +66,42 @@ class Empresa(models.Model):
             models.Index(fields=["nome"]),
             models.Index(fields=["nome_fantasia"]),
             models.Index(fields=["ativo"]),
+            models.Index(fields=["usa_producao"]),
         ]
         ordering = ["nome"]
 
     def __str__(self):
         return self.nome_fantasia or self.nome
 
+    def save(self, *args, **kwargs):
+        if self.licenca_master:
+            self.usa_vendas = True
+            self.usa_compras = True
+            self.usa_estoque = True
+            self.usa_financeiro = True
+            self.usa_fiscal = True
+            self.usa_producao = True
+        if self.usa_producao:
+            self.usa_ficha_tecnica = True
+            self.usa_faccao = True
+            self.usa_distribuicao_producao = True
+        else:
+            self.usa_ficha_tecnica = False
+            self.usa_faccao = False
+            self.usa_distribuicao_producao = False
+        super().save(*args, **kwargs)
+
 
 class Loja(models.Model):
+    TIPO_LOJA = "LOJA"
+    TIPO_MATRIZ = "MATRIZ"
+    TIPO_FABRICA = "FABRICA"
+    TIPO_UNIDADE_CHOICES = [
+        (TIPO_LOJA, "Loja"),
+        (TIPO_MATRIZ, "Matriz / Estoque central"),
+        (TIPO_FABRICA, "Fábrica / Produção"),
+    ]
+
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
@@ -62,6 +134,31 @@ class Loja(models.Model):
     ContaContabil = models.CharField(max_length=50, null=True, blank=True, default="")
     DataEnceramento = models.DateField(null=True, blank=True, default=None)
     Matriz = models.CharField(max_length=3, null=True, blank=True, default="NAO")
+    tipo_unidade = models.CharField(
+        max_length=10,
+        choices=TIPO_UNIDADE_CHOICES,
+        default=TIPO_LOJA,
+        db_index=True,
+    )
+    regime_tributario = models.CharField(
+        max_length=20,
+        choices=Empresa.REGIME_TRIBUTARIO_CHOICES,
+        default=Empresa.REGIME_SIMPLES,
+        db_index=True,
+    )
+    ambiente_fiscal = models.CharField(
+        max_length=12,
+        choices=Empresa.AMBIENTE_FISCAL_CHOICES,
+        default=Empresa.AMBIENTE_HOMOLOGACAO,
+        db_index=True,
+    )
+    inscricao_estadual = models.CharField(max_length=20, null=True, blank=True)
+    serie_nfce = models.PositiveIntegerField(default=1)
+    proximo_numero_nfce = models.PositiveIntegerField(default=1)
+    serie_nfe = models.PositiveIntegerField(default=1)
+    proximo_numero_nfe = models.PositiveIntegerField(default=1)
+    emite_nfce = models.BooleanField(default=True)
+    emite_nfe = models.BooleanField(default=True)
 
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
@@ -74,6 +171,7 @@ class Loja(models.Model):
             models.Index(fields=["cnpj"]),
             models.Index(fields=["cidade", "estado"]),
             models.Index(fields=["ativo"]),
+            models.Index(fields=["tipo_unidade"]),
             models.Index(fields=["data_cadastro"]),
         ]
 
@@ -128,6 +226,16 @@ class Cliente(models.Model):
 
 
 class Fornecedor(models.Model):
+    CATEGORIA_CHOICES = (
+        ("MATERIA_PRIMA", "Matéria-prima"),
+        ("AVIAMENTO", "Aviamento"),
+        ("REVENDA", "Produto de revenda"),
+        ("FACCAO", "Facção"),
+        ("PRESTADOR", "Prestador de serviço"),
+        ("TRANSPORTADORA", "Transportadora"),
+        ("OUTROS", "Outros"),
+    )
+
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
@@ -150,7 +258,7 @@ class Fornecedor(models.Model):
     telefone1 = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
     telefone2 = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
     email = models.CharField(max_length=50, null=True, blank=True, validators=[email_simple_validator])
-    categoria = models.CharField(max_length=15, null=True, blank=True, db_index=True)
+    categoria = models.CharField(max_length=15, choices=CATEGORIA_CHOICES, null=True, blank=True, db_index=True)
     bloqueio = models.BooleanField(default=False, db_index=True)
     mala_direta = models.BooleanField(default=False, db_index=True)
     conta_contabil = models.CharField(max_length=50, null=True, blank=True)
@@ -192,6 +300,7 @@ class Funcionarios(models.Model):
     categoria = models.CharField(max_length=15, null=True, blank=True, db_index=True)
     meta = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, db_index=True)
     comissao_percentual = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    salario = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     idloja = models.ForeignKey(Loja, on_delete=models.CASCADE, null=True, blank=True, related_name='funcionarios', db_index=True)
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)

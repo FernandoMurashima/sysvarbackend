@@ -29,3 +29,54 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.username} ({self.type})"
+
+
+class UserModulePermission(models.Model):
+    class Module(models.TextChoices):
+        CADASTROS = "cadastros", "Cadastros"
+        PRODUTOS = "produtos", "Produtos"
+        FISCAL = "fiscal", "Fiscal"
+        ESTOQUE = "estoque", "Estoque"
+        VENDAS = "vendas", "Vendas"
+        COMPRAS = "compras", "Compras"
+        PRODUCAO = "producao", "Produção"
+        FINANCEIRO = "financeiro", "Financeiro"
+        RELATORIOS = "relatorios", "Relatórios"
+        CONFIGURACOES = "configuracoes", "Configurações"
+
+    class Access(models.TextChoices):
+        NONE = "NONE", "Sem acesso"
+        VIEW = "VIEW", "Somente consulta"
+        EDIT = "EDIT", "Consulta e edição"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="module_permissions")
+    modulo = models.CharField(max_length=30, choices=Module.choices, db_index=True)
+    acesso = models.CharField(max_length=10, choices=Access.choices, default=Access.NONE, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "modulo"], name="uq_user_module_permission")
+        ]
+        ordering = ["user_id", "modulo"]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.modulo}: {self.acesso}"
+
+
+class UserFieldPermission(models.Model):
+    class Field(models.TextChoices):
+        FUNCIONARIO_SALARIO = "funcionario.salario", "Funcionário - salário"
+        PRODUTO_CUSTO = "produto.custo", "Produto - custos e margens"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="field_permissions")
+    campo = models.CharField(max_length=60, choices=Field.choices, db_index=True)
+    pode_ver = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "campo"], name="uq_user_field_permission")
+        ]
+        ordering = ["user_id", "campo"]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.campo}: {self.pode_ver}"

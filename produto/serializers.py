@@ -1,10 +1,14 @@
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
+from decimal import Decimal
+from accounts.permissions import has_field_permission
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
+    Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
 )
 
@@ -54,6 +58,11 @@ def _empresa_request(serializer):
     if user and user.is_authenticated and not user.is_superuser:
         return getattr(user, 'empresa', None)
     return None
+
+def _pode_ver_custo(serializer):
+    request = serializer.context.get('request') if getattr(serializer, 'context', None) else None
+    user = getattr(request, 'user', None)
+    return has_field_permission(user, 'produto.custo', default_roles=['Admin', 'Diretor', 'Gerente'])
 
 # ---------- Cadastros mestres ----------
 class ConfigEanSerializer(serializers.ModelSerializer):
@@ -220,15 +229,15 @@ class ProdutoSerializer(serializers.ModelSerializer):
             if empresa and obj_empresa_id and obj_empresa_id != empresa.id:
                 raise serializers.ValidationError({campo: 'O cadastro selecionado pertence a outra empresa.'})
 
-        if tipo == '1':  # Revenda
+        if tipo in ('1', '3'):  # Revenda / Produto Próprio
             if 'referencia' in self.initial_data and self.initial_data.get('referencia'):
-                raise serializers.ValidationError({'referencia': 'Gerada automaticamente para produto de Revenda.'})
+                raise serializers.ValidationError({'referencia': 'Gerada automaticamente para produtos vendáveis.'})
             if not colecao or not getattr(colecao, 'Codigo', None) or not getattr(colecao, 'Estacao', None):
                 raise serializers.ValidationError({'colecao': 'Coleção com Código (2 dígitos) e Estação (2 dígitos) é obrigatória.'})
             if not grupo or not getattr(grupo, 'CodigoRef', None):
                 raise serializers.ValidationError({'grupo': 'Grupo com CodigoRef (2 dígitos) é obrigatório.'})
             if grade is None:
-                raise serializers.ValidationError({'grade': 'Obrigatória para produto de Revenda.'})
+                raise serializers.ValidationError({'grade': 'Obrigatória para produtos vendáveis.'})
             ncm_fmt = _normalize_ncm_dotted(ncm_raw)
             ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
             if empresa:
@@ -236,11 +245,14 @@ class ProdutoSerializer(serializers.ModelSerializer):
             if not ncm_qs.exists():
                 raise serializers.ValidationError({'ncm': f'NCM {ncm_fmt} não cadastrado.'})
             attrs['ncm'] = ncm_fmt
-        elif tipo == '2':  # Uso/Consumo
+        elif tipo in ('2', '4'):  # Uso/Consumo / Insumo de Produção
             if 'referencia' in self.initial_data and self.initial_data.get('referencia'):
-                raise serializers.ValidationError({'referencia': 'Não deve ser informada para Uso/Consumo.'})
+                raise serializers.ValidationError({'referencia': 'Não deve ser informada para este tipo de produto.'})
             if grade is not None:
-                raise serializers.ValidationError({'grade': 'Não deve ser informada para Uso/Consumo.'})
+                raise serializers.ValidationError({'grade': 'Não deve ser informada para este tipo de produto.'})
+            if tipo == '4':
+                attrs['grupo'] = None
+                attrs['subgrupo'] = None
             if ncm_raw:
                 ncm_fmt = _normalize_ncm_dotted(ncm_raw)
                 ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
@@ -257,6 +269,12 @@ class ProdutoSerializer(serializers.ModelSerializer):
 class ProdutoDetalheSerializer(serializers.ModelSerializer):
     ean13 = serializers.CharField(read_only=True)
     config_ean = serializers.PrimaryKeyRelatedField(read_only=True)
+    cor_descricao = serializers.CharField(source='idcor.Descricao', read_only=True)
+    tamanho_descricao = serializers.CharField(source='idtamanho.Tamanho', read_only=True)
+    preco_venda = serializers.SerializerMethodField()
+    margem_valor = serializers.SerializerMethodField()
+    margem_percentual = serializers.SerializerMethodField()
+    estoque_total = serializers.SerializerMethodField()
 
     class Meta:
         model = ProdutoDetalhe
@@ -264,6 +282,56 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'codigo_item_ref': {'required': False},
         }
+
+    def _preco_venda(self, obj):
+        preco = (
+            TabelaprecoProduto.objects
+            .filter(produto=obj.produto, ativo=True)
+            .order_by('-DataInicio', '-Idprodutopreco')
+            .values_list('preco_promocional', 'preco')
+            .first()
+        )
+        if not preco:
+            return Decimal('0')
+        promocional, normal = preco
+        return Decimal(promocional or normal or 0)
+
+    def get_preco_venda(self, obj):
+        return self._preco_venda(obj)
+
+    def get_margem_valor(self, obj):
+        preco = self._preco_venda(obj)
+        custo = Decimal(obj.custo_medio or obj.custo_ultima_compra or obj.custo_original or 0)
+        return preco - custo
+
+    def get_margem_percentual(self, obj):
+        preco = self._preco_venda(obj)
+        if not preco:
+            return Decimal('0')
+        margem = self.get_margem_valor(obj)
+        return (margem / preco) * Decimal('100')
+
+    def get_estoque_total(self, obj):
+        total = (
+            Estoque.objects
+            .filter(CodigodeBarra=obj.ean13)
+            .aggregate(total=Sum('Estoque'))
+            .get('total')
+        )
+        return total or 0
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not _pode_ver_custo(self):
+            for campo in (
+                'custo_original',
+                'custo_ultima_compra',
+                'custo_medio',
+                'margem_valor',
+                'margem_percentual',
+            ):
+                data[campo] = None
+        return data
 
     def validate(self, attrs):
         for f in ('codigo_item_ref', 'ean13', 'config_ean'):
@@ -277,8 +345,8 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
         if not produto or not tamanho:
             return attrs
 
-        if produto.tipo_produto != '1':
-            raise serializers.ValidationError('ProdutoDetalhe só é permitido para produto de Revenda.')
+        if produto.tipo_produto not in ('1', '3'):
+            raise serializers.ValidationError('ProdutoDetalhe só é permitido para produtos vendáveis com grade.')
 
         if produto.grade_id and tamanho.idgrade_id != produto.grade_id:
             raise serializers.ValidationError('Tamanho não pertence à grade do produto.')
@@ -313,8 +381,8 @@ class TabelaprecoProdutoSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
-        if produto and produto.tipo_produto != '1':
-            raise serializers.ValidationError('Preço só é permitido para produto de Revenda.')
+        if produto and produto.tipo_produto not in ('1', '3'):
+            raise serializers.ValidationError('Preço só é permitido para produtos vendáveis.')
         return attrs
 
     # >>> FIX: garante date (não datetime) sem precisar migrar o Model
@@ -340,6 +408,221 @@ class TabelaprecoProdutoSerializer(serializers.ModelSerializer):
             validated_data['DataFim'] = df.date()
         return super().update(instance, validated_data)
 # <<< end serializer
+
+
+class FichaTecnicaItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    fornecedor_nome = serializers.CharField(source='fornecedor.nome_fornecedor', read_only=True)
+    unidade_descricao = serializers.CharField(source='unidade.Descricao', read_only=True)
+    unidade_permite_decimal = serializers.BooleanField(source='unidade.permite_decimal', read_only=True)
+    quantidade_com_perda = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
+    custo_medio_produto = serializers.DecimalField(max_digits=12, decimal_places=4, read_only=True)
+    custo_unitario_usado = serializers.DecimalField(max_digits=12, decimal_places=4, read_only=True)
+    custo_total_previsto = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
+
+    class Meta:
+        model = FichaTecnicaItem
+        fields = '__all__'
+
+    def validate(self, attrs):
+        ficha = attrs.get('ficha') or getattr(self.instance, 'ficha', None)
+        produto = attrs.get('produto', getattr(self.instance, 'produto', None))
+        fornecedor = attrs.get('fornecedor', getattr(self.instance, 'fornecedor', None))
+        unidade = attrs.get('unidade', getattr(self.instance, 'unidade', None))
+        tipo = attrs.get('tipo', getattr(self.instance, 'tipo', None))
+        quantidade = attrs.get('quantidade', getattr(self.instance, 'quantidade', None))
+        perda = attrs.get('perda_percentual', getattr(self.instance, 'perda_percentual', 0))
+
+        if not ficha:
+            raise serializers.ValidationError({'ficha': 'Informe a ficha técnica.'})
+        if quantidade is not None and Decimal(quantidade) <= 0:
+            raise serializers.ValidationError({'quantidade': 'Informe quantidade maior que zero.'})
+        if perda is not None and Decimal(perda) < 0:
+            raise serializers.ValidationError({'perda_percentual': 'A perda não pode ser negativa.'})
+
+        empresa_id = ficha.empresa_id
+        if produto:
+            if produto.empresa_id != empresa_id:
+                raise serializers.ValidationError({'produto': 'O produto selecionado pertence a outra empresa.'})
+            if produto.tipo_produto not in ('2', '4'):
+                raise serializers.ValidationError({'produto': 'Use produtos de uso/consumo ou insumos de produção na ficha.'})
+            if not unidade:
+                attrs['unidade'] = produto.unidade
+                unidade = produto.unidade
+        if fornecedor and fornecedor.empresa_id != empresa_id:
+            raise serializers.ValidationError({'fornecedor': 'O fornecedor selecionado pertence a outra empresa.'})
+        if unidade and unidade.empresa_id and unidade.empresa_id != empresa_id:
+            raise serializers.ValidationError({'unidade': 'A unidade selecionada pertence a outra empresa.'})
+        if quantidade is not None and unidade and not unidade.permite_decimal:
+            quantidade_dec = Decimal(quantidade)
+            if quantidade_dec != quantidade_dec.to_integral_value():
+                raise serializers.ValidationError({
+                    'quantidade': f'A unidade {unidade.Descricao} não aceita quantidade decimal.'
+                })
+        if tipo == FichaTecnicaItem.TIPO_SERVICO and not fornecedor:
+            raise serializers.ValidationError({'fornecedor': 'Informe o fornecedor/facção para item de serviço.'})
+        if tipo in (FichaTecnicaItem.TIPO_INSUMO, FichaTecnicaItem.TIPO_AVIAMENTO) and not produto:
+            raise serializers.ValidationError({'produto': 'Informe o produto/insumo deste item.'})
+
+        return attrs
+
+
+class FichaTecnicaSerializer(serializers.ModelSerializer):
+    itens = FichaTecnicaItemSerializer(many=True, read_only=True)
+    produto_descricao = serializers.CharField(source='produto_final.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto_final.referencia', read_only=True)
+    custo_previsto = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FichaTecnica
+        fields = '__all__'
+        extra_kwargs = {
+            'empresa': {'required': False, 'allow_null': True},
+        }
+
+    def get_custo_previsto(self, obj):
+        total = Decimal('0')
+        for item in obj.itens.all():
+            total += item.custo_total_previsto
+        return total
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        produto_final = attrs.get('produto_final', getattr(self.instance, 'produto_final', None))
+        rendimento = attrs.get('rendimento', getattr(self.instance, 'rendimento', 1))
+        versao = attrs.get('versao', getattr(self.instance, 'versao', None))
+
+        if not produto_final:
+            raise serializers.ValidationError({'produto_final': 'Informe o produto próprio da ficha.'})
+        if produto_final.tipo_produto != '3':
+            raise serializers.ValidationError({'produto_final': 'Ficha técnica deve ser vinculada a Produto Próprio.'})
+        if empresa and produto_final.empresa_id != empresa.id:
+            raise serializers.ValidationError({'produto_final': 'O produto selecionado pertence a outra empresa.'})
+        if rendimento is not None and Decimal(rendimento) <= 0:
+            raise serializers.ValidationError({'rendimento': 'Informe rendimento maior que zero.'})
+        if empresa and produto_final and versao:
+            existente = FichaTecnica.objects.filter(
+                empresa=empresa,
+                produto_final=produto_final,
+                versao=versao,
+            )
+            if self.instance:
+                existente = existente.exclude(pk=self.instance.pk)
+            if existente.exists():
+                raise serializers.ValidationError({
+                    'versao': 'Já existe ficha técnica para este produto nesta versão. Use outra versão ou edite a ficha existente.'
+                })
+        return attrs
+
+
+class OrdemProducaoItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    fornecedor_nome = serializers.CharField(source='fornecedor.nome_fornecedor', read_only=True)
+    unidade_descricao = serializers.CharField(source='unidade.Descricao', read_only=True)
+    unidade_permite_decimal = serializers.BooleanField(source='unidade.permite_decimal', read_only=True)
+
+    class Meta:
+        model = OrdemProducaoItem
+        fields = '__all__'
+
+
+class OrdemProducaoGradeSerializer(serializers.ModelSerializer):
+    sku_ean = serializers.CharField(source='sku_final.ean13', read_only=True)
+    sku_cor = serializers.CharField(source='sku_final.idcor.Descricao', read_only=True)
+    sku_tamanho = serializers.CharField(source='sku_final.idtamanho.Tamanho', read_only=True)
+
+    class Meta:
+        model = OrdemProducaoGrade
+        fields = '__all__'
+
+
+class OrdemProducaoSerializer(serializers.ModelSerializer):
+    itens = OrdemProducaoItemSerializer(many=True, read_only=True)
+    grade_producao = OrdemProducaoGradeSerializer(many=True, read_only=True)
+    produto_descricao = serializers.CharField(source='produto_final.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto_final.referencia', read_only=True)
+    ficha_versao = serializers.CharField(source='ficha_tecnica.versao', read_only=True)
+    sku_ean = serializers.CharField(source='sku_final.ean13', read_only=True)
+    sku_cor = serializers.CharField(source='sku_final.idcor.Descricao', read_only=True)
+    sku_tamanho = serializers.CharField(source='sku_final.idtamanho.Tamanho', read_only=True)
+
+    class Meta:
+        model = OrdemProducao
+        fields = '__all__'
+        extra_kwargs = {
+            'empresa': {'required': False, 'allow_null': True},
+            'numero': {'required': False, 'allow_blank': True},
+            'produto_final': {'required': False, 'allow_null': True},
+            'sku_final': {'required': False, 'allow_null': True},
+            'rendimento': {'required': False},
+            'status': {'read_only': True},
+            'custo_previsto': {'read_only': True},
+            'custo_real': {'read_only': True},
+            'data_inicio': {'read_only': True},
+            'data_finalizacao': {'read_only': True},
+        }
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        ficha = attrs.get('ficha_tecnica', getattr(self.instance, 'ficha_tecnica', None))
+        quantidade = attrs.get('quantidade', getattr(self.instance, 'quantidade', None))
+        numero = attrs.get('numero', getattr(self.instance, 'numero', ''))
+        grade_payload = self.initial_data.get('grade_producao') if hasattr(self, 'initial_data') else None
+
+        if not ficha:
+            raise serializers.ValidationError({'ficha_tecnica': 'Informe a ficha técnica.'})
+        if empresa and ficha.empresa_id != empresa.id:
+            raise serializers.ValidationError({'ficha_tecnica': 'A ficha técnica pertence a outra empresa.'})
+        if ficha.status != FichaTecnica.STATUS_APROVADA or not ficha.ativa:
+            raise serializers.ValidationError({'ficha_tecnica': 'Use uma ficha técnica aprovada e ativa.'})
+        sku_final = attrs.get('sku_final', getattr(self.instance, 'sku_final', None))
+        if grade_payload is not None:
+            if not isinstance(grade_payload, list):
+                raise serializers.ValidationError({'grade_producao': 'Informe uma lista de SKUs e quantidades.'})
+            total_grade = Decimal('0')
+            primeiro_sku = None
+            skus_usados = set()
+            for linha in grade_payload:
+                sku_id = linha.get('sku_final') or linha.get('sku')
+                qtd = Decimal(str(linha.get('quantidade') or 0))
+                if qtd <= 0:
+                    continue
+                if sku_id in skus_usados:
+                    raise serializers.ValidationError({'grade_producao': 'Existe SKU repetido na grade da OP.'})
+                skus_usados.add(sku_id)
+                try:
+                    sku_linha = ProdutoDetalhe.objects.get(pk=sku_id)
+                except ProdutoDetalhe.DoesNotExist:
+                    raise serializers.ValidationError({'grade_producao': f'SKU {sku_id} não encontrado.'})
+                if sku_linha.produto_id != ficha.produto_final_id:
+                    raise serializers.ValidationError({'grade_producao': 'Todos os SKUs produzidos devem pertencer ao produto da ficha técnica.'})
+                if not sku_linha.ativo:
+                    raise serializers.ValidationError({'grade_producao': f'O SKU {sku_linha.ean13} está inativo.'})
+                total_grade += qtd
+                if primeiro_sku is None:
+                    primeiro_sku = sku_linha
+            if total_grade <= 0:
+                raise serializers.ValidationError({'grade_producao': 'Informe ao menos um SKU com quantidade maior que zero.'})
+            attrs['quantidade'] = total_grade
+            attrs['sku_final'] = primeiro_sku
+        else:
+            if quantidade is None or Decimal(quantidade) <= 0:
+                raise serializers.ValidationError({'quantidade': 'Informe quantidade a produzir maior que zero.'})
+            if not sku_final:
+                raise serializers.ValidationError({'sku_final': 'Informe o SKU produzido pela OP.'})
+            if sku_final and sku_final.produto_id != ficha.produto_final_id:
+                raise serializers.ValidationError({'sku_final': 'O SKU produzido deve pertencer ao produto da ficha técnica.'})
+            if sku_final and not sku_final.ativo:
+                raise serializers.ValidationError({'sku_final': 'O SKU produzido está inativo.'})
+        if numero and empresa:
+            qs = OrdemProducao.objects.filter(empresa=empresa, numero=numero)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'numero': 'Já existe uma OP com este número nesta empresa.'})
+        attrs['produto_final'] = ficha.produto_final
+        attrs['rendimento'] = ficha.rendimento
+        return attrs
 
 
 class PromocaoSerializer(serializers.ModelSerializer):

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
+from decimal import Decimal
 
 from .models import (
     PedidoCompra,
@@ -7,6 +8,11 @@ from .models import (
     PedidoCompraEntrega,
     PedidoCompraParcela,
 )
+
+try:
+    from financeiro.models import Pagar
+except Exception:
+    Pagar = None
 
 # ----------------- Itens -----------------
 class PedidoCompraItemSerializer(serializers.ModelSerializer):
@@ -20,6 +26,8 @@ class PedidoCompraItemSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         pedido = attrs.get("pedido") or getattr(self.instance, "pedido", None)
         tipo = pedido.tipo if pedido else None
+        produto = attrs.get("produto", getattr(self.instance, "produto", None))
+        qtd = attrs.get("qtd", getattr(self.instance, "qtd", 0))
 
         if tipo == "1":  # Revenda
             # produto + cor + pack obrigatórios; n_packs >=1; sem descricao_livre
@@ -31,10 +39,21 @@ class PedidoCompraItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"n_packs": "Informe n_packs >= 1."})
             if attrs.get("descricao_livre"):
                 raise serializers.ValidationError({"descricao_livre": "Não permitido em Revenda."})
+            if qtd is not None and Decimal(qtd) != Decimal(qtd).to_integral_value():
+                raise serializers.ValidationError({"qtd": "Pedido de revenda não aceita quantidade decimal."})
 
         elif tipo == "2":  # Uso/Consumo
             if attrs.get("pack") or attrs.get("n_packs", 0):
                 raise serializers.ValidationError({"pack": "Não permitido em Uso/Consumo."})
+            if not produto:
+                raise serializers.ValidationError({"produto": "Informe o produto de uso/consumo ou insumo."})
+            if qtd is None or Decimal(qtd) <= 0:
+                raise serializers.ValidationError({"qtd": "Informe uma quantidade maior que zero."})
+            unidade = getattr(produto, "unidade", None)
+            if unidade and not unidade.permite_decimal and Decimal(qtd) != Decimal(qtd).to_integral_value():
+                raise serializers.ValidationError({
+                    "qtd": f"A unidade {unidade.Descricao} não aceita quantidade decimal."
+                })
         else:
             raise serializers.ValidationError({"pedido": "Tipo de pedido inválido."})
 
@@ -81,6 +100,8 @@ class PedidoCompraParcelaSerializer(serializers.ModelSerializer):
 class PedidoCompraSerializer(serializers.ModelSerializer):
     itens = PedidoCompraItemSerializer(many=True, read_only=True)
     parcelas = PedidoCompraParcelaSerializer(many=True, read_only=True)
+    idnatureza = serializers.SerializerMethodField()
+    natureza_label = serializers.SerializerMethodField()
 
     # proteção: forma de pagamento setada via ação específica
     forma_pagamento = serializers.CharField(read_only=True)
@@ -102,3 +123,25 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
         if tipo not in ("1", "2"):
             raise serializers.ValidationError({"tipo": "Tipo inválido (use 1=Revenda, 2=Uso/Consumo)."})
         return attrs
+
+    def _pagar_do_pedido(self, obj):
+        if not Pagar:
+            return None
+        return (
+            Pagar.objects
+            .select_related("Idnatureza")
+            .filter(empresa=obj.empresa, pedido_compra=obj.id)
+            .order_by("-Idpagar")
+            .first()
+        )
+
+    def get_idnatureza(self, obj):
+        pagar = self._pagar_do_pedido(obj)
+        return getattr(pagar, "Idnatureza_id", None)
+
+    def get_natureza_label(self, obj):
+        pagar = self._pagar_do_pedido(obj)
+        natureza = getattr(pagar, "Idnatureza", None)
+        if not natureza:
+            return None
+        return f"{natureza.codigo} - {natureza.descricao}"

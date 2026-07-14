@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from cadastros.models import Empresa, Loja
+from .models import UserModulePermission, UserFieldPermission
 
 User = get_user_model()
 
@@ -25,7 +26,23 @@ class LojaMiniSerializer(serializers.ModelSerializer):
 class EmpresaMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = Empresa
-        fields = ("id", "nome", "nome_fantasia")
+        fields = (
+            "id", "nome", "nome_fantasia",
+            "licenca_master", "usa_vendas", "usa_compras", "usa_estoque", "usa_financeiro",
+            "usa_fiscal", "usa_producao", "usa_ficha_tecnica", "usa_faccao", "usa_distribuicao_producao",
+        )
+
+
+class UserModulePermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserModulePermission
+        fields = ("modulo", "acesso")
+
+
+class UserFieldPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserFieldPermission
+        fields = ("campo", "pode_ver")
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -45,6 +62,8 @@ class UserSerializer(serializers.ModelSerializer):
     )
     # permitir criar/alterar senha via API (write-only)
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    permissoes_modulos = UserModulePermissionSerializer(source="module_permissions", many=True, required=False)
+    permissoes_campos = UserFieldPermissionSerializer(source="field_permissions", many=True, required=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -67,6 +86,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "first_name", "last_name",
             "type", "Idempresa", "empresa", "Idloja", "loja", "Idlojas", "lojas",
+            "permissoes_modulos", "permissoes_campos",
             "is_active", "is_staff", "is_superuser", "date_joined",
             "password",
         )
@@ -121,6 +141,8 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         password = validated_data.pop("password", None)
         lojas = validated_data.pop("lojas", [])
+        permissoes_modulos = validated_data.pop("module_permissions", [])
+        permissoes_campos = validated_data.pop("field_permissions", [])
         user = User(**validated_data)
         if password:
             user.set_password(password)
@@ -132,11 +154,14 @@ class UserSerializer(serializers.ModelSerializer):
             user.lojas.set(lojas)
         elif user.loja_id:
             user.lojas.set([user.loja])
+        self._salvar_permissoes(user, permissoes_modulos, permissoes_campos)
         return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", None)
         lojas = validated_data.pop("lojas", None)
+        permissoes_modulos = validated_data.pop("module_permissions", None)
+        permissoes_campos = validated_data.pop("field_permissions", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if password:
@@ -146,4 +171,25 @@ class UserSerializer(serializers.ModelSerializer):
             instance.lojas.set(lojas)
         elif instance.loja_id and not instance.lojas.filter(pk=instance.loja_id).exists():
             instance.lojas.add(instance.loja)
+        self._salvar_permissoes(instance, permissoes_modulos, permissoes_campos)
         return instance
+
+    def _salvar_permissoes(self, user, permissoes_modulos, permissoes_campos):
+        if permissoes_modulos is not None:
+            recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos}
+            UserModulePermission.objects.filter(user=user).exclude(modulo__in=recebidos.keys()).delete()
+            for modulo, acesso in recebidos.items():
+                UserModulePermission.objects.update_or_create(
+                    user=user,
+                    modulo=modulo,
+                    defaults={"acesso": acesso},
+                )
+        if permissoes_campos is not None:
+            recebidos = {item["campo"]: bool(item.get("pode_ver")) for item in permissoes_campos}
+            UserFieldPermission.objects.filter(user=user).exclude(campo__in=recebidos.keys()).delete()
+            for campo, pode_ver in recebidos.items():
+                UserFieldPermission.objects.update_or_create(
+                    user=user,
+                    campo=campo,
+                    defaults={"pode_ver": pode_ver},
+                )

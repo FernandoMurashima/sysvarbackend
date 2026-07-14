@@ -61,6 +61,28 @@ class FormaPagamentoParcela(models.Model):
         return f"{self.forma.codigo} - Parcela {self.ordem} ({self.dias} dias)"
 
 
+class ConfigFinanceira(models.Model):
+    empresa = models.OneToOneField(
+        'cadastros.Empresa',
+        on_delete=models.PROTECT,
+        related_name='config_financeira',
+    )
+    natureza_juros_pagos = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_juros_recebidos = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_tarifas_pagas = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_multas_pagas = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_multas_recebidas = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_descontos_concedidos = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    natureza_descontos_obtidos = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'financeiro_config_financeira'
+
+    def __str__(self):
+        return f"Configuração financeira {self.empresa_id}"
+
+
 # =========================
 # Cashback
 # =========================
@@ -499,6 +521,8 @@ class PagarItem(models.Model):
     idconta = models.IntegerField(null=True, blank=True)
 
     juros = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    multa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    tarifa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     data_baixa = models.DateField(null=True, blank=True)
@@ -593,6 +617,7 @@ class ReceberItem(models.Model):
     idconta = models.IntegerField(null=True, blank=True)
 
     juros = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    multa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     data_baixa = models.DateField(null=True, blank=True)

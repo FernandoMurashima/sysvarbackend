@@ -2,7 +2,8 @@ from django.contrib import admin
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque
+    TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
+    Promocao, Pack, PackItem, Estoque
 )
 
 @admin.register(ConfigEan)
@@ -11,7 +12,9 @@ class ConfigEanAdmin(admin.ModelAdmin):
 
 @admin.register(Ncm)
 class NcmAdmin(admin.ModelAdmin):
-    list_display = ('ncm', 'descricao', 'aliquota')
+    list_display = ('empresa', 'ncm', 'descricao', 'categoria', 'aliquota', 'ativo')
+    list_filter = ('empresa', 'categoria', 'ativo')
+    search_fields = ('ncm', 'descricao')
 
 @admin.register(Grade)
 class GradeAdmin(admin.ModelAdmin):
@@ -71,6 +74,41 @@ class ProdutoDetalheAdmin(admin.ModelAdmin):
 @admin.register(TabelaprecoProduto)
 class TabelaprecoProdutoAdmin(admin.ModelAdmin):
     list_display = ('Idprodutopreco', 'produto', 'tabela', 'preco', 'preco_promocional', 'DataInicio', 'DataFim', 'ativo')
+
+
+@admin.register(FichaTecnica)
+class FichaTecnicaAdmin(admin.ModelAdmin):
+    list_display = ('id', 'empresa', 'produto_final', 'versao', 'status', 'ativa', 'data_cadastro')
+    list_filter = ('empresa', 'status', 'ativa')
+    search_fields = ('produto_final__descricao', 'produto_final__referencia', 'versao')
+
+
+@admin.register(FichaTecnicaItem)
+class FichaTecnicaItemAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ficha', 'tipo', 'produto', 'fornecedor', 'quantidade', 'perda_percentual', 'custo_unitario_previsto')
+    list_filter = ('tipo',)
+    search_fields = ('produto__descricao', 'fornecedor__nome_fornecedor', 'descricao')
+
+
+@admin.register(OrdemProducao)
+class OrdemProducaoAdmin(admin.ModelAdmin):
+    list_display = ('id', 'empresa', 'numero', 'produto_final', 'quantidade', 'status', 'custo_previsto', 'custo_real', 'data_emissao')
+    list_filter = ('empresa', 'status', 'data_emissao')
+    search_fields = ('numero', 'produto_final__descricao', 'produto_final__referencia')
+
+
+@admin.register(OrdemProducaoItem)
+class OrdemProducaoItemAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ordem', 'tipo', 'produto', 'fornecedor', 'quantidade_necessaria', 'custo_unitario_previsto', 'custo_total_previsto')
+    list_filter = ('tipo',)
+    search_fields = ('ordem__numero', 'produto__descricao', 'fornecedor__nome_fornecedor', 'descricao')
+
+
+@admin.register(OrdemProducaoGrade)
+class OrdemProducaoGradeAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ordem', 'sku_final', 'quantidade')
+    search_fields = ('ordem__numero', 'sku_final__ean13', 'sku_final__produto__descricao')
+
 
 @admin.register(Promocao)
 class PromocaoAdmin(admin.ModelAdmin):

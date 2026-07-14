@@ -7,6 +7,7 @@ from produto.models import Produto, Cor, Pack, PackItem
 STATUS_PC = (
     ('AB', 'Aberto'),
     ('AP', 'Aprovado'),
+    ('AT', 'Atendido'),
     ('CA', 'Cancelado'),
 )
 
@@ -79,7 +80,7 @@ class PedidoCompraItem(models.Model):
     descricao_livre = models.CharField(max_length=200, null=True, blank=True)
 
     # Números
-    qtd = models.PositiveIntegerField(default=0, validators=[MinValueValidator(0)])
+    qtd = models.DecimalField(max_digits=12, decimal_places=3, default=0, validators=[MinValueValidator(0)])
     preco_unit = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(0)])
     desconto_valor = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
@@ -110,10 +111,10 @@ class PedidoCompraEntrega(models.Model):
     id = models.BigAutoField(primary_key=True)
     item = models.ForeignKey(PedidoCompraItem, on_delete=models.CASCADE, related_name='entregas')
 
-    qtd_prevista = models.PositiveIntegerField(default=0)
+    qtd_prevista = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     data_prevista = models.DateField(null=True, blank=True)
 
-    qtd_recebida = models.PositiveIntegerField(default=0)
+    qtd_recebida = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     data_recebida = models.DateField(null=True, blank=True)
 
     status = models.CharField(max_length=4, choices=ENTREGA_STATUS, default='PREV')

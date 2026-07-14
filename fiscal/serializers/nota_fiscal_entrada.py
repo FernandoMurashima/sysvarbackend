@@ -96,6 +96,8 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
         pedido = attrs.get("pedido_compra") or getattr(self.instance, "pedido_compra", None)
         if pedido and (pedido.status or "").upper() == "CA":
             raise serializers.ValidationError({"pedido_compra": "Não é possível criar nota para pedido cancelado."})
+        if pedido and (pedido.status or "").upper() == "AT":
+            raise serializers.ValidationError({"pedido_compra": "Este pedido já foi totalmente atendido."})
 
         if self.instance and self.instance.status != NotaFiscalEntrada.Status.ABERTA:
             protected = {"pedido_compra", "modelo", "serie", "numero", "chave_acesso", "dt_emissao", "dt_entrada"}

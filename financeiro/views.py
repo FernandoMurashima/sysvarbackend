@@ -14,6 +14,7 @@ except Exception:
     AuditLog = None
 
 from .models import (
+    ConfigFinanceira,
     Caixa, ContaBancaria, MovimentacaoFinanceira, LancamentoContabil,
     CashbackConfig, CashbackMovimento, saldo_cashback_cliente,
     ValeTroca, ValeTrocaMovimento, saldo_vale_troca_cliente,
@@ -23,6 +24,7 @@ from .models import (
     FormaPagamento, FormaPagamentoParcela
 )
 from .serializers import (
+    ConfigFinanceiraSerializer,
     CaixaSerializer, ContaBancariaSerializer, MovimentacaoFinanceiraSerializer,
     LancamentoContabilSerializer,
     CashbackConfigSerializer, CashbackMovimentoSerializer,
@@ -263,6 +265,54 @@ class FormaPagamentoParcelaViewSet(BaseViewSet):
         if codigo:
             qs = qs.filter(forma__codigo=codigo)
         return qs
+
+
+class ConfigFinanceiraViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = ConfigFinanceira.objects.select_related(
+        'empresa',
+        'natureza_juros_pagos',
+        'natureza_juros_recebidos',
+        'natureza_tarifas_pagas',
+        'natureza_multas_pagas',
+        'natureza_multas_recebidas',
+        'natureza_descontos_concedidos',
+        'natureza_descontos_obtidos',
+    ).all()
+    serializer_class = ConfigFinanceiraSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.is_superuser:
+            empresa = self.request.query_params.get('empresa')
+            return qs.filter(empresa_id=empresa) if empresa else qs
+        empresa_id = getattr(self.request.user, 'empresa_id', None)
+        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+
+    @action(detail=False, methods=['get', 'patch'], url_path='atual')
+    def atual(self, request):
+        empresa = getattr(request.user, 'empresa', None)
+        if request.user.is_superuser:
+            empresa_id = request.query_params.get('empresa') or request.data.get('empresa')
+            if empresa_id:
+                from cadastros.models import Empresa
+                empresa = Empresa.objects.filter(pk=empresa_id).first()
+        if not empresa:
+            return Response({'detail': 'Usuário sem empresa vinculada.'}, status=status.HTTP_400_BAD_REQUEST)
+        config, _ = ConfigFinanceira.objects.get_or_create(empresa=empresa)
+        if request.method.lower() == 'patch':
+            serializer = self.get_serializer(config, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self._validar_naturezas_config(serializer.validated_data, empresa.id)
+            serializer.save()
+            return Response(serializer.data)
+        return Response(self.get_serializer(config).data)
+
+    def _validar_naturezas_config(self, data, empresa_id):
+        for campo, natureza in data.items():
+            if campo.startswith('natureza_') and natureza and natureza.empresa_id != empresa_id:
+                raise ValidationError({campo: 'A natureza selecionada pertence a outra empresa.'})
 
 
 class CashbackConfigViewSet(BaseViewSet):
@@ -702,6 +752,13 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
     def _money(self, value):
         return str(Decimal(value or 0).quantize(Decimal('0.01')))
 
+    def _documento_parcela_generico(self, titulo, parcela_n):
+        titulo = str(titulo or '').strip()
+        sufixo = f"-{parcela_n}"
+        if titulo.endswith(sufixo):
+            return titulo
+        return f"{titulo}{sufixo}" if titulo else sufixo.lstrip('-')
+
     @action(detail=False, methods=['get'], url_path='consulta-naturezas')
     def consulta_naturezas(self, request):
         qs = self.get_queryset().select_related('Idnatureza', 'idloja').filter(Idnatureza__isnull=False)
@@ -829,6 +886,7 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
 
     def _classificar_linha_dre(self, natureza, mov):
         operacao = ((natureza.natureza_operacao if natureza else '') or '').upper()
+        categoria = (getattr(natureza, 'categoria_gerencial', '') or '').lower()
         texto = ' '.join([
             getattr(natureza, 'categoria_principal', '') or '',
             getattr(natureza, 'subcategoria', '') or '',
@@ -843,19 +901,26 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
                 return 'DEDUCOES'
             if any(palavra in texto for palavra in ('cmv', 'custo', 'mercadoria vendida')):
                 return 'CUSTOS'
+            if any(palavra in texto for palavra in ('financeir', 'taxa', 'tarifa', 'juros', 'cartao', 'cartão', 'bancar', 'antecip')):
+                return 'DESPESAS_FINANCEIRAS'
+            if any(palavra in texto for palavra in ('tribut', 'imposto', 'icms', 'pis', 'cofins', 'csll', 'irpj', 'simples')):
+                return 'TRIBUTOS'
+            if 'administr' in categoria:
+                return 'DESPESAS_ADMINISTRATIVAS'
+            if any(palavra in categoria for palavra in ('venda', 'comercial')):
+                return 'DESPESAS_VENDAS'
             if getattr(mov, 'origem', '') == MovimentacaoFinanceira.ORIGEM_COMISSAO or any(
                 palavra in texto for palavra in ('comiss', 'venda', 'marketing', 'frete')
             ):
                 return 'DESPESAS_VENDAS'
-            if any(palavra in texto for palavra in ('financeir', 'taxa', 'tarifa', 'juros', 'cartao', 'cartão', 'bancar')):
-                return 'DESPESAS_FINANCEIRAS'
-            if any(palavra in texto for palavra in ('tribut', 'imposto', 'icms', 'pis', 'cofins', 'csll', 'irpj', 'simples')):
-                return 'TRIBUTOS'
             return 'DESPESAS_ADMINISTRATIVAS'
         return 'OUTROS'
 
     @action(detail=False, methods=['get'], url_path='dre')
     def dre(self, request):
+        regime = (request.query_params.get('regime') or 'caixa').strip().lower()
+        if regime not in ('caixa', 'competencia'):
+            regime = 'caixa'
         qs = (
             self.get_queryset()
             .select_related('Idnatureza', 'idloja')
@@ -880,15 +945,13 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
         }
         detalhes = []
 
-        for mov in qs.order_by('-data_movimento', '-Idmovimentacao'):
-            nat = mov.Idnatureza
-            grupo_key = self._classificar_linha_dre(nat, mov)
-            valor = Decimal(mov.valor or 0)
+        def adicionar_linha(obj, nat, data_movimento, loja_nome, documento, historico, origem, tipo, valor, row_id):
+            grupo_key = self._classificar_linha_dre(nat, obj)
             if grupo_key == 'RECEITA_BRUTA':
-                sinal = Decimal('-1.00') if mov.tipo == MovimentacaoFinanceira.TIPO_SAIDA else Decimal('1.00')
+                sinal = Decimal('-1.00') if tipo == MovimentacaoFinanceira.TIPO_SAIDA else Decimal('1.00')
             else:
-                sinal = Decimal('1.00') if mov.tipo == MovimentacaoFinanceira.TIPO_ENTRADA else Decimal('-1.00')
-            valor_dre = valor * sinal
+                sinal = Decimal('1.00') if tipo == MovimentacaoFinanceira.TIPO_ENTRADA else Decimal('-1.00')
+            valor_dre = Decimal(valor or 0) * sinal
             categoria = nat.categoria_gerencial or nat.categoria_principal or 'Sem categoria'
             linha_key = nat.pk
 
@@ -907,17 +970,120 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
             grupo['linhas'][linha_key]['quantidade'] += 1
 
             detalhes.append({
-                'id': mov.Idmovimentacao,
-                'data_movimento': mov.data_movimento,
-                'loja': getattr(mov.idloja, 'nome_loja', ''),
-                'documento': mov.documento or '',
-                'historico': mov.historico,
-                'origem': mov.origem,
+                'id': row_id,
+                'data_movimento': data_movimento,
+                'loja': loja_nome,
+                'documento': documento or '',
+                'historico': historico,
+                'origem': origem,
                 'grupo': grupo['grupo'],
                 'natureza': f'{nat.codigo} - {nat.descricao}',
                 'categoria_gerencial': categoria,
                 'valor': self._money(valor_dre),
             })
+
+        if regime == 'competencia':
+            componente = (
+                models.Q(documento__endswith='-JUR') |
+                models.Q(documento__endswith='-MUL') |
+                models.Q(documento__endswith='-TAR') |
+                models.Q(documento__endswith='-DSC')
+            )
+            qs = qs.filter(
+                ~models.Q(origem__in=[MovimentacaoFinanceira.ORIGEM_PAGAR, MovimentacaoFinanceira.ORIGEM_RECEBER]) |
+                componente
+            )
+
+        for mov in qs.order_by('-data_movimento', '-Idmovimentacao'):
+            nat = mov.Idnatureza
+            adicionar_linha(
+                mov,
+                nat,
+                mov.data_movimento,
+                getattr(mov.idloja, 'nome_loja', ''),
+                mov.documento,
+                mov.historico,
+                mov.origem,
+                mov.tipo,
+                mov.valor,
+                mov.Idmovimentacao,
+            )
+
+        if regime == 'competencia':
+            empresa_id = self._empresa_id_usuario()
+            loja = request.query_params.get('loja')
+            data_ini = request.query_params.get('data_ini')
+            data_fim = request.query_params.get('data_fim')
+
+            pagar_qs = (
+                PagarItem.objects
+                .select_related('Idpagar', 'Idpagar__idloja', 'Idnatureza', 'Idpagar__Idnatureza')
+                .exclude(status=PagarItem.STATUS_CANCELADO)
+                .filter(
+                    models.Q(Idnatureza__entra_dre=True) |
+                    models.Q(Idnatureza__isnull=True, Idpagar__Idnatureza__entra_dre=True)
+                )
+            )
+            receber_qs = (
+                ReceberItem.objects
+                .select_related('Idreceber', 'Idreceber__idloja', 'Idnatureza', 'Idreceber__Idnatureza')
+                .exclude(status=ReceberItem.STATUS_CANCELADO)
+                .filter(
+                    models.Q(Idnatureza__entra_dre=True) |
+                    models.Q(Idnatureza__isnull=True, Idreceber__Idnatureza__entra_dre=True)
+                )
+            )
+            if empresa_id:
+                pagar_qs = pagar_qs.filter(Idpagar__empresa_id=empresa_id)
+                receber_qs = receber_qs.filter(Idreceber__empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                pagar_qs = pagar_qs.none()
+                receber_qs = receber_qs.none()
+            if loja:
+                pagar_qs = pagar_qs.filter(Idpagar__idloja_id=loja)
+                receber_qs = receber_qs.filter(Idreceber__idloja_id=loja)
+            if data_ini:
+                pagar_qs = pagar_qs.filter(Idpagar__Data_emissao__gte=data_ini)
+                receber_qs = receber_qs.filter(Idreceber__Data_emissao__gte=data_ini)
+            if data_fim:
+                pagar_qs = pagar_qs.filter(Idpagar__Data_emissao__lte=data_fim)
+                receber_qs = receber_qs.filter(Idreceber__Data_emissao__lte=data_fim)
+
+            for item in pagar_qs.order_by('-Idpagar__Data_emissao', '-Idpagaritem'):
+                titulo = item.Idpagar
+                nat = item.Idnatureza or titulo.Idnatureza
+                documento = self._documento_parcela_generico(titulo.Titulo or titulo.pk, item.parcela_n)
+                mov = type('DreObj', (), {'origem': 'PAGAR_COMPETENCIA'})()
+                adicionar_linha(
+                    mov,
+                    nat,
+                    titulo.Data_emissao,
+                    getattr(titulo.idloja, 'nome_loja', ''),
+                    documento,
+                    f"Competência contas a pagar {documento}",
+                    'PAGAR_COMPETENCIA',
+                    MovimentacaoFinanceira.TIPO_SAIDA,
+                    item.valor_parcela,
+                    f"P{item.pk}",
+                )
+
+            for item in receber_qs.order_by('-Idreceber__Data_emissao', '-Idreceberitem'):
+                titulo = item.Idreceber
+                nat = item.Idnatureza or titulo.Idnatureza
+                documento = self._documento_parcela_generico(titulo.Titulo or titulo.pk, item.parcela_n)
+                mov = type('DreObj', (), {'origem': 'RECEBER_COMPETENCIA'})()
+                adicionar_linha(
+                    mov,
+                    nat,
+                    titulo.Data_emissao,
+                    getattr(titulo.idloja, 'nome_loja', ''),
+                    documento,
+                    f"Competência contas a receber {documento}",
+                    'RECEBER_COMPETENCIA',
+                    MovimentacaoFinanceira.TIPO_ENTRADA,
+                    item.valor_parcela,
+                    f"R{item.pk}",
+                )
 
         receita_bruta = grupos['RECEITA_BRUTA']['valor']
         deducoes = grupos['DEDUCOES']['valor']
@@ -1476,6 +1642,10 @@ class PagarItemViewSet(BaseViewSet):
         obj = self.get_object()
         valor_baixa = request.data.get('valor_baixa')
         data_baixa = request.data.get('data_baixa') or timezone.now().date().isoformat()
+        juros = self._decimal_request(request, 'juros')
+        multa = self._decimal_request(request, 'multa')
+        tarifa = self._decimal_request(request, 'tarifa')
+        desconto = self._decimal_request(request, 'desconto')
         try:
             valor_baixa = Decimal(str(valor_baixa))
         except (TypeError, ValueError, InvalidOperation):
@@ -1493,9 +1663,13 @@ class PagarItemViewSet(BaseViewSet):
             before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
             obj.valor_baixa = valor_baixa
             obj.data_baixa = data_baixa
+            obj.juros = juros
+            obj.multa = multa
+            obj.tarifa = tarifa
+            obj.desconto = desconto
             obj.status = PagarItem.STATUS_BAIXADO
-            obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
-            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa)
+            obj.save(update_fields=['valor_baixa', 'data_baixa', 'juros', 'multa', 'tarifa', 'desconto', 'status'])
+            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa, juros, multa, tarifa, desconto)
 
         _audit('pagaritem', obj.pk, {'before': before, 'after': {
             'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa),
@@ -1503,12 +1677,21 @@ class PagarItemViewSet(BaseViewSet):
         }}, request, action='baixar')
         return Response(self.get_serializer(obj).data)
 
+    def _decimal_request(self, request, campo):
+        try:
+            valor = Decimal(str(request.data.get(campo, 0) or 0))
+        except (TypeError, ValueError, InvalidOperation):
+            raise ValidationError({campo: 'Informe um valor numérico.'})
+        if valor < 0:
+            raise ValidationError({campo: 'O valor não pode ser negativo.'})
+        return valor
+
     def _documento_parcela(self, item):
         titulo = str(item.Idpagar.Titulo or item.Idpagar_id)
         sufixo = f"-{item.parcela_n}"
         return titulo if titulo.endswith(sufixo) else f"{titulo}{sufixo}"
 
-    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa):
+    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa, juros=0, multa=0, tarifa=0, desconto=0):
         existente = (
             MovimentacaoFinanceira.objects
             .filter(pagar_item=item, status=MovimentacaoFinanceira.STATUS_EFETIVA)
@@ -1538,17 +1721,43 @@ class PagarItemViewSet(BaseViewSet):
 
         documento = self._documento_parcela(item)
         fornecedor = getattr(titulo.idfornecedor, 'nome_fornecedor', '') or getattr(titulo.idfornecedor, 'apelido', '')
+        config = getattr(titulo.empresa, 'config_financeira', None)
+        principal = Decimal(valor_baixa or 0) - Decimal(juros or 0) - Decimal(multa or 0) - Decimal(tarifa or 0) + Decimal(desconto or 0)
+        if principal < 0:
+            raise ValidationError({'valor_baixa': 'O total dos acréscimos não pode superar o valor pago.'})
+
+        movimento = self._criar_movimento_componentizado(
+            titulo=titulo,
+            item=item,
+            data_baixa=data_baixa,
+            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            valor=principal,
+            historico=f"Baixa contas a pagar {documento}" + (f" - {fornecedor}" if fornecedor else ""),
+            documento=documento,
+            natureza=item.Idnatureza or titulo.Idnatureza,
+            caixa=caixa,
+        )
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_SAIDA, juros, f"Juros pagos {documento}", f"{documento}-JUR", getattr(config, 'natureza_juros_pagos', None), caixa)
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_SAIDA, multa, f"Multa paga {documento}", f"{documento}-MUL", getattr(config, 'natureza_multas_pagas', None), caixa)
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_SAIDA, tarifa, f"Tarifa paga {documento}", f"{documento}-TAR", getattr(config, 'natureza_tarifas_pagas', None), caixa)
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_ENTRADA, desconto, f"Desconto obtido {documento}", f"{documento}-DSC", getattr(config, 'natureza_descontos_obtidos', None), caixa)
+        return movimento
+
+    def _criar_movimento_componentizado(self, titulo, item, data_baixa, tipo, valor, historico, documento, natureza, caixa):
+        valor = Decimal(valor or 0)
+        if valor <= 0:
+            return None
         movimento = MovimentacaoFinanceira.objects.create(
             empresa=titulo.empresa,
             idloja=titulo.idloja,
             data_movimento=data_baixa,
-            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            tipo=tipo,
             status=MovimentacaoFinanceira.STATUS_EFETIVA,
             origem=MovimentacaoFinanceira.ORIGEM_PAGAR,
-            valor=valor_baixa,
-            historico=f"Baixa contas a pagar {documento}" + (f" - {fornecedor}" if fornecedor else ""),
+            valor=valor,
+            historico=historico,
             documento=documento,
-            Idnatureza=item.Idnatureza or titulo.Idnatureza,
+            Idnatureza=natureza or item.Idnatureza or titulo.Idnatureza,
             FormaPagamento=item.FormaPagamento or titulo.FormaPagamento,
             caixa=caixa,
             pagar_item=item,
@@ -1656,6 +1865,9 @@ class ReceberItemViewSet(BaseViewSet):
         obj = self.get_object()
         valor_baixa = request.data.get('valor_baixa')
         data_baixa = request.data.get('data_baixa') or timezone.now().date().isoformat()
+        juros = self._decimal_request(request, 'juros')
+        multa = self._decimal_request(request, 'multa')
+        desconto = self._decimal_request(request, 'desconto')
         try:
             valor_baixa = Decimal(str(valor_baixa))
         except (TypeError, ValueError, InvalidOperation):
@@ -1673,9 +1885,12 @@ class ReceberItemViewSet(BaseViewSet):
             before = {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa}
             obj.valor_baixa = valor_baixa
             obj.data_baixa = data_baixa
+            obj.juros = juros
+            obj.multa = multa
+            obj.desconto = desconto
             obj.status = ReceberItem.STATUS_BAIXADO
-            obj.save(update_fields=['valor_baixa', 'data_baixa', 'status'])
-            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa)
+            obj.save(update_fields=['valor_baixa', 'data_baixa', 'juros', 'multa', 'desconto', 'status'])
+            movimento = self._criar_movimento_baixa(obj, valor_baixa, data_baixa, juros, multa, desconto)
 
         _audit('receberitem', obj.pk, {'before': before, 'after': {
             'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': str(obj.data_baixa),
@@ -1683,12 +1898,21 @@ class ReceberItemViewSet(BaseViewSet):
         }}, request, action='baixar')
         return Response(self.get_serializer(obj).data)
 
+    def _decimal_request(self, request, campo):
+        try:
+            valor = Decimal(str(request.data.get(campo, 0) or 0))
+        except (TypeError, ValueError, InvalidOperation):
+            raise ValidationError({campo: 'Informe um valor numérico.'})
+        if valor < 0:
+            raise ValidationError({campo: 'O valor não pode ser negativo.'})
+        return valor
+
     def _documento_parcela(self, item):
         titulo = str(item.Idreceber.Titulo or item.Idreceber_id)
         sufixo = f"-{item.parcela_n}"
         return titulo if titulo.endswith(sufixo) else f"{titulo}{sufixo}"
 
-    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa):
+    def _criar_movimento_baixa(self, item, valor_baixa, data_baixa, juros=0, multa=0, desconto=0):
         existente = (
             MovimentacaoFinanceira.objects
             .filter(receber_item=item, status=MovimentacaoFinanceira.STATUS_EFETIVA)
@@ -1722,17 +1946,42 @@ class ReceberItemViewSet(BaseViewSet):
             or getattr(titulo.idcliente, 'nome', '')
             or getattr(titulo.idcliente, 'apelido', '')
         )
+        config = getattr(titulo.empresa, 'config_financeira', None)
+        principal = Decimal(valor_baixa or 0) - Decimal(juros or 0) - Decimal(multa or 0) + Decimal(desconto or 0)
+        if principal < 0:
+            raise ValidationError({'valor_baixa': 'O total dos acréscimos não pode superar o valor recebido.'})
+
+        movimento = self._criar_movimento_componentizado(
+            titulo=titulo,
+            item=item,
+            data_baixa=data_baixa,
+            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            valor=principal,
+            historico=f"Baixa contas a receber {documento}" + (f" - {cliente}" if cliente else ""),
+            documento=documento,
+            natureza=item.Idnatureza or titulo.Idnatureza,
+            caixa=caixa,
+        )
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_ENTRADA, juros, f"Juros recebidos {documento}", f"{documento}-JUR", getattr(config, 'natureza_juros_recebidos', None), caixa)
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_ENTRADA, multa, f"Multa recebida {documento}", f"{documento}-MUL", getattr(config, 'natureza_multas_recebidas', None), caixa)
+        self._criar_movimento_componentizado(titulo, item, data_baixa, MovimentacaoFinanceira.TIPO_SAIDA, desconto, f"Desconto concedido {documento}", f"{documento}-DSC", getattr(config, 'natureza_descontos_concedidos', None), caixa)
+        return movimento
+
+    def _criar_movimento_componentizado(self, titulo, item, data_baixa, tipo, valor, historico, documento, natureza, caixa):
+        valor = Decimal(valor or 0)
+        if valor <= 0:
+            return None
         movimento = MovimentacaoFinanceira.objects.create(
             empresa=titulo.empresa,
             idloja=titulo.idloja,
             data_movimento=data_baixa,
-            tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
+            tipo=tipo,
             status=MovimentacaoFinanceira.STATUS_EFETIVA,
             origem=MovimentacaoFinanceira.ORIGEM_RECEBER,
-            valor=valor_baixa,
-            historico=f"Baixa contas a receber {documento}" + (f" - {cliente}" if cliente else ""),
+            valor=valor,
+            historico=historico,
             documento=documento,
-            Idnatureza=item.Idnatureza or titulo.Idnatureza,
+            Idnatureza=natureza or item.Idnatureza or titulo.Idnatureza,
             FormaPagamento=item.FormaPagamento or titulo.FormaPagamento,
             caixa=caixa,
             receber_item=item,

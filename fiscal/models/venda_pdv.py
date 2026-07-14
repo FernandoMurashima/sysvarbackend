@@ -72,6 +72,22 @@ class VendaPdvItem(models.Model):
     total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     custo_unitario = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     cmv_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    ncm = models.CharField(max_length=10, blank=True, default="")
+    cfop = models.CharField(max_length=4, blank=True, default="")
+    origem_mercadoria = models.PositiveSmallIntegerField(null=True, blank=True)
+    cst_icms = models.CharField(max_length=3, blank=True, default="")
+    base_icms = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    aliquota_icms = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    valor_icms = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    cst_pis = models.CharField(max_length=2, blank=True, default="")
+    base_pis = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    aliquota_pis = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    valor_pis = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    cst_cofins = models.CharField(max_length=2, blank=True, default="")
+    base_cofins = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    aliquota_cofins = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    valor_cofins = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    total_impostos = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     class Meta:
         db_table = "fiscal_venda_pdv_item"

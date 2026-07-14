@@ -27,10 +27,20 @@ from financeiro.models import (
     saldo_vale_troca_cliente,
 )
 from financeiro.services import gerar_lancamento_contabil_movimentacao
-from fiscal.models import NFCe, NFeDevolucao, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from fiscal.models import (
+    Cfop,
+    NFCe,
+    NFeDevolucao,
+    RegraTributaria,
+    VendaDevolucao,
+    VendaDevolucaoItem,
+    VendaPdv,
+    VendaPdvItem,
+    VendaPdvPagamento,
+)
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
-from produto.models import Estoque, EstoqueMovimentacao, Produto, ProdutoDetalhe
+from produto.models import Estoque, EstoqueMovimentacao, Ncm, Produto, ProdutoDetalhe
 from cadastros.models import Cliente, Funcionarios
 
 
@@ -91,7 +101,10 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor"]
     write_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
-    action_roles = {"relatorio_vendas": ["Admin", "Diretor", "Gerente"]}
+    action_roles = {
+        "relatorio_vendas": ["Admin", "Diretor", "Gerente"],
+        "relatorio_margem": ["Admin", "Diretor", "Gerente"],
+    }
     serializer_class = VendaPdvSerializer
     queryset = (
         VendaPdv.objects.select_related("loja", "caixa", "cliente", "vendedor", "criado_por")
@@ -280,6 +293,94 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             "subgrupos": subgrupos_payload,
         })
 
+    @action(detail=False, methods=["get"], url_path="relatorio-margem")
+    def relatorio_margem(self, request):
+        vendas = self._vendas_relatorio(request)
+        produtos = defaultdict(lambda: {
+            "produto": "",
+            "referencia": "",
+            "colecao": "",
+            "grupo": "",
+            "subgrupo": "",
+            "quantidade": Decimal("0"),
+            "receita": Decimal("0.00"),
+            "cmv": Decimal("0.00"),
+        })
+        lojas = defaultdict(lambda: {
+            "loja": "",
+            "quantidade": Decimal("0"),
+            "receita": Decimal("0.00"),
+            "cmv": Decimal("0.00"),
+        })
+
+        for venda in vendas:
+            devolvidos = self._quantidades_devolvidas_venda(venda)
+            for item in venda.itens.all():
+                quantidade_original = Decimal(item.quantidade or 0)
+                if quantidade_original <= 0:
+                    continue
+                quantidade_liquida = quantidade_original - Decimal(devolvidos.get(item.id, 0))
+                if quantidade_liquida <= 0:
+                    continue
+
+                fator = quantidade_liquida / quantidade_original
+                receita = money(Decimal(item.total_item or 0) * fator)
+                cmv = money(Decimal(item.cmv_total or 0) * fator)
+                produto = item.produto
+                key = produto.pk
+                row = produtos[key]
+                row["produto"] = produto.descricao
+                row["referencia"] = produto.referencia or ""
+                row["colecao"] = getattr(produto.colecao, "Descricao", "") if produto.colecao_id else ""
+                row["grupo"] = getattr(produto.grupo, "Descricao", "") if produto.grupo_id else ""
+                row["subgrupo"] = getattr(produto.subgrupo, "Descricao", "") if produto.subgrupo_id else ""
+                row["quantidade"] += quantidade_liquida
+                row["receita"] += receita
+                row["cmv"] += cmv
+
+                loja_row = lojas[venda.loja_id]
+                loja_row["loja"] = venda.loja.nome_loja
+                loja_row["quantidade"] += quantidade_liquida
+                loja_row["receita"] += receita
+                loja_row["cmv"] += cmv
+
+        def serializar(row):
+            receita = money(row["receita"])
+            cmv = money(row["cmv"])
+            margem = money(receita - cmv)
+            margem_percentual = money((margem / receita * Decimal("100")) if receita else Decimal("0"))
+            return {
+                **{k: row[k] for k in row.keys() if k not in ("quantidade", "receita", "cmv")},
+                "quantidade": float(row["quantidade"]),
+                "receita": str(receita),
+                "cmv": str(cmv),
+                "margem": str(margem),
+                "margem_percentual": str(margem_percentual),
+            }
+
+        produtos_payload = [serializar(row) for row in produtos.values()]
+        lojas_payload = [serializar(row) for row in lojas.values()]
+        produtos_payload.sort(key=lambda row: Decimal(row["margem"]), reverse=True)
+        lojas_payload.sort(key=lambda row: row["loja"])
+
+        total_receita = money(sum((Decimal(row["receita"]) for row in produtos_payload), Decimal("0.00")))
+        total_cmv = money(sum((Decimal(row["cmv"]) for row in produtos_payload), Decimal("0.00")))
+        total_margem = money(total_receita - total_cmv)
+        total_margem_percentual = money((total_margem / total_receita * Decimal("100")) if total_receita else Decimal("0"))
+
+        return Response({
+            "resumo": {
+                "receita": str(total_receita),
+                "cmv": str(total_cmv),
+                "margem": str(total_margem),
+                "margem_percentual": str(total_margem_percentual),
+                "produtos": len(produtos_payload),
+                "quantidade": float(sum((row["quantidade"] for row in produtos.values()), Decimal("0"))),
+            },
+            "produtos": produtos_payload,
+            "lojas": lojas_payload,
+        })
+
     def _vendas_relatorio(self, request):
         qs = (
             VendaPdv.objects.select_related("loja", "vendedor")
@@ -290,6 +391,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 "itens__produto__colecao",
                 "itens__produto__grupo",
                 "itens__produto__subgrupo",
+                "devolucoes__itens",
             )
             .filter(status=VendaPdv.Status.FINALIZADA)
             .order_by("-data_venda")
@@ -312,6 +414,15 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if data_fim:
             qs = qs.filter(data_venda__lte=self._datetime_fim_dia(data_fim))
         return list(qs)
+
+    def _quantidades_devolvidas_venda(self, venda: VendaPdv) -> Dict[int, int]:
+        devolvidos = defaultdict(int)
+        for devolucao in venda.devolucoes.all():
+            if devolucao.status == VendaDevolucao.Status.CANCELADA:
+                continue
+            for item in devolucao.itens.all():
+                devolvidos[item.venda_item_id] += int(item.quantidade or 0)
+        return devolvidos
 
     def _datetime_inicio_dia(self, date_text: str):
         dt = datetime.combine(datetime.strptime(date_text, "%Y-%m-%d").date(), time.min)
@@ -423,6 +534,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         self._registrar_financeiro(venda)
         self._registrar_cmv(venda)
+        self._registrar_impostos_venda(venda)
         self._registrar_comissao(venda)
         self._registrar_uso_vale_troca(venda, pagamentos_payload)
         self._registrar_cashback(venda, pagamentos_payload)
@@ -635,6 +747,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if posterior < 0 and (venda.loja.EstoqueNegativo or "NAO").upper() != "SIM":
             raise ValueError(f"Saldo insuficiente para {produto.descricao}.")
 
+        custo_unitario = self._custo_sku(sku)
         estoque.Estoque = posterior
         estoque.referencia = produto.referencia or estoque.referencia
         estoque.save(update_fields=["Estoque", "referencia"])
@@ -644,12 +757,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             referencia=produto.referencia or "",
             tipo=EstoqueMovimentacao.TIPO_SAIDA,
             quantidade=quantidade,
+            custo_unitario=custo_unitario,
+            custo_total=money(Decimal(quantidade) * custo_unitario),
+            custo_medio_apos=custo_unitario,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
             documento=venda.documento,
             observacao=f"Venda PDV {venda.documento}",
         )
 
+        fiscal = self._calcular_fiscal_item(venda, produto, quantidade, preco, desconto)
         return VendaPdvItem.objects.create(
             venda=venda,
             produto=produto,
@@ -662,13 +779,160 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             quantidade=quantidade,
             preco_unitario=preco,
             desconto=desconto,
-            custo_unitario=self._custo_sku(sku),
+            custo_unitario=custo_unitario,
+            **fiscal,
         )
 
+    def _calcular_fiscal_item(
+        self,
+        venda: VendaPdv,
+        produto: Produto,
+        quantidade: int,
+        preco: Decimal,
+        desconto: Decimal,
+    ) -> dict:
+        base = money((Decimal(quantidade or 0) * Decimal(preco or 0)) - Decimal(desconto or 0))
+        loja_uf = (getattr(venda.loja, "estado", "") or "").upper()
+        destino_uf = (getattr(venda.cliente, "estado", "") or loja_uf).upper()
+        cfop = produto.cfop_venda_dentro if loja_uf == destino_uf else produto.cfop_venda_fora
+        if not cfop:
+            cfop = produto.cfop_venda_dentro or produto.cfop_venda_fora or ""
+
+        regras = self._regras_tributarias_item(venda, produto, cfop, loja_uf, destino_uf)
+        icms = self._calcular_tributo_item(regras.get("ICMS"), base, Decimal(produto.aliquota_icms or 0))
+        pis = self._calcular_tributo_item(regras.get("PIS"), base, Decimal(produto.aliq_pis or 0))
+        cofins = self._calcular_tributo_item(regras.get("COFINS"), base, Decimal(produto.aliq_cofins or 0))
+
+        regra_cfop = next((regra.cfop.codigo for regra in regras.values() if regra.cfop_id), "")
+        if regra_cfop:
+            cfop = regra_cfop
+
+        return {
+            "ncm": produto.ncm or "",
+            "cfop": cfop,
+            "origem_mercadoria": produto.origem_mercadoria,
+            "cst_icms": icms["cst"] or produto.csosn_ou_cst_icms or "",
+            "base_icms": base,
+            "aliquota_icms": icms["aliquota"],
+            "valor_icms": icms["valor"],
+            "cst_pis": pis["cst"] or produto.cst_pis or "",
+            "base_pis": base,
+            "aliquota_pis": pis["aliquota"],
+            "valor_pis": pis["valor"],
+            "cst_cofins": cofins["cst"] or produto.cst_cofins or "",
+            "base_cofins": base,
+            "aliquota_cofins": cofins["aliquota"],
+            "valor_cofins": cofins["valor"],
+            "total_impostos": money(icms["valor"] + pis["valor"] + cofins["valor"]),
+        }
+
+    def _regras_tributarias_item(self, venda: VendaPdv, produto: Produto, cfop_codigo: str, uf_origem: str, uf_destino: str) -> dict:
+        empresa_id = venda.empresa_id or getattr(venda.loja, "empresa_id", None) or produto.empresa_id
+        if not empresa_id:
+            return {}
+
+        hoje = timezone.localdate()
+        regime = getattr(venda.loja, "regime_tributario", "") or RegraTributaria.REGIME_TODOS
+        tipo_produto = self._tipo_produto_regra(produto)
+        cfop_obj = self._cfop_regra(empresa_id, cfop_codigo)
+        ncm_obj = self._ncm_regra(empresa_id, produto.ncm)
+
+        qs = (
+            RegraTributaria.objects
+            .select_related("tributo", "cfop", "ncm")
+            .filter(
+                empresa_id=empresa_id,
+                ativo=True,
+                tipo_operacao__iexact="VENDA",
+                vigencia_inicio__lte=hoje,
+            )
+            .filter(models.Q(vigencia_fim__isnull=True) | models.Q(vigencia_fim__gte=hoje))
+            .filter(models.Q(regime_tributario=regime) | models.Q(regime_tributario=RegraTributaria.REGIME_TODOS))
+            .filter(models.Q(tipo_produto=tipo_produto) | models.Q(tipo_produto=RegraTributaria.TIPO_PRODUTO_TODOS))
+            .filter(models.Q(uf_origem__isnull=True) | models.Q(uf_origem="") | models.Q(uf_origem=uf_origem))
+            .filter(models.Q(uf_destino__isnull=True) | models.Q(uf_destino="") | models.Q(uf_destino=uf_destino))
+        )
+        if cfop_obj:
+            qs = qs.filter(models.Q(cfop__isnull=True) | models.Q(cfop=cfop_obj))
+        else:
+            qs = qs.filter(cfop__isnull=True)
+        if ncm_obj:
+            qs = qs.filter(models.Q(ncm__isnull=True) | models.Q(ncm=ncm_obj))
+        else:
+            qs = qs.filter(ncm__isnull=True)
+
+        selecionadas = {}
+        for regra in qs:
+            codigo = (regra.tributo.codigo or "").upper()
+            if codigo not in ("ICMS", "PIS", "COFINS"):
+                continue
+            atual = selecionadas.get(codigo)
+            if not atual or self._pontuacao_regra(regra, regime, tipo_produto, cfop_obj, ncm_obj, uf_origem, uf_destino) > self._pontuacao_regra(atual, regime, tipo_produto, cfop_obj, ncm_obj, uf_origem, uf_destino):
+                selecionadas[codigo] = regra
+        return selecionadas
+
+    def _calcular_tributo_item(self, regra, base: Decimal, aliquota_padrao: Decimal) -> dict:
+        if not regra:
+            aliquota = Decimal(aliquota_padrao or 0).quantize(Decimal("0.01"))
+            return {"aliquota": aliquota, "valor": money(base * aliquota / Decimal("100")), "cst": ""}
+        aliquota = Decimal(regra.aliquota or 0).quantize(Decimal("0.01"))
+        reducao = Decimal(regra.reducao_base or 0)
+        base_tributada = money(base * (Decimal("100") - reducao) / Decimal("100"))
+        return {
+            "aliquota": aliquota,
+            "valor": money(base_tributada * aliquota / Decimal("100")),
+            "cst": regra.cst_csosn or "",
+        }
+
+    def _tipo_produto_regra(self, produto: Produto) -> str:
+        return {
+            "1": RegraTributaria.TIPO_PRODUTO_REVENDA,
+            "2": RegraTributaria.TIPO_PRODUTO_USO_CONSUMO,
+            "3": RegraTributaria.TIPO_PRODUTO_PROPRIO,
+            "4": RegraTributaria.TIPO_PRODUTO_INSUMO,
+        }.get(str(produto.tipo_produto or ""), RegraTributaria.TIPO_PRODUTO_TODOS)
+
+    def _cfop_regra(self, empresa_id, cfop_codigo: str):
+        codigo = str(cfop_codigo or "").strip()
+        if not codigo:
+            return None
+        return Cfop.objects.filter(empresa_id=empresa_id, codigo=codigo, ativo=True).first()
+
+    def _ncm_regra(self, empresa_id, ncm_codigo: str):
+        codigo = str(ncm_codigo or "").strip()
+        if not codigo:
+            return None
+        return Ncm.objects.filter(empresa_id=empresa_id, ncm=codigo, ativo=True).first()
+
+    def _pontuacao_regra(self, regra, regime, tipo_produto, cfop_obj, ncm_obj, uf_origem, uf_destino) -> int:
+        pontos = 0
+        if regra.regime_tributario == regime:
+            pontos += 8
+        if regra.tipo_produto == tipo_produto:
+            pontos += 8
+        if cfop_obj and regra.cfop_id == cfop_obj.id:
+            pontos += 6
+        if ncm_obj and regra.ncm_id == ncm_obj.id:
+            pontos += 6
+        if regra.uf_origem == uf_origem:
+            pontos += 3
+        if regra.uf_destino == uf_destino:
+            pontos += 3
+        return pontos
+
     def _custo_sku(self, sku: ProdutoDetalhe) -> Decimal:
-        custo = Decimal(sku.custo_ultima_compra or sku.custo_original or 0)
+        custo = Decimal(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
         if custo > 0:
             return custo
+        referencia = (
+            ProdutoDetalhe.objects
+            .filter(produto_id=sku.produto_id, custo_medio__gt=0)
+            .order_by("-custo_medio")
+            .values_list("custo_medio", flat=True)
+            .first()
+        )
+        if referencia:
+            return Decimal(referencia or 0)
         referencia = (
             ProdutoDetalhe.objects
             .filter(produto_id=sku.produto_id, custo_ultima_compra__gt=0)
@@ -677,6 +941,22 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             .first()
         )
         return Decimal(referencia or 0)
+
+    def _atualizar_custo_medio_retorno(self, sku: ProdutoDetalhe, saldo_anterior: int, quantidade: int, custo_retorno: Decimal) -> Decimal:
+        custo_retorno = Decimal(custo_retorno or 0)
+        custo_atual = Decimal(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+        if custo_retorno <= 0:
+            return custo_atual
+        saldo_anterior_dec = Decimal(max(int(saldo_anterior or 0), 0))
+        quantidade_dec = Decimal(max(int(quantidade or 0), 0))
+        saldo_posterior = saldo_anterior_dec + quantidade_dec
+        if saldo_posterior <= 0:
+            custo_medio = custo_retorno
+        else:
+            custo_medio = ((saldo_anterior_dec * custo_atual) + (quantidade_dec * custo_retorno)) / saldo_posterior
+        sku.custo_medio = custo_medio.quantize(Decimal("0.0001"))
+        sku.save(update_fields=["custo_medio"])
+        return sku.custo_medio
 
     def _natureza_venda(self, empresa=None) -> Nat_Lancamento:
         natureza = (
@@ -787,6 +1067,56 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             ativo=True,
         )
 
+    def _natureza_impostos_venda(self, empresa=None) -> Nat_Lancamento:
+        natureza = (
+            Nat_Lancamento.objects
+            .filter(empresa=empresa, ativo=True, natureza_operacao="DESPESA")
+            .filter(
+                models.Q(codigo="2200")
+                | models.Q(descricao__icontains="Impostos sobre vendas")
+                | models.Q(descricao__icontains="Tributos sobre vendas")
+            )
+            .order_by("codigo")
+            .first()
+        )
+        if natureza:
+            return natureza
+
+        plano = None
+        try:
+            from cadastros.models import PlanoContabil
+            plano = (
+                PlanoContabil.objects
+                .filter(empresa=empresa, ativa=True)
+                .filter(
+                    models.Q(descricao__icontains="Imposto")
+                    | models.Q(descricao__icontains="Tributo")
+                    | models.Q(descricao__icontains="ICMS")
+                )
+                .order_by("codigo")
+                .first()
+            )
+        except Exception:
+            plano = None
+
+        return Nat_Lancamento.objects.create(
+            empresa=empresa,
+            codigo="2200",
+            categoria_principal="DEDUCOES DA RECEITA",
+            subcategoria="Tributos",
+            descricao="Impostos sobre vendas",
+            tipo="DESPESA",
+            status="ATIVO",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+            categoria_gerencial="Tributos sobre vendas",
+            movimenta_financeiro=False,
+            entra_dre=True,
+            plano_contabil=plano,
+            conta_contabil=plano.codigo if plano else None,
+            ativo=True,
+        )
+
     def _registrar_cmv(self, venda: VendaPdv):
         if MovimentacaoFinanceira.objects.filter(
             empresa=venda.empresa,
@@ -841,6 +1171,34 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             documento=venda.documento,
             Idnatureza=self._natureza_comissao(venda.empresa),
             FormaPagamento="COMISSAO",
+        )
+        gerar_lancamento_contabil_movimentacao(movimento)
+
+    def _registrar_impostos_venda(self, venda: VendaPdv):
+        if MovimentacaoFinanceira.objects.filter(
+            empresa=venda.empresa,
+            origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
+            documento=venda.documento,
+            FormaPagamento="IMPOSTOS",
+        ).exists():
+            return
+
+        total_impostos = money(sum((Decimal(item.total_impostos or 0) for item in venda.itens.all()), Decimal("0.00")))
+        if total_impostos <= 0:
+            return
+
+        movimento = MovimentacaoFinanceira.objects.create(
+            empresa=venda.empresa,
+            idloja=venda.loja,
+            data_movimento=timezone.localdate(),
+            tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+            status=MovimentacaoFinanceira.STATUS_EFETIVA,
+            origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
+            valor=total_impostos,
+            historico=f"Impostos sobre venda PDV {venda.documento}",
+            documento=venda.documento,
+            Idnatureza=self._natureza_impostos_venda(venda.empresa),
+            FormaPagamento="IMPOSTOS",
         )
         gerar_lancamento_contabil_movimentacao(movimento)
 
@@ -1036,6 +1394,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     def _cupom(self, venda: VendaPdv, nfce: NFCe) -> dict:
         cashback_gerado = money(sum((mov.valor for mov in venda.cashback_creditos.all()), Decimal("0.00")))
         cashback_usado = money(sum((mov.valor for mov in venda.cashback_usos.all()), Decimal("0.00")))
+        total_impostos = money(sum((item.total_impostos for item in venda.itens.all()), Decimal("0.00")))
         return {
             "empresa": venda.loja.nome_loja,
             "cnpj": venda.loja.cnpj,
@@ -1052,12 +1411,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                     "preco_unitario": str(money(item.preco_unitario)),
                     "desconto": str(money(item.desconto)),
                     "total_item": str(money(item.total_item)),
+                    "ncm": item.ncm,
+                    "cfop": item.cfop,
+                    "total_impostos": str(money(item.total_impostos)),
                 }
                 for item in venda.itens.all()
             ],
             "subtotal": str(money(venda.subtotal)),
             "desconto": str(money(venda.desconto_itens + venda.desconto_geral)),
             "total": str(money(venda.total)),
+            "total_impostos": str(total_impostos),
             "forma_pagamento": venda.forma_pagamento,
             "valor_recebido": str(money(venda.valor_recebido)),
             "troco": str(money(venda.troco)),
@@ -1316,10 +1679,28 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
                 devolvidos[item.venda_item_id] += int(item.quantidade or 0)
         return devolvidos
 
+    def _atualizar_custo_medio_retorno(self, sku: ProdutoDetalhe, saldo_anterior: int, quantidade: int, custo_retorno: Decimal) -> Decimal:
+        custo_retorno = Decimal(custo_retorno or 0)
+        custo_atual = Decimal(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+        if custo_retorno <= 0:
+            return custo_atual
+        saldo_anterior_dec = Decimal(max(int(saldo_anterior or 0), 0))
+        quantidade_dec = Decimal(max(int(quantidade or 0), 0))
+        saldo_posterior = saldo_anterior_dec + quantidade_dec
+        if saldo_posterior <= 0:
+            custo_medio = custo_retorno
+        else:
+            custo_medio = ((saldo_anterior_dec * custo_atual) + (quantidade_dec * custo_retorno)) / saldo_posterior
+        sku.custo_medio = custo_medio.quantize(Decimal("0.0001"))
+        sku.save(update_fields=["custo_medio"])
+        return sku.custo_medio
+
     def _registrar_item_devolucao(self, devolucao: VendaDevolucao, venda_item: VendaPdvItem, quantidade: int, desconto: Decimal):
         estoque = Estoque.objects.select_for_update().get(CodigodeBarra=venda_item.ean, Idloja=devolucao.loja)
         anterior = estoque.Estoque or 0
         posterior = anterior + quantidade
+        custo_unitario = Decimal(venda_item.custo_unitario or 0)
+        custo_medio_apos = self._atualizar_custo_medio_retorno(venda_item.sku, anterior, quantidade, custo_unitario)
         estoque.Estoque = posterior
         estoque.referencia = venda_item.referencia or estoque.referencia
         estoque.save(update_fields=["Estoque", "referencia"])
@@ -1329,6 +1710,9 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             referencia=venda_item.referencia or "",
             tipo=EstoqueMovimentacao.TIPO_ENTRADA,
             quantidade=quantidade,
+            custo_unitario=custo_unitario,
+            custo_total=money(Decimal(quantidade) * custo_unitario),
+            custo_medio_apos=custo_medio_apos,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
             documento=devolucao.documento,

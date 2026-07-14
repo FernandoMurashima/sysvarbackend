@@ -49,9 +49,18 @@ def natureza_cmv(empresa):
 
 
 def custo_sku(sku):
-    custo = Decimal(sku.custo_ultima_compra or sku.custo_original or 0)
+    custo = Decimal(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
     if custo > 0:
         return custo
+    referencia = (
+        sku.__class__.objects
+        .filter(produto_id=sku.produto_id, custo_medio__gt=0)
+        .order_by("-custo_medio")
+        .values_list("custo_medio", flat=True)
+        .first()
+    )
+    if referencia:
+        return Decimal(referencia or 0)
     referencia = (
         sku.__class__.objects
         .filter(produto_id=sku.produto_id, custo_ultima_compra__gt=0)

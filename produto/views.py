@@ -3,8 +3,9 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 try:
     from auditoria.models import AuditLog
@@ -12,19 +13,22 @@ except Exception:  # auditoria opcionalmente ausente em dev
     AuditLog = None
 
 from .permissions import CanToggleProductFlags
-from accounts.permissions import HasModuleRole
+from accounts.permissions import HasEmpresaModulo, HasModuleRole
+from cadastros.models import Loja
 
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    TabelaprecoProduto, Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
+    Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
 )
 from .serializers import (
     ConfigEanSerializer, NcmSerializer, GradeSerializer, TamanhoSerializer, CorSerializer,
     MaterialSerializer, ColecaoSerializer, UnidadeSerializer, GrupoSerializer, SubgrupoSerializer,
     TabelaprecoSerializer, CodigosSerializer, ProdutoSerializer, ProdutoDetalheSerializer,
-    TabelaprecoProdutoSerializer, PromocaoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
+    TabelaprecoProdutoSerializer, FichaTecnicaSerializer, FichaTecnicaItemSerializer,
+    OrdemProducaoSerializer, OrdemProducaoItemSerializer, PromocaoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
     EstoqueMovimentacaoSerializer, InventarioEstoqueSerializer, InventarioEstoqueItemSerializer
 )
 
@@ -49,6 +53,14 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str):
     except Exception:
         # Não derruba a requisição se auditoria falhar
         pass
+
+
+def _money(value):
+    return Decimal(value or 0).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def _q4(value):
+    return Decimal(value or 0).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
 
 
 class BaseViewSet(viewsets.ModelViewSet):
@@ -195,8 +207,11 @@ class ProdutoViewSet(BaseViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         tipo_produto = self.request.query_params.get('tipo_produto') or self.request.query_params.get('tipo')
-        if tipo_produto in ('1', '2'):
-            qs = qs.filter(tipo_produto=tipo_produto)
+        tipos_validos = {'1', '2', '3', '4'}
+        if tipo_produto:
+            tipos = [tipo.strip() for tipo in str(tipo_produto).split(',') if tipo.strip() in tipos_validos]
+            if tipos:
+                qs = qs.filter(tipo_produto__in=tipos)
 
         ativo = self.request.query_params.get('ativo')
         if ativo in ('true', '1'):
@@ -217,7 +232,7 @@ class ProdutoViewSet(BaseViewSet):
     @action(detail=True, methods=['post'], url_path='gerar-skus')
     def gerar_skus(self, request, pk=None):
         """
-        Gera SKUs (ProdutoDetalhe) para um produto de Revenda.
+        Gera SKUs (ProdutoDetalhe) para um produto vendável com grade.
         Body:
         {
           "cores": [Idcor, ...],          # obrigatório
@@ -225,8 +240,8 @@ class ProdutoViewSet(BaseViewSet):
         }
         """
         produto = self.get_object()
-        if produto.tipo_produto != '1':
-            return Response({'detail': 'Apenas produtos de Revenda geram SKUs.'}, status=status.HTTP_400_BAD_REQUEST)
+        if produto.tipo_produto not in ('1', '3'):
+            return Response({'detail': 'Apenas produtos vendáveis com grade geram SKUs.'}, status=status.HTTP_400_BAD_REQUEST)
         if not produto.grade_id:
             return Response({'detail': 'Produto sem grade.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -272,9 +287,9 @@ class ProdutoViewSet(BaseViewSet):
         """
         produto = self.get_object()
 
-        if produto.tipo_produto != '1':
+        if produto.tipo_produto not in ('1', '3'):
             return Response(
-                {'detail': 'Estoque inicial só é permitido para produto de Revenda.'},
+                {'detail': 'Estoque inicial só é permitido para produtos vendáveis com grade.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -516,6 +531,867 @@ class TabelaprecoProdutoViewSet(BaseViewSet):
                 raise ValidationError({"tabela": "Tabela pertence a outra empresa."})
         if produto and tabela and produto.empresa_id and tabela.empresa_id and produto.empresa_id != tabela.empresa_id:
             raise ValidationError({"tabela": "Tabela e produto pertencem a empresas diferentes."})
+
+
+class FichaTecnicaViewSet(BaseViewSet):
+    permission_classes = [HasModuleRole, HasEmpresaModulo]
+    empresa_modulo_field = 'usa_ficha_tecnica'
+    queryset = FichaTecnica.objects.select_related('empresa', 'produto_final').prefetch_related('itens').order_by('-data_cadastro')
+    serializer_class = FichaTecnicaSerializer
+    read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        produto = self.request.query_params.get('produto') or self.request.query_params.get('produto_final')
+        status_param = self.request.query_params.get('status')
+        ativa = self.request.query_params.get('ativa')
+        search = (self.request.query_params.get('search') or '').strip()
+
+        if produto:
+            qs = qs.filter(produto_final_id=produto)
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if ativa in ('true', '1'):
+            qs = qs.filter(ativa=True)
+        elif ativa in ('false', '0'):
+            qs = qs.filter(ativa=False)
+        if search:
+            qs = qs.filter(
+                Q(produto_final__descricao__icontains=search)
+                | Q(produto_final__referencia__icontains=search)
+                | Q(descricao__icontains=search)
+                | Q(versao__icontains=search)
+            )
+        return qs
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        _audit('FichaTecnica', serializer.instance.pk, {'created': True}, self.request, 'create')
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        _audit('FichaTecnica', serializer.instance.pk, {'updated': True}, self.request, 'update')
+
+    @action(detail=True, methods=['post'], url_path='aprovar')
+    def aprovar(self, request, pk=None):
+        ficha = self.get_object()
+        if not ficha.itens.exists():
+            return Response({'detail': 'Inclua ao menos um item antes de aprovar a ficha.'}, status=status.HTTP_400_BAD_REQUEST)
+        ficha.status = FichaTecnica.STATUS_APROVADA
+        ficha.ativa = True
+        ficha.save(update_fields=['status', 'ativa', 'atualizado_em'])
+        _audit('FichaTecnica', ficha.pk, {'status': FichaTecnica.STATUS_APROVADA}, request, 'approve')
+        return Response(self.get_serializer(ficha).data)
+
+
+class FichaTecnicaItemViewSet(BaseViewSet):
+    permission_classes = [HasModuleRole, HasEmpresaModulo]
+    empresa_modulo_field = 'usa_ficha_tecnica'
+    queryset = FichaTecnicaItem.objects.select_related('ficha', 'produto', 'fornecedor', 'unidade').order_by('ordem', 'id')
+    serializer_class = FichaTecnicaItemSerializer
+    read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = getattr(self.request.user, 'empresa_id', None)
+        empresa_param = self.request.query_params.get('empresa')
+        if self.request.user.is_superuser and empresa_param:
+            qs = qs.filter(ficha__empresa_id=empresa_param)
+        elif not self.request.user.is_superuser and empresa_id:
+            qs = qs.filter(ficha__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            qs = qs.none()
+
+        ficha = self.request.query_params.get('ficha')
+        if ficha:
+            qs = qs.filter(ficha_id=ficha)
+        return qs
+
+    def _save_with_empresa_scope(self, serializer):
+        serializer.save()
+
+
+class OrdemProducaoViewSet(BaseViewSet):
+    permission_classes = [HasModuleRole, HasEmpresaModulo]
+    empresa_modulo_field = 'usa_producao'
+    queryset = (
+        OrdemProducao.objects
+        .select_related('empresa', 'ficha_tecnica', 'produto_final', 'sku_final', 'sku_final__idcor', 'sku_final__idtamanho')
+        .prefetch_related('itens', 'grade_producao')
+        .order_by('-data_emissao', '-id')
+    )
+    serializer_class = OrdemProducaoSerializer
+    read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get('status')
+        produto = self.request.query_params.get('produto') or self.request.query_params.get('produto_final')
+        ficha = self.request.query_params.get('ficha') or self.request.query_params.get('ficha_tecnica')
+        search = (self.request.query_params.get('search') or '').strip()
+
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if produto:
+            qs = qs.filter(produto_final_id=produto)
+        if ficha:
+            qs = qs.filter(ficha_tecnica_id=ficha)
+        if search:
+            qs = qs.filter(
+                Q(numero__icontains=search)
+                | Q(produto_final__descricao__icontains=search)
+                | Q(produto_final__referencia__icontains=search)
+            )
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='painel')
+    def painel(self, request):
+        qs = self.get_queryset()
+        por_status = {
+            row['status']: row['total']
+            for row in qs.values('status').annotate(total=Count('id'))
+        }
+        faccoes = OrdemProducaoItem.objects.filter(
+            ordem__in=qs,
+            tipo=FichaTecnicaItem.TIPO_SERVICO,
+        )
+        faccao_status = {
+            row['status_faccao']: row['total']
+            for row in faccoes.values('status_faccao').annotate(total=Count('id'))
+        }
+        custos = qs.aggregate(
+            previsto=Sum('custo_previsto'),
+            real=Sum('custo_real'),
+        )
+        custo_previsto_total = custos['previsto'] or Decimal('0')
+        custo_real_total = custos['real'] or Decimal('0')
+        variacao_custo_total = custo_real_total - custo_previsto_total
+        recentes = [
+            {
+                'id': ordem.id,
+                'numero': ordem.numero,
+                'produto': ordem.produto_final.descricao if ordem.produto_final_id else '',
+                'referencia': ordem.produto_final.referencia if ordem.produto_final_id else '',
+                'quantidade': ordem.quantidade,
+                'status': ordem.status,
+                'custo_previsto': ordem.custo_previsto,
+                'custo_real': ordem.custo_real,
+                'variacao_custo': Decimal(ordem.custo_real or 0) - Decimal(ordem.custo_previsto or 0),
+                'data_emissao': ordem.data_emissao,
+            }
+            for ordem in qs.select_related('produto_final')[:8]
+        ]
+        pendencias_faccao = [
+            {
+                'op': item.ordem.numero,
+                'produto': item.ordem.produto_final.descricao if item.ordem.produto_final_id else '',
+                'fornecedor': item.fornecedor.nome_fornecedor if item.fornecedor_id else '',
+                'servico': item.descricao or 'Serviço de facção',
+                'quantidade': item.quantidade_necessaria,
+                'status': item.status_faccao,
+                'documento': item.documento_faccao or '',
+            }
+            for item in faccoes
+                .exclude(status_faccao=OrdemProducaoItem.STATUS_FACCAO_RETORNADO)
+                .select_related('ordem', 'ordem__produto_final', 'fornecedor')
+                .order_by('ordem__data_emissao', 'id')[:8]
+        ]
+        alertas_insumos = []
+        ops_ativas = qs.filter(status__in=[
+            OrdemProducao.STATUS_ABERTA,
+            OrdemProducao.STATUS_APROVADA,
+            OrdemProducao.STATUS_EM_PRODUCAO,
+        ])
+        primeira_op = ops_ativas.select_related('empresa').first()
+        loja_central = None
+        if primeira_op:
+            try:
+                loja_central = self._loja_central_producao(primeira_op)
+            except ValidationError:
+                loja_central = None
+
+        if loja_central:
+            necessidades = (
+                OrdemProducaoItem.objects
+                .filter(
+                    ordem__in=ops_ativas,
+                    tipo__in=[FichaTecnicaItem.TIPO_INSUMO, FichaTecnicaItem.TIPO_AVIAMENTO],
+                    produto__isnull=False,
+                )
+                .values('produto_id', 'produto__descricao', 'produto__referencia')
+                .annotate(necessario=Sum('quantidade_necessaria'))
+                .order_by('produto__descricao')
+            )
+            for row in necessidades:
+                produto_stub = type('ProdutoCodigo', (), {
+                    'pk': row['produto_id'],
+                    'referencia': row['produto__referencia'],
+                })()
+                codigo = self._codigo_estoque_produto(produto_stub)
+                estoque = Estoque.objects.filter(CodigodeBarra=codigo, Idloja=loja_central).first()
+                saldo = Decimal(estoque.Estoque or 0) if estoque else Decimal('0')
+                necessario = Decimal(row['necessario'] or 0)
+                falta = necessario - saldo
+                if falta > 0:
+                    alertas_insumos.append({
+                        'produto': row['produto__descricao'] or '',
+                        'referencia': row['produto__referencia'] or '',
+                        'necessario': necessario,
+                        'saldo': saldo,
+                        'falta': falta,
+                        'loja_central': loja_central.nome_loja,
+                    })
+        return Response({
+            'totais': {
+                'abertas': por_status.get(OrdemProducao.STATUS_ABERTA, 0),
+                'aprovadas': por_status.get(OrdemProducao.STATUS_APROVADA, 0),
+                'em_producao': por_status.get(OrdemProducao.STATUS_EM_PRODUCAO, 0),
+                'finalizadas': por_status.get(OrdemProducao.STATUS_FINALIZADA, 0),
+                'canceladas': por_status.get(OrdemProducao.STATUS_CANCELADA, 0),
+                'custo_previsto': custo_previsto_total,
+                'custo_real': custo_real_total,
+                'variacao_custo': variacao_custo_total,
+            },
+            'faccao': {
+                'pendentes': faccao_status.get(OrdemProducaoItem.STATUS_FACCAO_PENDENTE, 0),
+                'enviadas': faccao_status.get(OrdemProducaoItem.STATUS_FACCAO_ENVIADO, 0),
+                'retornadas': faccao_status.get(OrdemProducaoItem.STATUS_FACCAO_RETORNADO, 0),
+            },
+            'recentes': recentes,
+            'pendencias_faccao': pendencias_faccao,
+            'alertas_insumos': alertas_insumos[:12],
+        })
+
+    def _validar_estoque_insumos(self, ordem):
+        loja = self._loja_central_producao(ordem)
+        faltas = []
+        itens = (
+            ordem.itens
+            .select_related('produto')
+            .filter(tipo__in=[FichaTecnicaItem.TIPO_INSUMO, FichaTecnicaItem.TIPO_AVIAMENTO], produto__isnull=False)
+        )
+        for item in itens:
+            quantidade = Decimal(item.quantidade_necessaria or 0).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            if quantidade <= 0:
+                continue
+            codigo = self._codigo_estoque_produto(item.produto)
+            estoque = Estoque.objects.filter(CodigodeBarra=codigo, Idloja=loja).first()
+            saldo = Decimal(estoque.Estoque or 0) if estoque else Decimal('0')
+            falta = quantidade - saldo
+            if falta > 0:
+                faltas.append({
+                    'produto': item.produto.descricao or item.produto.referencia or str(item.produto_id),
+                    'referencia': item.produto.referencia or '',
+                    'codigo': codigo,
+                    'loja': loja.nome_loja,
+                    'necessario': quantidade,
+                    'saldo': saldo,
+                    'falta': falta,
+                })
+        return loja, faltas
+
+    @action(detail=True, methods=['get'], url_path='validar-estoque')
+    def validar_estoque(self, request, pk=None):
+        ordem = self.get_object()
+        try:
+            loja, faltas = self._validar_estoque_insumos(ordem)
+        except ValidationError as exc:
+            raise exc
+        return Response({
+            'ok': not faltas,
+            'loja': loja.nome_loja,
+            'faltas': faltas,
+        })
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        self._sincronizar_grade_ordem(serializer.instance)
+        self._gerar_itens_ordem(serializer.instance)
+        _audit('OrdemProducao', serializer.instance.pk, {'created': True}, self.request, 'create')
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        ordem = self.get_object()
+        if ordem.status != OrdemProducao.STATUS_ABERTA:
+            raise ValidationError({'status': 'Somente OP aberta pode ser alterada.'})
+        super().perform_update(serializer)
+        self._sincronizar_grade_ordem(serializer.instance)
+        ordem.itens.all().delete()
+        self._gerar_itens_ordem(serializer.instance)
+        _audit('OrdemProducao', serializer.instance.pk, {'updated': True}, self.request, 'update')
+
+    def _sincronizar_grade_ordem(self, ordem):
+        payload = self.request.data.get('grade_producao')
+        ordem.grade_producao.all().delete()
+        if payload is None:
+            if ordem.sku_final_id and Decimal(ordem.quantidade or 0) > 0:
+                OrdemProducaoGrade.objects.create(
+                    ordem=ordem,
+                    sku_final=ordem.sku_final,
+                    quantidade=ordem.quantidade,
+                )
+            return
+
+        linhas = []
+        for linha in payload or []:
+            sku_id = linha.get('sku_final') or linha.get('sku')
+            qtd = Decimal(str(linha.get('quantidade') or 0))
+            if qtd <= 0:
+                continue
+            linhas.append(OrdemProducaoGrade(
+                ordem=ordem,
+                sku_final_id=sku_id,
+                quantidade=qtd,
+            ))
+        OrdemProducaoGrade.objects.bulk_create(linhas)
+
+    def _gerar_itens_ordem(self, ordem):
+        ficha = ordem.ficha_tecnica
+        fator = Decimal(ordem.quantidade or 0) / Decimal(ficha.rendimento or 1)
+        total_previsto = Decimal('0')
+        itens = []
+        for ficha_item in ficha.itens.select_related('produto', 'fornecedor', 'unidade').all():
+            qtd_necessaria = Decimal(ficha_item.quantidade_com_perda or 0) * fator
+            unidade = ficha_item.unidade
+            if unidade and not unidade.permite_decimal and qtd_necessaria != qtd_necessaria.to_integral_value():
+                item_nome = ficha_item.produto.descricao if ficha_item.produto_id else (ficha_item.descricao or ficha_item.fornecedor)
+                raise ValidationError({
+                    'quantidade': (
+                        f'O item {item_nome} usa a unidade {unidade.Descricao}, que não aceita decimal. '
+                        f'A quantidade calculada para a OP foi {qtd_necessaria}. Ajuste a quantidade, perda ou rendimento da ficha.'
+                    )
+                })
+            custo_usado = Decimal(ficha_item.custo_unitario_usado or 0)
+            custo_total = _money(qtd_necessaria * custo_usado)
+            itens.append(OrdemProducaoItem(
+                ordem=ordem,
+                ficha_item=ficha_item,
+                tipo=ficha_item.tipo,
+                produto=ficha_item.produto,
+                fornecedor=ficha_item.fornecedor,
+                descricao=ficha_item.descricao,
+                unidade=ficha_item.unidade,
+                quantidade_base=ficha_item.quantidade,
+                perda_percentual=ficha_item.perda_percentual,
+                quantidade_necessaria=qtd_necessaria,
+                custo_unitario_previsto=custo_usado,
+                custo_unitario_real=custo_usado,
+                custo_total_previsto=custo_total,
+                custo_total_real=custo_total,
+                observacoes=ficha_item.observacoes,
+                ordem_linha=ficha_item.ordem,
+            ))
+            total_previsto += custo_total
+
+        OrdemProducaoItem.objects.bulk_create(itens)
+        ordem.custo_previsto = _money(total_previsto)
+        ordem.custo_real = _money(total_previsto)
+        ordem.save(update_fields=['custo_previsto', 'custo_real', 'atualizado_em'])
+
+    def _loja_central_producao(self, ordem):
+        loja = (
+            Loja.objects
+            .filter(empresa=ordem.empresa, ativo=True, tipo_unidade=Loja.TIPO_FABRICA)
+            .order_by('id')
+            .first()
+        )
+        if loja:
+            return loja
+        loja = (
+            Loja.objects
+            .filter(empresa=ordem.empresa, ativo=True, tipo_unidade=Loja.TIPO_MATRIZ)
+            .order_by('id')
+            .first()
+        )
+        if loja:
+            return loja
+        loja = (
+            Loja.objects
+            .filter(empresa=ordem.empresa, ativo=True, Matriz='SIM')
+            .order_by('id')
+            .first()
+        )
+        if loja:
+            return loja
+        loja = Loja.objects.filter(empresa=ordem.empresa, ativo=True).order_by('id').first()
+        if not loja:
+            raise ValidationError({'loja': 'Cadastre uma fábrica ou matriz/estoque central ativo para receber a produção.'})
+        return loja
+
+    def _codigo_estoque_produto(self, produto):
+        referencia_numerica = ''.join(ch for ch in str(produto.referencia or '') if ch.isdigit())
+        if len(referencia_numerica) == 13:
+            return referencia_numerica
+        return f"29{int(produto.pk) % 100000000000:011d}"
+
+    def _custo_unitario_insumo(self, item):
+        produto = item.produto
+        return _q4(
+            item.custo_unitario_real
+            or item.custo_unitario_previsto
+            or getattr(produto, 'custo_medio', 0)
+            or getattr(produto, 'custo_ultima_compra', 0)
+            or getattr(produto, 'custo_original', 0)
+            or 0
+        )
+
+    def _baixar_insumos_ordem(self, ordem, loja):
+        itens = (
+            ordem.itens
+            .select_related('produto')
+            .filter(tipo__in=[FichaTecnicaItem.TIPO_INSUMO, FichaTecnicaItem.TIPO_AVIAMENTO], produto__isnull=False)
+        )
+        movimentos = 0
+        for item in itens:
+            quantidade = Decimal(item.quantidade_necessaria or 0).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            if quantidade <= 0:
+                continue
+
+            produto = item.produto
+            codigo = self._codigo_estoque_produto(produto)
+            custo_unitario = self._custo_unitario_insumo(item)
+            custo_total = _money(quantidade * custo_unitario)
+
+            estoque, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=codigo,
+                Idloja=loja,
+                defaults={
+                    'referencia': produto.referencia or '',
+                    'Estoque': Decimal('0'),
+                    'reserva': Decimal('0'),
+                },
+            )
+            anterior = Decimal(estoque.Estoque or 0)
+            posterior = anterior - quantidade
+            if posterior < 0 and (loja.EstoqueNegativo or 'NAO').upper() != 'SIM':
+                nome = produto.descricao or produto.referencia or produto.pk
+                raise ValidationError({
+                    'estoque': (
+                        f'Saldo insuficiente do insumo {nome} na fábrica/estoque central. '
+                        f'Saldo atual: {anterior}; necessário: {quantidade}.'
+                    )
+                })
+
+            estoque.Estoque = posterior
+            estoque.referencia = produto.referencia or estoque.referencia
+            estoque.reserva = estoque.reserva or 0
+            estoque.save(update_fields=['Estoque', 'referencia', 'reserva'])
+
+            item.custo_unitario_real = custo_unitario
+            item.custo_total_real = custo_total
+            item.save(update_fields=['custo_unitario_real', 'custo_total_real'])
+
+            EstoqueMovimentacao.objects.create(
+                Idloja=loja,
+                CodigodeBarra=codigo,
+                referencia=produto.referencia or '',
+                tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                quantidade=quantidade,
+                custo_unitario=custo_unitario,
+                custo_total=custo_total,
+                custo_medio_apos=custo_unitario,
+                saldo_anterior=anterior,
+                saldo_posterior=posterior,
+                documento=ordem.numero,
+                observacao=f'Baixa de insumo OP {ordem.numero}',
+            )
+            movimentos += 1
+
+        return movimentos
+
+    def _entrada_sku_produto_acabado(self, ordem, loja, sku, quantidade, custo_unitario):
+        custo_total_linha = _money(Decimal(quantidade or 0) * Decimal(custo_unitario or 0))
+        if quantidade <= 0:
+            raise ValidationError({'quantidade': 'Quantidade produzida deve ser maior que zero.'})
+
+        estoque, _ = Estoque.objects.select_for_update().get_or_create(
+            CodigodeBarra=sku.ean13,
+            Idloja=loja,
+            defaults={'referencia': ordem.produto_final.referencia or '', 'Estoque': Decimal('0'), 'reserva': Decimal('0')},
+        )
+        anterior = Decimal(estoque.Estoque or 0)
+        posterior = anterior + quantidade
+
+        custo_atual = Decimal(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+        base_anterior = anterior if anterior > 0 else Decimal('0')
+        custo_medio_apos = custo_unitario
+        if posterior > 0:
+            custo_medio_apos = (
+                ((base_anterior * custo_atual) + (quantidade * custo_unitario)) / posterior
+            ).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+
+        estoque.Estoque = posterior
+        estoque.referencia = ordem.produto_final.referencia or ''
+        estoque.save(update_fields=['Estoque', 'referencia'])
+
+        sku.custo_ultima_compra = custo_unitario
+        sku.custo_medio = custo_medio_apos
+        if not Decimal(sku.custo_original or 0):
+            sku.custo_original = custo_unitario
+        sku.save(update_fields=['custo_ultima_compra', 'custo_medio', 'custo_original'])
+        self._atualizar_custo_produto_acabado(ordem.produto_final)
+
+        EstoqueMovimentacao.objects.create(
+            Idloja=loja,
+            CodigodeBarra=sku.ean13,
+            referencia=ordem.produto_final.referencia or '',
+            tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+            quantidade=quantidade,
+            custo_unitario=custo_unitario,
+            custo_total=custo_total_linha,
+            custo_medio_apos=custo_medio_apos,
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            documento=ordem.numero,
+            observacao=f'Entrada de produto acabado OP {ordem.numero}',
+        )
+
+    def _atualizar_custo_produto_acabado(self, produto):
+        custos = (
+            ProdutoDetalhe.objects
+            .filter(produto=produto, custo_medio__gt=0)
+            .values_list('custo_medio', flat=True)
+        )
+        custos = [Decimal(custo or 0) for custo in custos if Decimal(custo or 0) > 0]
+        if not custos:
+            return
+        custo_medio = (sum(custos, Decimal('0')) / Decimal(len(custos))).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+        produto.custo_ultima_compra = custo_medio
+        produto.custo_medio = custo_medio
+        if not Decimal(produto.custo_original or 0):
+            produto.custo_original = custo_medio
+        produto.save(update_fields=['custo_ultima_compra', 'custo_medio', 'custo_original'])
+
+    def _entrada_produto_acabado(self, ordem):
+        grade = list(ordem.grade_producao.select_related('sku_final', 'sku_final__produto').all())
+        if not grade and ordem.sku_final_id:
+            grade = [OrdemProducaoGrade(ordem=ordem, sku_final=ordem.sku_final, quantidade=ordem.quantidade)]
+        if not grade:
+            raise ValidationError({'grade_producao': 'Informe a grade de SKUs produzidos antes de finalizar a OP.'})
+
+        loja = self._loja_central_producao(ordem)
+        quantidade_total = sum(Decimal(linha.quantidade or 0) for linha in grade)
+        if quantidade_total <= 0:
+            raise ValidationError({'quantidade': 'Quantidade produzida deve ser maior que zero.'})
+
+        custo_total = Decimal(ordem.custo_real or ordem.custo_previsto or 0)
+        custo_unitario = (custo_total / quantidade_total).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+
+        for linha in grade:
+            if linha.sku_final.produto_id != ordem.produto_final_id:
+                raise ValidationError({'grade_producao': 'Todos os SKUs produzidos devem pertencer ao produto da OP.'})
+            self._entrada_sku_produto_acabado(
+                ordem=ordem,
+                loja=loja,
+                sku=linha.sku_final,
+                quantidade=Decimal(linha.quantidade or 0),
+                custo_unitario=custo_unitario,
+            )
+
+    @action(detail=True, methods=['post'], url_path='aprovar')
+    def aprovar(self, request, pk=None):
+        ordem = self.get_object()
+        if ordem.status != OrdemProducao.STATUS_ABERTA:
+            return Response({'detail': 'Somente OP aberta pode ser aprovada.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not ordem.itens.exists():
+            return Response({'detail': 'A OP não possui itens calculados.'}, status=status.HTTP_400_BAD_REQUEST)
+        ordem.status = OrdemProducao.STATUS_APROVADA
+        ordem.save(update_fields=['status', 'atualizado_em'])
+        _audit('OrdemProducao', ordem.pk, {'status': ordem.status}, request, 'approve')
+        return Response(self.get_serializer(ordem).data)
+
+    @action(detail=True, methods=['post'], url_path='iniciar')
+    def iniciar(self, request, pk=None):
+        ordem = self.get_object()
+        if ordem.status != OrdemProducao.STATUS_APROVADA:
+            return Response({'detail': 'Somente OP aprovada pode ser iniciada.'}, status=status.HTTP_400_BAD_REQUEST)
+        ordem.status = OrdemProducao.STATUS_EM_PRODUCAO
+        ordem.data_inicio = timezone.now()
+        ordem.save(update_fields=['status', 'data_inicio', 'atualizado_em'])
+        _audit('OrdemProducao', ordem.pk, {'status': ordem.status}, request, 'start')
+        return Response(self.get_serializer(ordem).data)
+
+    @action(detail=True, methods=['post'], url_path='finalizar')
+    @transaction.atomic
+    def finalizar(self, request, pk=None):
+        ordem = self.get_object()
+        if ordem.status not in (OrdemProducao.STATUS_APROVADA, OrdemProducao.STATUS_EM_PRODUCAO):
+            return Response({'detail': 'Somente OP aprovada ou em produção pode ser finalizada.'}, status=status.HTTP_400_BAD_REQUEST)
+        faccoes_pendentes = ordem.itens.filter(
+            tipo=FichaTecnicaItem.TIPO_SERVICO,
+        ).exclude(status_faccao=OrdemProducaoItem.STATUS_FACCAO_RETORNADO)
+        if faccoes_pendentes.exists():
+            return Response({
+                'detail': (
+                    'Antes de finalizar a OP, registre o retorno de todos os serviços/facções. '
+                    'Esses retornos confirmam a quantidade executada e o custo real da produção.'
+                )
+            }, status=status.HTTP_400_BAD_REQUEST)
+        loja = self._loja_central_producao(ordem)
+        movimentos_insumos = self._baixar_insumos_ordem(ordem, loja)
+        ordem.recalcular_totais()
+        self._entrada_produto_acabado(ordem)
+        ordem.status = OrdemProducao.STATUS_FINALIZADA
+        ordem.data_finalizacao = timezone.now()
+        ordem.save(update_fields=['status', 'data_finalizacao', 'atualizado_em'])
+        _audit('OrdemProducao', ordem.pk, {'status': ordem.status, 'baixas_insumos': movimentos_insumos}, request, 'finish')
+        data = self.get_serializer(ordem).data
+        data['baixas_insumos'] = movimentos_insumos
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='distribuir')
+    @transaction.atomic
+    def distribuir(self, request, pk=None):
+        ordem = self.get_object()
+        if ordem.status != OrdemProducao.STATUS_FINALIZADA:
+            return Response({'detail': 'Somente OP finalizada pode ser distribuída.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        loja_origem = self._loja_central_producao(ordem)
+        loja_destino_id = request.data.get('loja_destino')
+        if not loja_destino_id:
+            return Response({'detail': 'Informe a loja de destino.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            loja_destino = Loja.objects.get(pk=loja_destino_id, empresa=ordem.empresa, ativo=True)
+        except Loja.DoesNotExist:
+            return Response({'detail': 'Loja de destino não encontrada para esta empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+        if loja_destino.pk == loja_origem.pk:
+            return Response({'detail': 'A loja de destino deve ser diferente da fábrica/estoque central.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        itens = request.data.get('itens') or []
+        if not isinstance(itens, list):
+            return Response({'detail': 'Informe uma lista de SKUs e quantidades para distribuir.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        documento = (request.data.get('documento') or '').strip()
+        if not documento:
+            documento = f"DIST-{ordem.numero}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+        documento = documento[:50]
+        if EstoqueMovimentacao.objects.filter(documento=documento, observacao__icontains=f'Distribuição OP {ordem.numero}').exists():
+            return Response({'detail': 'Já existe uma distribuição registrada com este documento.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        grade = {linha.sku_final_id: Decimal(linha.quantidade or 0) for linha in ordem.grade_producao.all()}
+        distribuido_antes = {}
+        movs_op = EstoqueMovimentacao.objects.filter(
+            observacao__icontains=f'Distribuição OP {ordem.numero}',
+            tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+        ).values_list('CodigodeBarra', 'quantidade')
+        for ean, qtd in movs_op:
+            distribuido_antes[ean] = distribuido_antes.get(ean, Decimal('0')) + Decimal(qtd or 0)
+
+        movimentos = 0
+        total_qtd = Decimal('0')
+        for linha in itens:
+            sku_id = linha.get('sku_final') or linha.get('sku')
+            quantidade = Decimal(str(linha.get('quantidade') or 0)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            if quantidade <= 0:
+                continue
+            try:
+                sku = ProdutoDetalhe.objects.select_related('produto').get(pk=sku_id, produto=ordem.produto_final)
+            except ProdutoDetalhe.DoesNotExist:
+                return Response({'detail': f'SKU {sku_id} não pertence ao produto produzido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            qtd_produzida = grade.get(sku.pk, Decimal('0'))
+            qtd_ja_distribuida = distribuido_antes.get(sku.ean13, Decimal('0'))
+            if qtd_produzida and (qtd_ja_distribuida + quantidade) > qtd_produzida:
+                return Response({
+                    'detail': (
+                        f'Quantidade distribuída do SKU {sku.ean13} excede a quantidade produzida. '
+                        f'Produzido: {qtd_produzida}; já distribuído: {qtd_ja_distribuida}; solicitado: {quantidade}.'
+                    )
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            estoque_origem, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=sku.ean13,
+                Idloja=loja_origem,
+                defaults={'referencia': ordem.produto_final.referencia or '', 'Estoque': Decimal('0'), 'reserva': Decimal('0')},
+            )
+            origem_anterior = Decimal(estoque_origem.Estoque or 0)
+            origem_posterior = origem_anterior - quantidade
+            if origem_posterior < 0 and (loja_origem.EstoqueNegativo or 'NAO').upper() != 'SIM':
+                return Response({
+                    'detail': f'Saldo insuficiente na fábrica para o SKU {sku.ean13}. Saldo: {origem_anterior}; solicitado: {quantidade}.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            estoque_destino, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=sku.ean13,
+                Idloja=loja_destino,
+                defaults={'referencia': ordem.produto_final.referencia or '', 'Estoque': Decimal('0'), 'reserva': Decimal('0')},
+            )
+            destino_anterior = Decimal(estoque_destino.Estoque or 0)
+            destino_posterior = destino_anterior + quantidade
+
+            custo_unitario = _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+            custo_total = _money(quantidade * custo_unitario)
+
+            estoque_origem.Estoque = origem_posterior
+            estoque_origem.referencia = ordem.produto_final.referencia or estoque_origem.referencia
+            estoque_origem.reserva = estoque_origem.reserva or 0
+            estoque_origem.save(update_fields=['Estoque', 'referencia', 'reserva'])
+
+            estoque_destino.Estoque = destino_posterior
+            estoque_destino.referencia = ordem.produto_final.referencia or estoque_destino.referencia
+            estoque_destino.reserva = estoque_destino.reserva or 0
+            estoque_destino.save(update_fields=['Estoque', 'referencia', 'reserva'])
+
+            obs = f'Distribuição OP {ordem.numero} para {loja_destino.nome_loja}'
+            EstoqueMovimentacao.objects.create(
+                Idloja=loja_origem,
+                CodigodeBarra=sku.ean13,
+                referencia=ordem.produto_final.referencia or '',
+                tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                quantidade=quantidade,
+                custo_unitario=custo_unitario,
+                custo_total=custo_total,
+                custo_medio_apos=custo_unitario,
+                saldo_anterior=origem_anterior,
+                saldo_posterior=origem_posterior,
+                documento=documento,
+                observacao=obs,
+            )
+            EstoqueMovimentacao.objects.create(
+                Idloja=loja_destino,
+                CodigodeBarra=sku.ean13,
+                referencia=ordem.produto_final.referencia or '',
+                tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                quantidade=quantidade,
+                custo_unitario=custo_unitario,
+                custo_total=custo_total,
+                custo_medio_apos=custo_unitario,
+                saldo_anterior=destino_anterior,
+                saldo_posterior=destino_posterior,
+                documento=documento,
+                observacao=f'Distribuição OP {ordem.numero} recebida de {loja_origem.nome_loja}',
+            )
+            distribuido_antes[sku.ean13] = qtd_ja_distribuida + quantidade
+            movimentos += 2
+            total_qtd += quantidade
+
+        if movimentos == 0:
+            return Response({'detail': 'Informe ao menos um SKU com quantidade maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        _audit('OrdemProducao', ordem.pk, {'documento': documento, 'loja_destino': loja_destino.pk, 'quantidade': str(total_qtd)}, request, 'distribute')
+        return Response({
+            'documento': documento,
+            'movimentos': movimentos,
+            'quantidade': str(total_qtd),
+            'loja_origem': loja_origem.nome_loja,
+            'loja_destino': loja_destino.nome_loja,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='cancelar')
+    def cancelar(self, request, pk=None):
+        ordem = self.get_object()
+        if ordem.status == OrdemProducao.STATUS_FINALIZADA:
+            return Response({'detail': 'OP finalizada não pode ser cancelada nesta etapa.'}, status=status.HTTP_400_BAD_REQUEST)
+        ordem.status = OrdemProducao.STATUS_CANCELADA
+        ordem.save(update_fields=['status', 'atualizado_em'])
+        _audit('OrdemProducao', ordem.pk, {'status': ordem.status}, request, 'cancel')
+        return Response(self.get_serializer(ordem).data)
+
+
+class OrdemProducaoItemViewSet(BaseViewSet):
+    permission_classes = [HasModuleRole, HasEmpresaModulo]
+    empresa_modulo_field = 'usa_producao'
+    queryset = OrdemProducaoItem.objects.select_related('ordem', 'produto', 'fornecedor', 'unidade', 'ficha_item')
+    serializer_class = OrdemProducaoItemSerializer
+    read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+
+    def create(self, request, *args, **kwargs):
+        return Response({'detail': 'Itens da OP são gerados pela ficha técnica.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def update(self, request, *args, **kwargs):
+        return Response({'detail': 'Itens da OP são gerados pela ficha técnica.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response({'detail': 'Itens da OP são gerados pela ficha técnica.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Itens da OP são gerados pela ficha técnica.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def _validar_item_faccao(self, item):
+        if item.tipo != FichaTecnicaItem.TIPO_SERVICO:
+            raise ValidationError({'tipo': 'Somente itens de serviço/facção podem usar este controle.'})
+        if item.ordem.status in (OrdemProducao.STATUS_CANCELADA, OrdemProducao.STATUS_FINALIZADA):
+            raise ValidationError({'status': 'OP cancelada ou finalizada não permite alterar facção.'})
+
+    @action(detail=True, methods=['post'], url_path='enviar-faccao')
+    @transaction.atomic
+    def enviar_faccao(self, request, pk=None):
+        item = self.get_object()
+        self._validar_item_faccao(item)
+        quantidade = Decimal(str(request.data.get('quantidade') or item.quantidade_necessaria or 0))
+        if quantidade <= 0:
+            return Response({'detail': 'Informe quantidade enviada maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        item.status_faccao = OrdemProducaoItem.STATUS_FACCAO_ENVIADO
+        item.quantidade_enviada_faccao = quantidade
+        item.documento_faccao = (request.data.get('documento') or item.documento_faccao or '').strip()[:50] or None
+        data_envio = request.data.get('data_envio')
+        item.data_envio_faccao = data_envio or timezone.localdate()
+        item.save(update_fields=[
+            'status_faccao',
+            'quantidade_enviada_faccao',
+            'documento_faccao',
+            'data_envio_faccao',
+        ])
+        _audit('OrdemProducaoItem', item.pk, {'status_faccao': item.status_faccao}, request, 'send_faccao')
+        return Response(self.get_serializer(item).data)
+
+    @action(detail=True, methods=['post'], url_path='retornar-faccao')
+    @transaction.atomic
+    def retornar_faccao(self, request, pk=None):
+        item = self.get_object()
+        self._validar_item_faccao(item)
+        if item.status_faccao == OrdemProducaoItem.STATUS_FACCAO_PENDENTE:
+            return Response({'detail': 'Envie o item para facção antes de registrar o retorno.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        quantidade = Decimal(str(request.data.get('quantidade') or item.quantidade_enviada_faccao or item.quantidade_necessaria or 0))
+        if quantidade <= 0:
+            return Response({'detail': 'Informe quantidade retornada maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+        enviada = Decimal(item.quantidade_enviada_faccao or 0)
+        if enviada > 0 and quantidade > enviada:
+            return Response({'detail': 'Quantidade retornada não pode ser maior que a quantidade enviada.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        custo_unitario = _q4(request.data.get('custo_unitario_real') or item.custo_unitario_real or item.custo_unitario_previsto or 0)
+        item.status_faccao = OrdemProducaoItem.STATUS_FACCAO_RETORNADO
+        item.quantidade_retornada_faccao = quantidade
+        item.data_retorno_faccao = request.data.get('data_retorno') or timezone.localdate()
+        item.custo_unitario_real = custo_unitario
+        item.custo_total_real = _money(Decimal(item.quantidade_necessaria or 0) * custo_unitario)
+        item.save(update_fields=[
+            'status_faccao',
+            'quantidade_retornada_faccao',
+            'data_retorno_faccao',
+            'custo_unitario_real',
+            'custo_total_real',
+        ])
+        item.ordem.recalcular_totais()
+        _audit('OrdemProducaoItem', item.pk, {'status_faccao': item.status_faccao, 'custo_unitario_real': str(custo_unitario)}, request, 'return_faccao')
+        return Response(self.get_serializer(item).data)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = getattr(self.request.user, 'empresa_id', None)
+        empresa_param = self.request.query_params.get('empresa')
+        if self.request.user.is_superuser and empresa_param:
+            qs = qs.filter(ordem__empresa_id=empresa_param)
+        elif not self.request.user.is_superuser and empresa_id:
+            qs = qs.filter(ordem__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            qs = qs.none()
+
+        ordem = self.request.query_params.get('ordem')
+        if ordem:
+            qs = qs.filter(ordem_id=ordem)
+        return qs
+
+    def _save_with_empresa_scope(self, serializer):
+        serializer.save()
 
 
 class PromocaoViewSet(BaseViewSet):

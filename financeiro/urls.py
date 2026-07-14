@@ -1,5 +1,6 @@
 from rest_framework.routers import DefaultRouter
 from .views import (
+    ConfigFinanceiraViewSet,
     CaixaViewSet, ContaBancariaViewSet, MovimentacaoFinanceiraViewSet, LancamentoContabilViewSet,
     CashbackConfigViewSet, CashbackMovimentoViewSet,
     ValeTrocaViewSet, ValeTrocaMovimentoViewSet,
@@ -10,6 +11,7 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register('config-financeira', ConfigFinanceiraViewSet)
 router.register('formas', FormaPagamentoViewSet)
 router.register('formas-parcelas', FormaPagamentoParcelaViewSet)
 router.register('cashback-config', CashbackConfigViewSet)

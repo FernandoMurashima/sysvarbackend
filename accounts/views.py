@@ -212,7 +212,13 @@ class UserViewSet(viewsets.ModelViewSet):
     /api/accounts/users/ -> CRUD (somente staff)
     /api/accounts/users/me/ -> dados do usuário logado (qualquer autenticado)
     """
-    queryset = User.objects.select_related("empresa", "loja").prefetch_related("lojas").all().order_by("id")
+    queryset = (
+        User.objects
+        .select_related("empresa", "loja")
+        .prefetch_related("lojas", "module_permissions", "field_permissions")
+        .all()
+        .order_by("id")
+    )
     serializer_class = UserSerializer
     permission_classes = [CanManageCompanyUsers]
     filter_backends = [SearchFilter, OrderingFilter]

@@ -1,6 +1,7 @@
 from django.db import models, transaction
 from django.utils import timezone
 from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
+from decimal import Decimal
 
 # ------------------------------------------------------------
 # Helper: dígito verificador do EAN-13
@@ -57,6 +58,19 @@ class ConfigEan(models.Model):
 # Tabelas auxiliares (mestre)
 # ===========================
 class Ncm(models.Model):
+    CATEGORIA_VESTUARIO = "VESTUARIO"
+    CATEGORIA_TECIDO = "TECIDO"
+    CATEGORIA_AVIAMENTO = "AVIAMENTO"
+    CATEGORIA_EMBALAGEM = "EMBALAGEM"
+    CATEGORIA_OUTROS = "OUTROS"
+    CATEGORIA_CHOICES = [
+        (CATEGORIA_VESTUARIO, "Vestuário"),
+        (CATEGORIA_TECIDO, "Tecidos"),
+        (CATEGORIA_AVIAMENTO, "Aviamentos"),
+        (CATEGORIA_EMBALAGEM, "Embalagens"),
+        (CATEGORIA_OUTROS, "Outros"),
+    ]
+
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='ncms', db_index=True)
     # Guardaremos também no Produto como CHAR(10) no formato ####.##.##
     ncm = models.CharField(
@@ -64,8 +78,10 @@ class Ncm(models.Model):
         validators=[RegexValidator(r'^\d{4}\.\d{2}\.\d{2}$', 'NCM deve estar no formato ####.##.##')]
     )
     descricao = models.CharField(max_length=1000)
+    categoria = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, default=CATEGORIA_OUTROS, db_index=True)
     aliquota = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     campo1 = models.CharField(max_length=25, blank=True, null=True)
+    ativo = models.BooleanField(default=True, db_index=True)
 
     def __str__(self):
         return f'{self.ncm} - {self.descricao[:60]}'
@@ -163,6 +179,7 @@ class Unidade(models.Model):
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='unidades_produto', db_index=True)
     Descricao = models.CharField(max_length=100)
     Codigo = models.CharField(max_length=10, null=True, blank=True)
+    permite_decimal = models.BooleanField(default=False)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
@@ -236,6 +253,8 @@ class Produto(models.Model):
     TIPO_CHOICES = (
         ('1', 'Revenda'),
         ('2', 'Uso/Consumo'),
+        ('3', 'Produto Próprio'),
+        ('4', 'Insumo de Produção'),
     )
 
     Idproduto = models.BigAutoField(primary_key=True)
@@ -253,7 +272,7 @@ class Produto(models.Model):
     colecao = models.ForeignKey(Colecao, on_delete=models.SET_NULL, null=True, blank=True)
     material = models.ForeignKey(Material, on_delete=models.SET_NULL, null=True, blank=True)
 
-    # Grade (HAD) – obrigatória para Revenda (validar na aplicação)
+    # Grade (HAD) – obrigatória para produtos vendáveis com variação
     grade = models.ForeignKey(Grade, on_delete=models.PROTECT, null=True, blank=True)
 
     # Fiscal
@@ -284,6 +303,9 @@ class Produto(models.Model):
     observacoes = models.TextField(null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
     data_inativo = models.DateTimeField(null=True, blank=True)
+    custo_original = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_ultima_compra = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_medio = models.DecimalField(max_digits=12, decimal_places=4, default=0)
 
     def _gerar_referencia(self) -> str:
         # Regras: AA-BB-CCDDD
@@ -305,9 +327,24 @@ class Produto(models.Model):
         ddd = f"{ddd_val:03d}"
         return f"{aa}-{bb}-{cc}{ddd}"
 
+    def _gerar_referencia_insumo(self) -> str:
+        with transaction.atomic():
+            cod_row, _ = Codigos.objects.select_for_update().get_or_create(
+                empresa=self.empresa, colecao='IN', estacao='00', defaults={'valor_var': 1}
+            )
+            while True:
+                numero = cod_row.valor_var
+                referencia = f"INS-{numero:03d}"
+                cod_row.valor_var = numero + 1
+                cod_row.save(update_fields=['valor_var'])
+                if not Produto.objects.filter(empresa=self.empresa, referencia=referencia).exists():
+                    return referencia
+
     def save(self, *args, **kwargs):
-        if self.tipo_produto == '1' and not self.referencia:
+        if self.tipo_produto in ('1', '3') and not self.referencia:
             self.referencia = self._gerar_referencia()
+        elif self.tipo_produto == '4' and not self.referencia:
+            self.referencia = self._gerar_referencia_insumo()
         super().save(*args, **kwargs)
 
     class Meta:
@@ -328,7 +365,7 @@ class Produto(models.Model):
 
 
 class ProdutoDetalhe(models.Model):
-    # Variante Cor × Tamanho – só existe para Revenda
+    # Variante Cor × Tamanho – usada por produtos vendáveis com grade
     IdprodutoDetalhe = models.BigAutoField(primary_key=True)
     produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='skus')
     idcor = models.ForeignKey(Cor, on_delete=models.PROTECT)
@@ -359,6 +396,7 @@ class ProdutoDetalhe(models.Model):
     ativo = models.BooleanField(default=True)
     custo_original = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     custo_ultima_compra = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_medio = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     # >>> ADDED
     bloqueado_venda = models.BooleanField(
         default=False,
@@ -441,6 +479,292 @@ class TabelaprecoProduto(models.Model):
 
     def __str__(self):
         return f'{self.produto_id} · {self.tabela_id} · {self.preco}'
+
+
+class FichaTecnica(models.Model):
+    STATUS_RASCUNHO = 'RASCUNHO'
+    STATUS_APROVADA = 'APROVADA'
+    STATUS_INATIVA = 'INATIVA'
+    STATUS_CHOICES = (
+        (STATUS_RASCUNHO, 'Rascunho'),
+        (STATUS_APROVADA, 'Aprovada'),
+        (STATUS_INATIVA, 'Inativa'),
+    )
+
+    empresa = models.ForeignKey(
+        'cadastros.Empresa',
+        on_delete=models.PROTECT,
+        related_name='fichas_tecnicas',
+        db_index=True,
+    )
+    produto_final = models.ForeignKey(
+        Produto,
+        on_delete=models.PROTECT,
+        related_name='fichas_tecnicas',
+        limit_choices_to={'tipo_produto': '3'},
+    )
+    versao = models.CharField(max_length=20, default='1')
+    descricao = models.CharField(max_length=120, null=True, blank=True)
+    rendimento = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=STATUS_RASCUNHO, db_index=True)
+    ativa = models.BooleanField(default=True, db_index=True)
+    observacoes = models.TextField(null=True, blank=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'produto_final', 'versao'], name='uq_empresa_produto_ficha_versao'),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'produto_final']),
+            models.Index(fields=['status']),
+            models.Index(fields=['ativa']),
+        ]
+
+    def __str__(self):
+        return f'{self.produto_final_id} · ficha {self.versao}'
+
+
+class FichaTecnicaItem(models.Model):
+    TIPO_INSUMO = 'INSUMO'
+    TIPO_AVIAMENTO = 'AVIAMENTO'
+    TIPO_SERVICO = 'SERVICO'
+    TIPO_CHOICES = (
+        (TIPO_INSUMO, 'Insumo'),
+        (TIPO_AVIAMENTO, 'Aviamento'),
+        (TIPO_SERVICO, 'Serviço/Facção'),
+    )
+
+    ficha = models.ForeignKey(FichaTecnica, on_delete=models.CASCADE, related_name='itens')
+    tipo = models.CharField(max_length=15, choices=TIPO_CHOICES, default=TIPO_INSUMO, db_index=True)
+    produto = models.ForeignKey(
+        Produto,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='itens_ficha_tecnica',
+    )
+    fornecedor = models.ForeignKey(
+        'cadastros.Fornecedor',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='itens_ficha_tecnica',
+    )
+    descricao = models.CharField(max_length=120, null=True, blank=True)
+    unidade = models.ForeignKey(Unidade, on_delete=models.PROTECT, null=True, blank=True)
+    quantidade = models.DecimalField(max_digits=12, decimal_places=4)
+    perda_percentual = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    custo_unitario_previsto = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    observacoes = models.CharField(max_length=200, null=True, blank=True)
+    ordem = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ['ordem', 'id']
+        indexes = [
+            models.Index(fields=['ficha', 'tipo']),
+            models.Index(fields=['produto']),
+            models.Index(fields=['fornecedor']),
+        ]
+
+    @property
+    def quantidade_com_perda(self):
+        perda = Decimal(self.perda_percentual or 0) / Decimal('100')
+        return Decimal(self.quantidade or 0) * (Decimal('1') + perda)
+
+    @property
+    def custo_medio_produto(self):
+        if not self.produto_id:
+            return Decimal('0')
+        return Decimal(
+            self.produto.custo_medio
+            or self.produto.custo_ultima_compra
+            or self.produto.custo_original
+            or 0
+        )
+
+    @property
+    def custo_unitario_usado(self):
+        custo_informado = Decimal(self.custo_unitario_previsto or 0)
+        if custo_informado > 0:
+            return custo_informado
+        return self.custo_medio_produto
+
+    @property
+    def custo_total_previsto(self):
+        return self.quantidade_com_perda * self.custo_unitario_usado
+
+    def __str__(self):
+        return self.descricao or str(self.produto or self.fornecedor or self.pk)
+
+
+class OrdemProducao(models.Model):
+    STATUS_ABERTA = 'ABERTA'
+    STATUS_APROVADA = 'APROVADA'
+    STATUS_EM_PRODUCAO = 'EM_PRODUCAO'
+    STATUS_FINALIZADA = 'FINALIZADA'
+    STATUS_CANCELADA = 'CANCELADA'
+    STATUS_CHOICES = (
+        (STATUS_ABERTA, 'Aberta'),
+        (STATUS_APROVADA, 'Aprovada'),
+        (STATUS_EM_PRODUCAO, 'Em produção'),
+        (STATUS_FINALIZADA, 'Finalizada'),
+        (STATUS_CANCELADA, 'Cancelada'),
+    )
+
+    empresa = models.ForeignKey(
+        'cadastros.Empresa',
+        on_delete=models.PROTECT,
+        related_name='ordens_producao',
+        db_index=True,
+    )
+    numero = models.CharField(max_length=30, db_index=True)
+    ficha_tecnica = models.ForeignKey(FichaTecnica, on_delete=models.PROTECT, related_name='ordens_producao')
+    produto_final = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='ordens_producao')
+    sku_final = models.ForeignKey(
+        ProdutoDetalhe,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='ordens_producao',
+        help_text='SKU acabado produzido pela OP. A entrada ocorre no estoque central da empresa.',
+    )
+    quantidade = models.DecimalField(max_digits=12, decimal_places=3)
+    rendimento = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=STATUS_ABERTA, db_index=True)
+    custo_previsto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    custo_real = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    observacoes = models.TextField(null=True, blank=True)
+    data_emissao = models.DateField(default=timezone.localdate, db_index=True)
+    data_inicio = models.DateTimeField(null=True, blank=True)
+    data_finalizacao = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(default=timezone.now)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-data_emissao', '-id']
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'numero'], name='uq_empresa_ordem_producao_numero'),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'status']),
+            models.Index(fields=['produto_final']),
+            models.Index(fields=['ficha_tecnica']),
+            models.Index(fields=['sku_final']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.ficha_tecnica_id and not self.produto_final_id:
+            self.produto_final = self.ficha_tecnica.produto_final
+        if self.ficha_tecnica_id and not self.rendimento:
+            self.rendimento = self.ficha_tecnica.rendimento
+        if not self.numero:
+            ano = timezone.now().year
+            prefixo = f"OP{ano}"
+            ultima = (
+                OrdemProducao.objects
+                .filter(empresa=self.empresa, numero__startswith=prefixo)
+                .order_by('-numero')
+                .values_list('numero', flat=True)
+                .first()
+            )
+            sequencia = 1
+            if ultima:
+                try:
+                    sequencia = int(str(ultima).replace(prefixo, '') or 0) + 1
+                except ValueError:
+                    sequencia = 1
+            self.numero = f"{prefixo}{sequencia:05d}"
+        super().save(*args, **kwargs)
+
+    def recalcular_totais(self):
+        total_previsto = Decimal('0')
+        total_real = Decimal('0')
+        for item in self.itens.all():
+            total_previsto += Decimal(item.custo_total_previsto or 0)
+            total_real += Decimal(item.custo_total_real or 0)
+        self.custo_previsto = total_previsto.quantize(Decimal('0.01'))
+        self.custo_real = total_real.quantize(Decimal('0.01'))
+        self.save(update_fields=['custo_previsto', 'custo_real', 'atualizado_em'])
+
+    def __str__(self):
+        return f'{self.numero} - {self.produto_final}'
+
+
+class OrdemProducaoItem(models.Model):
+    STATUS_FACCAO_PENDENTE = 'PENDENTE'
+    STATUS_FACCAO_ENVIADO = 'ENVIADO'
+    STATUS_FACCAO_RETORNADO = 'RETORNADO'
+    STATUS_FACCAO_CHOICES = (
+        (STATUS_FACCAO_PENDENTE, 'Pendente'),
+        (STATUS_FACCAO_ENVIADO, 'Enviado'),
+        (STATUS_FACCAO_RETORNADO, 'Retornado'),
+    )
+
+    ordem = models.ForeignKey(OrdemProducao, on_delete=models.CASCADE, related_name='itens')
+    ficha_item = models.ForeignKey(FichaTecnicaItem, on_delete=models.PROTECT, related_name='itens_ordem')
+    tipo = models.CharField(max_length=15, choices=FichaTecnicaItem.TIPO_CHOICES)
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_ordem_producao')
+    fornecedor = models.ForeignKey(
+        'cadastros.Fornecedor',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='itens_ordem_producao',
+    )
+    descricao = models.CharField(max_length=120, null=True, blank=True)
+    unidade = models.ForeignKey(Unidade, on_delete=models.PROTECT, null=True, blank=True)
+    quantidade_base = models.DecimalField(max_digits=12, decimal_places=4)
+    perda_percentual = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    quantidade_necessaria = models.DecimalField(max_digits=14, decimal_places=4)
+    custo_unitario_previsto = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_unitario_real = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_total_previsto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    custo_total_real = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    observacoes = models.CharField(max_length=200, null=True, blank=True)
+    ordem_linha = models.PositiveIntegerField(default=1)
+    status_faccao = models.CharField(max_length=12, choices=STATUS_FACCAO_CHOICES, default=STATUS_FACCAO_PENDENTE, db_index=True)
+    documento_faccao = models.CharField(max_length=50, null=True, blank=True)
+    data_envio_faccao = models.DateField(null=True, blank=True)
+    data_retorno_faccao = models.DateField(null=True, blank=True)
+    quantidade_enviada_faccao = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    quantidade_retornada_faccao = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+
+    class Meta:
+        ordering = ['ordem_linha', 'id']
+        indexes = [
+            models.Index(fields=['ordem', 'tipo']),
+            models.Index(fields=['produto']),
+            models.Index(fields=['status_faccao']),
+        ]
+
+    def __str__(self):
+        return self.descricao or str(self.produto or self.fornecedor or self.pk)
+
+
+class OrdemProducaoGrade(models.Model):
+    ordem = models.ForeignKey(OrdemProducao, on_delete=models.CASCADE, related_name='grade_producao')
+    sku_final = models.ForeignKey(
+        ProdutoDetalhe,
+        on_delete=models.PROTECT,
+        related_name='grades_ordem_producao',
+        help_text='SKU acabado produzido nesta linha da OP.',
+    )
+    quantidade = models.DecimalField(max_digits=12, decimal_places=3)
+
+    class Meta:
+        ordering = ['sku_final__idcor__Descricao', 'sku_final__idtamanho__Tamanho', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['ordem', 'sku_final'], name='uq_op_grade_sku'),
+        ]
+        indexes = [
+            models.Index(fields=['ordem']),
+            models.Index(fields=['sku_final']),
+        ]
+
+    def __str__(self):
+        return f'{self.ordem.numero} - {self.sku_final} - {self.quantidade}'
 
 
 class Promocao(models.Model):
@@ -577,8 +901,8 @@ class Estoque(models.Model):
     )
     referencia = models.CharField(max_length=30, default='')
     Idloja = models.ForeignKey('cadastros.Loja', on_delete=models.CASCADE)
-    Estoque = models.IntegerField(null=True, blank=True)
-    reserva = models.IntegerField(null=True, blank=True)
+    Estoque = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    reserva = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -614,9 +938,12 @@ class EstoqueMovimentacao(models.Model):
     )
     referencia = models.CharField(max_length=30, default='', db_index=True)
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, db_index=True)
-    quantidade = models.IntegerField()
-    saldo_anterior = models.IntegerField(default=0)
-    saldo_posterior = models.IntegerField(default=0)
+    quantidade = models.DecimalField(max_digits=14, decimal_places=3)
+    custo_unitario = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    custo_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    custo_medio_apos = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    saldo_anterior = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    saldo_posterior = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     documento = models.CharField(max_length=50, null=True, blank=True)
     observacao = models.CharField(max_length=255, null=True, blank=True)
     data_movimento = models.DateTimeField(default=timezone.now, db_index=True)
@@ -669,9 +996,9 @@ class InventarioEstoqueItem(models.Model):
         validators=[RegexValidator(r'^\d{13}$', 'EAN-13 deve ter exatamente 13 dígitos.')],
     )
     referencia = models.CharField(max_length=30, default='')
-    saldo_sistema = models.IntegerField(default=0)
-    saldo_contado = models.IntegerField(default=0)
-    diferenca = models.IntegerField(default=0)
+    saldo_sistema = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    saldo_contado = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    diferenca = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     observacao = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:

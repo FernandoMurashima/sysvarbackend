@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    Cfop,
     NFCe,
     NFeDevolucao,
     NotaFiscalEntrada,
@@ -10,7 +11,30 @@ from .models import (
     VendaPdv,
     VendaPdvItem,
     VendaPdvPagamento,
+    RegraTributaria,
+    Tributo,
 )
+
+
+@admin.register(Cfop)
+class CfopAdmin(admin.ModelAdmin):
+    list_display = ("empresa", "codigo", "descricao", "tipo_operacao", "destino", "ativo")
+    list_filter = ("empresa", "tipo_operacao", "destino", "ativo")
+    search_fields = ("codigo", "descricao", "empresa__nome", "empresa__nome_fantasia")
+
+
+@admin.register(Tributo)
+class TributoAdmin(admin.ModelAdmin):
+    list_display = ("empresa", "codigo", "descricao", "esfera", "atual", "ativo")
+    list_filter = ("empresa", "esfera", "atual", "ativo")
+    search_fields = ("codigo", "descricao", "empresa__nome", "empresa__nome_fantasia")
+
+
+@admin.register(RegraTributaria)
+class RegraTributariaAdmin(admin.ModelAdmin):
+    list_display = ("empresa", "nome", "tributo", "cfop", "ncm", "tipo_operacao", "regime_tributario", "aliquota", "ativo")
+    list_filter = ("empresa", "tributo", "tipo_operacao", "regime_tributario", "ativo")
+    search_fields = ("nome", "tributo__codigo", "cfop__codigo", "ncm__ncm")
 
 
 class NotaFiscalEntradaItemInline(admin.TabularInline):

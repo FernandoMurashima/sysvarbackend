@@ -1,10 +1,11 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
+from compras.models import PedidoCompraEntrega
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, ProdutoDetalhe
 
 try:
@@ -21,6 +22,18 @@ except Exception:
 
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaSerializer
+
+
+def _q4(valor) -> Decimal:
+    return Decimal(valor or 0).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _money(valor) -> Decimal:
+    return Decimal(valor or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _q3(valor) -> Decimal:
+    return Decimal(valor or 0).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
 def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "custom"):
@@ -94,6 +107,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         before = nota.status
         nota.status = NotaFiscalEntrada.Status.FECHADA
         nota.save(update_fields=["status", "atualizado_em"])
+        custos_produtos = self._atualizar_custos_produtos_nao_revenda(nota)
 
         try:
             estoque = self._movimentar_estoque_entrada(nota)
@@ -102,10 +116,13 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         financeiro = self._vincular_financeiro(nota)
+        recebimento = self._atualizar_recebimento_pedido(nota)
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="fechar")
         data = self.get_serializer(nota).data
         data["financeiro"] = financeiro
         data["estoque"] = estoque
+        data["custos_produtos"] = custos_produtos
+        data["recebimento_pedido"] = recebimento
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cancelar")
@@ -126,9 +143,11 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         nota.status = NotaFiscalEntrada.Status.CANCELADA
         nota.save(update_fields=["status", "atualizado_em"])
+        recebimento = self._atualizar_recebimento_pedido(nota)
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="cancelar")
         data = self.get_serializer(nota).data
         data["estoque"] = estoque
+        data["recebimento_pedido"] = recebimento
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="itens-pedido")
@@ -189,25 +208,89 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return Response(payload, status=status.HTTP_200_OK)
 
     def _documento_estoque(self, nota):
-        return f"NFE:{nota.pk}"
+        return str(nota.numero or nota.pk).strip()
+
+    def _codigo_estoque_produto(self, produto):
+        referencia_numerica = ''.join(ch for ch in str(produto.referencia or '') if ch.isdigit())
+        if len(referencia_numerica) == 13:
+            return referencia_numerica
+        return f"29{int(produto.pk) % 100000000000:011d}"
+
+    def _qtd_recebida_item(self, pedido_item):
+        itens = NotaFiscalEntradaItem.objects.filter(
+            pedido_item=pedido_item,
+            nota__pedido_compra_id=pedido_item.pedido_id,
+            nota__status=NotaFiscalEntrada.Status.FECHADA,
+        )
+        return sum(Decimal(item.qtd_recebida or 0) for item in itens)
+
+    def _atualizar_recebimento_pedido(self, nota):
+        pedido = nota.pedido_compra
+        itens = list(pedido.itens.all().order_by("id"))
+        if not itens:
+            return {"status_pedido": pedido.status, "itens_atualizados": 0}
+
+        atendidos = 0
+        parciais = 0
+        atualizados = 0
+        for item in itens:
+            prevista = Decimal(item.qtd or 0)
+            recebida = self._qtd_recebida_item(item)
+            entrega = item.entregas.order_by("id").first()
+            if not entrega:
+                entrega = PedidoCompraEntrega(item=item, qtd_prevista=prevista, data_prevista=pedido.previsao_entrega)
+
+            entrega.qtd_prevista = prevista
+            entrega.qtd_recebida = recebida
+            if prevista > 0 and recebida >= prevista:
+                entrega.status = "RECB"
+                entrega.data_recebida = nota.dt_entrada
+                atendidos += 1
+            elif recebida > 0:
+                entrega.status = "PARC"
+                entrega.data_recebida = None
+                parciais += 1
+            else:
+                entrega.status = "PREV"
+                entrega.data_recebida = None
+            entrega.save()
+            atualizados += 1
+
+        novo_status = "AT" if atendidos == len(itens) else "AP"
+        if pedido.status != novo_status and pedido.status != "CA":
+            pedido.status = novo_status
+            pedido.save(update_fields=["status"])
+
+        return {
+            "status_pedido": pedido.status,
+            "itens_atualizados": atualizados,
+            "itens_atendidos": atendidos,
+            "itens_parciais": parciais,
+        }
 
     def _movimentar_estoque_entrada(self, nota):
-        if nota.pedido_compra.tipo != "1":
-            return {"disponivel": False, "motivo": "Pedido de uso/consumo não movimenta estoque de revenda.", "movimentos": 0}
-
         documento = self._documento_estoque(nota)
         if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists():
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
 
         movimentos = 0
         for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__cor", "pedido_item__pack"):
-            movimentos += self._movimentar_item_estoque(
-                nota=nota,
-                item_nf=item_nf,
-                tipo=EstoqueMovimentacao.TIPO_ENTRADA,
-                documento=documento,
-                sinal=1,
-            )
+            if nota.pedido_compra.tipo == "1":
+                movimentos += self._movimentar_item_estoque(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                    documento=documento,
+                    sinal=1,
+                )
+            else:
+                movimentos += self._movimentar_item_estoque_nao_revenda(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                    documento=documento,
+                    sinal=1,
+                )
 
         return {"disponivel": True, "movimentos": movimentos}
 
@@ -218,15 +301,101 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         movimentos = 0
         for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__cor", "pedido_item__pack"):
-            movimentos += self._movimentar_item_estoque(
-                nota=nota,
-                item_nf=item_nf,
-                tipo=EstoqueMovimentacao.TIPO_SAIDA,
-                documento=documento,
-                sinal=-1,
-            )
+            if nota.pedido_compra.tipo == "1":
+                movimentos += self._movimentar_item_estoque(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                    documento=documento,
+                    sinal=-1,
+                )
+            else:
+                movimentos += self._movimentar_item_estoque_nao_revenda(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                    documento=documento,
+                    sinal=-1,
+                )
 
         return {"disponivel": True, "movimentos": movimentos}
+
+    def _movimentar_item_estoque_nao_revenda(self, nota, item_nf, tipo, documento, sinal):
+        pedido_item = item_nf.pedido_item
+        produto = pedido_item.produto if pedido_item else None
+        if not produto or produto.tipo_produto not in ("2", "4"):
+            return 0
+
+        qtd = _q3(item_nf.qtd_recebida or 0)
+        if qtd <= 0:
+            return 0
+
+        codigo = self._codigo_estoque_produto(produto)
+        custo_movimento = _q4(
+            item_nf.preco_unit_nf
+            or produto.custo_medio
+            or produto.custo_ultima_compra
+            or produto.custo_original
+            or 0
+        )
+        estoque, _ = Estoque.objects.select_for_update().get_or_create(
+            CodigodeBarra=codigo,
+            Idloja=nota.pedido_compra.loja,
+            defaults={"referencia": produto.referencia or "", "Estoque": 0, "reserva": 0},
+        )
+        anterior = Decimal(estoque.Estoque or 0)
+        posterior = anterior + (qtd * Decimal(sinal))
+        if posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+            raise ValueError(
+                f"Saldo insuficiente do produto {produto.descricao} para cancelar/movimentar a nota."
+            )
+
+        estoque.referencia = produto.referencia or estoque.referencia
+        estoque.Estoque = posterior
+        estoque.reserva = estoque.reserva or 0
+        estoque.save(update_fields=["referencia", "Estoque", "reserva"])
+
+        EstoqueMovimentacao.objects.create(
+            Idloja=nota.pedido_compra.loja,
+            CodigodeBarra=codigo,
+            referencia=produto.referencia or "",
+            tipo=tipo,
+            quantidade=qtd,
+            custo_unitario=custo_movimento,
+            custo_total=_money(qtd * custo_movimento),
+            custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            documento=documento,
+            observacao=f"Nota fiscal de entrada {nota.numero}",
+        )
+        return 1
+
+    def _atualizar_custos_produtos_nao_revenda(self, nota):
+        atualizados = 0
+        for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto"):
+            pedido_item = item_nf.pedido_item
+            produto = pedido_item.produto if pedido_item else None
+            if not produto or produto.tipo_produto not in ("2", "4"):
+                continue
+
+            qtd_recebida = Decimal(item_nf.qtd_recebida or 0)
+            if qtd_recebida <= 0:
+                continue
+
+            total_liquido = Decimal(item_nf.total_item or 0)
+            custo_entrada = _q4((total_liquido / qtd_recebida) if total_liquido > 0 else item_nf.preco_unit_nf)
+            if custo_entrada <= 0:
+                continue
+
+            if not Decimal(produto.custo_original or 0):
+                produto.custo_original = custo_entrada
+            produto.custo_ultima_compra = custo_entrada
+            produto.custo_medio = custo_entrada
+            produto.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+            atualizados += 1
+
+        return {"atualizados": atualizados}
 
     def _movimentar_item_estoque(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
@@ -245,6 +414,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         if not pack_itens:
             raise ValueError("Pack do item não possui tamanhos configurados.")
 
+        custo_entrada = _q4(item_nf.preco_unit_nf or 0)
         movimentos = 0
         for pack_item in pack_itens:
             qtd_decimal = Decimal(pack_item.qtd or 0) * Decimal(pedido_item.n_packs or 0) * fator_recebido
@@ -274,13 +444,6 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 raise ValueError(
                     f"SKU não encontrado para produto {pedido_item.produto_id}, cor {pedido_item.cor_id}, tamanho {pack_item.tamanho_id}."
                 )
-            if sinal > 0:
-                custo = Decimal(item_nf.preco_unit_nf or 0)
-                sku.custo_ultima_compra = custo
-                if not Decimal(sku.custo_original or 0):
-                    sku.custo_original = custo
-                sku.save(update_fields=["custo_original", "custo_ultima_compra"])
-
             estoque, _ = Estoque.objects.select_for_update().get_or_create(
                 CodigodeBarra=sku.ean13,
                 Idloja=nota.pedido_compra.loja,
@@ -288,6 +451,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             )
             anterior = estoque.Estoque or 0
             posterior = anterior + (qtd * sinal)
+            custo_movimento = self._custo_movimento_sku(sku, custo_entrada)
+            custo_medio_apos = _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or custo_movimento)
+            if sinal > 0:
+                custo_medio_apos = self._atualizar_custo_medio_sku(sku, anterior, qtd, custo_entrada)
             estoque.referencia = sku.produto.referencia or estoque.referencia
             estoque.Estoque = posterior
             estoque.reserva = estoque.reserva or 0
@@ -299,6 +466,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 referencia=sku.produto.referencia or "",
                 tipo=tipo,
                 quantidade=qtd,
+                custo_unitario=custo_movimento,
+                custo_total=_money(Decimal(qtd) * custo_movimento),
+                custo_medio_apos=custo_medio_apos,
                 saldo_anterior=anterior,
                 saldo_posterior=posterior,
                 documento=documento,
@@ -308,32 +478,148 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         return movimentos
 
+    def _custo_movimento_sku(self, sku, custo_entrada: Decimal) -> Decimal:
+        if custo_entrada > 0:
+            return custo_entrada
+        return _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+
+    def _atualizar_custo_medio_sku(self, sku, saldo_anterior: int, quantidade: int, custo_entrada: Decimal) -> Decimal:
+        custo_entrada = _q4(custo_entrada)
+        custo_atual = _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
+        if custo_entrada <= 0:
+            return custo_atual
+
+        saldo_anterior_dec = Decimal(max(int(saldo_anterior or 0), 0))
+        quantidade_dec = Decimal(max(int(quantidade or 0), 0))
+        saldo_posterior = saldo_anterior_dec + quantidade_dec
+        if saldo_posterior <= 0:
+            custo_medio = custo_entrada
+        else:
+            custo_medio = ((saldo_anterior_dec * custo_atual) + (quantidade_dec * custo_entrada)) / saldo_posterior
+
+        sku.custo_ultima_compra = custo_entrada
+        if not Decimal(sku.custo_original or 0):
+            sku.custo_original = custo_entrada
+        sku.custo_medio = _q4(custo_medio)
+        sku.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+        return sku.custo_medio
+
     def _vincular_financeiro(self, nota):
         if not FIN_OK:
             return {"disponivel": False, "titulos_atualizados": 0, "parcelas_efetivadas": 0}
 
-        titulos = Pagar.objects.filter(pedido_compra=nota.pedido_compra_id).filter(nfe_id__isnull=True)
+        titulos = Pagar.objects.filter(pedido_compra=nota.pedido_compra_id).filter(nfe_id__isnull=True, Previsao=True)
         documento = _documento_nota(nota)
+        valor_nota = _money(nota.valor_total or 0)
         titulos_atualizados = 0
+        titulos_criados = 0
         parcelas_efetivadas = 0
+        previsoes_ajustadas = 0
 
-        for titulo in titulos:
-            titulo.nfe_id = nota.pk
-            titulo.Titulo = str(nota.numero)[:60]
-            titulo.Documento = documento
-            titulo.Data_emissao = nota.dt_emissao
-            titulo.Previsao = False
-            titulo.save(update_fields=["nfe_id", "Titulo", "Documento", "Data_emissao", "Previsao"])
-            titulos_atualizados += 1
+        for titulo in titulos.order_by("Idpagar"):
+            parcelas_previstas = list(
+                PagarItem.objects.filter(Idpagar=titulo)
+                .exclude(status=PagarItem.STATUS_CANCELADO)
+                .order_by("parcela_n")
+            )
+            valor_previsao = _money(sum(Decimal(p.valor_parcela or 0) for p in parcelas_previstas))
+            if valor_previsao <= 0 or valor_nota <= 0:
+                continue
 
-            parcelas = PagarItem.objects.filter(Idpagar=titulo, status=PagarItem.STATUS_PREVISTO)
-            parcelas_efetivadas += parcelas.update(status=PagarItem.STATUS_EFETIVO, Previsao=False)
+            if valor_nota >= valor_previsao - Decimal("0.01"):
+                self._redistribuir_parcelas(parcelas_previstas, valor_nota)
+                titulo.nfe_id = nota.pk
+                titulo.Titulo = str(nota.numero)[:60]
+                titulo.Documento = documento
+                titulo.Data_emissao = nota.dt_emissao
+                titulo.Valor_total = valor_nota
+                titulo.Previsao = False
+                titulo.save(update_fields=["nfe_id", "Titulo", "Documento", "Data_emissao", "Valor_total", "Previsao"])
+                parcelas_efetivadas += PagarItem.objects.filter(Idpagar=titulo).exclude(
+                    status=PagarItem.STATUS_CANCELADO
+                ).update(status=PagarItem.STATUS_EFETIVO, Previsao=False)
+                titulos_atualizados += 1
+                valor_nota = Decimal("0.00")
+                break
+
+            titulo_nf = Pagar.objects.create(
+                empresa=titulo.empresa,
+                idloja=titulo.idloja,
+                idfornecedor=titulo.idfornecedor,
+                Titulo=str(nota.numero)[:60],
+                Documento=documento,
+                Data_emissao=nota.dt_emissao,
+                Valor_total=valor_nota,
+                Previsao=False,
+                FormaPagamento=titulo.FormaPagamento,
+                Idnatureza=titulo.Idnatureza,
+                conta_contabil=titulo.conta_contabil,
+                pedido_compra=nota.pedido_compra_id,
+                nfe_id=nota.pk,
+            )
+            self._criar_parcelas_proporcionais(titulo_nf, parcelas_previstas, valor_previsao, valor_nota, efetivo=True)
+            titulos_criados += 1
+            parcelas_efetivadas += len(parcelas_previstas)
+
+            saldo_previsao = _money(valor_previsao - valor_nota)
+            self._redistribuir_parcelas(parcelas_previstas, saldo_previsao)
+            titulo.Valor_total = saldo_previsao
+            titulo.Titulo = f"PC {nota.pedido_compra_id} - saldo"[:60]
+            titulo.save(update_fields=["Valor_total", "Titulo"])
+            previsoes_ajustadas += 1
+            valor_nota = Decimal("0.00")
+            break
 
         return {
             "disponivel": True,
             "titulos_atualizados": titulos_atualizados,
+            "titulos_criados": titulos_criados,
             "parcelas_efetivadas": parcelas_efetivadas,
+            "previsoes_ajustadas": previsoes_ajustadas,
         }
+
+    def _criar_parcelas_proporcionais(self, titulo, parcelas_base, total_base, total_destino, efetivo=False):
+        restante = _money(total_destino)
+        total_base = _money(total_base)
+        total_parcelas = len(parcelas_base)
+        for idx, base in enumerate(parcelas_base, start=1):
+            if idx == total_parcelas:
+                valor = restante
+            else:
+                proporcao = Decimal(base.valor_parcela or 0) / total_base if total_base else Decimal("0")
+                valor = _money(total_destino * proporcao)
+                restante = _money(restante - valor)
+            PagarItem.objects.create(
+                Idpagar=titulo,
+                parcela_n=base.parcela_n,
+                status=PagarItem.STATUS_EFETIVO if efetivo else PagarItem.STATUS_PREVISTO,
+                Data_vencimento=base.Data_vencimento,
+                valor_parcela=valor,
+                FormaPagamento=base.FormaPagamento,
+                idconta=base.idconta,
+                juros=0,
+                multa=0,
+                tarifa=0,
+                desconto=0,
+                data_baixa=None,
+                valor_baixa=None,
+                Previsao=not efetivo,
+                Idnatureza=base.Idnatureza,
+            )
+
+    def _redistribuir_parcelas(self, parcelas, total_destino):
+        total_atual = _money(sum(Decimal(p.valor_parcela or 0) for p in parcelas))
+        restante = _money(total_destino)
+        total_parcelas = len(parcelas)
+        for idx, parcela in enumerate(parcelas, start=1):
+            if idx == total_parcelas:
+                valor = restante
+            else:
+                proporcao = Decimal(parcela.valor_parcela or 0) / total_atual if total_atual else Decimal("0")
+                valor = _money(total_destino * proporcao)
+                restante = _money(restante - valor)
+            parcela.valor_parcela = valor
+            parcela.save(update_fields=["valor_parcela"])
 
 
 class NotaFiscalEntradaItemViewSet(BaseViewSet):

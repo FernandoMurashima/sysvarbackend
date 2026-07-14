@@ -50,6 +50,8 @@ from produto.models import (
     Cor,
     Estoque,
     EstoqueMovimentacao,
+    FichaTecnica,
+    FichaTecnicaItem,
     Grade,
     Grupo,
     InventarioEstoque,
@@ -60,6 +62,8 @@ from produto.models import (
     PackItem,
     Produto,
     ProdutoDetalhe,
+    OrdemProducao,
+    OrdemProducaoItem,
     Promocao,
     Subgrupo,
     Tabelapreco,
@@ -154,6 +158,11 @@ class Command(BaseCommand):
         PedidoCompraItem.objects.filter(pedido__empresa_id__in=empresa_ids).delete()
         PedidoCompra.objects.filter(empresa_id__in=empresa_ids).delete()
 
+        OrdemProducaoItem.objects.filter(ordem__empresa_id__in=empresa_ids).delete()
+        OrdemProducao.objects.filter(empresa_id__in=empresa_ids).delete()
+        FichaTecnicaItem.objects.filter(ficha__empresa_id__in=empresa_ids).delete()
+        FichaTecnica.objects.filter(empresa_id__in=empresa_ids).delete()
+
         InventarioEstoqueItem.objects.filter(inventario__Idloja__in=lojas).delete()
         InventarioEstoque.objects.filter(Idloja__in=lojas).delete()
         EstoqueMovimentacao.objects.filter(Idloja__in=lojas).delete()
@@ -237,6 +246,7 @@ class Command(BaseCommand):
                 EstoqueNegativo="NAO",
                 Rede="SIM",
                 Matriz="SIM" if pos == 1 else "NAO",
+                tipo_unidade=Loja.TIPO_MATRIZ if pos == 1 else Loja.TIPO_LOJA,
                 DataAbertura=timezone.localdate().replace(month=1, day=10),
                 ContaContabil="1.1.01",
                 ativo=True,
@@ -442,7 +452,8 @@ class Command(BaseCommand):
 
     def _base_produtos(self, empresa, idx):
         ncm = Ncm.objects.create(empresa=empresa, ncm="6204.62.00", descricao="Vestuário feminino", aliquota=Decimal("18.00"))
-        unidade = Unidade.objects.create(empresa=empresa, Descricao="Unidade", Codigo="UN")
+        unidade = Unidade.objects.create(empresa=empresa, Descricao="Unidade", Codigo="UN", permite_decimal=False)
+        unidade_metro = Unidade.objects.create(empresa=empresa, Descricao="Metro", Codigo="M", permite_decimal=True)
         material = Material.objects.create(empresa=empresa, Descricao="Algodao", Codigo="ALG", Status="ATIVO")
         grade_num = Grade.objects.create(empresa=empresa, Descricao="Grade jeans 38 a 48", Status="ATIVO")
         grade_alpha = Grade.objects.create(empresa=empresa, Descricao="Grade moda PP a GG", Status="ATIVO")
@@ -483,6 +494,7 @@ class Command(BaseCommand):
         return {
             "ncm": ncm.ncm,
             "unidade": unidade,
+            "unidade_metro": unidade_metro,
             "material": material,
             "grade_num": grade_num,
             "grade_alpha": grade_alpha,

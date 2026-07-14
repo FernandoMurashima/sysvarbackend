@@ -9,6 +9,7 @@ from .validators import (
     only_digits,
 )
 from typing import Optional
+from accounts.permissions import has_field_permission
 
 # Helpers de normalização
 def _norm_email(v: Optional[str]) -> Optional[str]:
@@ -62,6 +63,16 @@ class LojaSerializer(serializers.ModelSerializer):
             "ContaContabil",
             "DataEnceramento",
             "Matriz",
+            "tipo_unidade",
+            "regime_tributario",
+            "ambiente_fiscal",
+            "inscricao_estadual",
+            "serie_nfce",
+            "proximo_numero_nfce",
+            "serie_nfe",
+            "proximo_numero_nfe",
+            "emite_nfce",
+            "emite_nfe",
             "ativo",
             "data_cadastro",
         )
@@ -142,9 +153,37 @@ class ClienteSerializer(serializers.ModelSerializer):
 # Fornecedor
 # ---------------------------
 class FornecedorSerializer(serializers.ModelSerializer):
+    CATEGORIAS_NORMALIZADAS = {
+        "materiaprima": "MATERIA_PRIMA",
+        "matériaprima": "MATERIA_PRIMA",
+        "aviamento": "AVIAMENTO",
+        "revenda": "REVENDA",
+        "produtoderevenda": "REVENDA",
+        "faccao": "FACCAO",
+        "facção": "FACCAO",
+        "prestador": "PRESTADOR",
+        "prestadordeservico": "PRESTADOR",
+        "prestadordeserviço": "PRESTADOR",
+        "transportadora": "TRANSPORTADORA",
+        "outros": "OUTROS",
+    }
+
     class Meta:
         model = Fornecedor
         fields = "__all__"
+
+    def validate_categoria(self, value):
+        if not value:
+            return value
+        categoria = str(value).strip()
+        validas = {codigo for codigo, _ in Fornecedor.CATEGORIA_CHOICES}
+        if categoria in validas:
+            return categoria
+        normalizada = categoria.lower().replace(" ", "").replace("_", "").replace("-", "")
+        codigo = self.CATEGORIAS_NORMALIZADAS.get(normalizada)
+        if codigo:
+            return codigo
+        raise serializers.ValidationError("Categoria de fornecedor inválida.")
 
     def validate_cnpj(self, value):
         if not value:
@@ -180,11 +219,31 @@ class FornecedorSerializer(serializers.ModelSerializer):
 # Funcionários
 # ---------------------------
 class FuncionariosSerializer(serializers.ModelSerializer):
+    salario_oculto = serializers.SerializerMethodField()
+
     class Meta:
         model = Funcionarios
         fields = "__all__"
 
+    def _pode_ver_salario(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return has_field_permission(user, "funcionario.salario", default_roles=["Admin", "Diretor"])
+
+    def get_salario_oculto(self, obj):
+        return not self._pode_ver_salario()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self._pode_ver_salario():
+            data["salario"] = None
+        return data
+
     def validate(self, attrs):
+        if "salario" in attrs and not self._pode_ver_salario():
+            raise serializers.ValidationError({
+                "salario": "Você não tem permissão para informar ou alterar salário."
+            })
         categoria = (attrs.get("categoria", getattr(self.instance, "categoria", "")) or "").strip().lower()
         empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         loja = attrs.get("idloja", getattr(self.instance, "idloja", None))
