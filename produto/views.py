@@ -15,6 +15,7 @@ except Exception:  # auditoria opcionalmente ausente em dev
 from .permissions import CanToggleProductFlags
 from accounts.permissions import HasEmpresaModulo, HasModuleRole
 from cadastros.models import Loja
+from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem
 
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
@@ -1184,6 +1185,7 @@ class OrdemProducaoViewSet(BaseViewSet):
 
         movimentos = 0
         total_qtd = Decimal('0')
+        nfe_itens = []
         for linha in itens:
             sku_id = linha.get('sku_final') or linha.get('sku')
             quantidade = Decimal(str(linha.get('quantidade') or 0)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -1266,6 +1268,12 @@ class OrdemProducaoViewSet(BaseViewSet):
                 documento=documento,
                 observacao=f'Distribuição OP {ordem.numero} recebida de {loja_origem.nome_loja}',
             )
+            nfe_itens.append({
+                'sku': sku,
+                'quantidade': quantidade,
+                'valor_unitario': custo_unitario,
+                'cfop': self._cfop_transferencia(ordem.empresa),
+            })
             distribuido_antes[sku.ean13] = qtd_ja_distribuida + quantidade
             movimentos += 2
             total_qtd += quantidade
@@ -1273,14 +1281,92 @@ class OrdemProducaoViewSet(BaseViewSet):
         if movimentos == 0:
             return Response({'detail': 'Informe ao menos um SKU com quantidade maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        _audit('OrdemProducao', ordem.pk, {'documento': documento, 'loja_destino': loja_destino.pk, 'quantidade': str(total_qtd)}, request, 'distribute')
+        nfe = self._criar_nfe_distribuicao(ordem, loja_origem, loja_destino, documento, nfe_itens, request)
+        _audit('OrdemProducao', ordem.pk, {
+            'documento': documento,
+            'loja_destino': loja_destino.pk,
+            'quantidade': str(total_qtd),
+            'nfe_saida': nfe.pk,
+            'nfe_numero': nfe.numero,
+        }, request, 'distribute')
         return Response({
             'documento': documento,
             'movimentos': movimentos,
             'quantidade': str(total_qtd),
             'loja_origem': loja_origem.nome_loja,
             'loja_destino': loja_destino.nome_loja,
+            'nfe_saida': nfe.pk,
+            'nfe_numero': nfe.numero,
+            'nfe_serie': nfe.serie,
+            'nfe_status': nfe.status,
         }, status=status.HTTP_200_OK)
+
+    def _cfop_transferencia(self, empresa):
+        cfop = (
+            Cfop.objects
+            .filter(empresa=empresa, ativo=True, tipo_operacao=Cfop.TIPO_TRANSFERENCIA, codigo__in=['5152', '5949'])
+            .order_by('codigo')
+            .values_list('codigo', flat=True)
+            .first()
+        )
+        return cfop or '5152'
+
+    def _proximo_numero_nfe(self, loja_origem):
+        serie = str(loja_origem.serie_nfe or 1)
+        numero = str(loja_origem.proximo_numero_nfe or 1)
+        loja_origem.proximo_numero_nfe = int(loja_origem.proximo_numero_nfe or 1) + 1
+        loja_origem.save(update_fields=['proximo_numero_nfe'])
+        return serie, numero
+
+    def _criar_nfe_distribuicao(self, ordem, loja_origem, loja_destino, documento, itens, request):
+        existente = NotaFiscalSaida.objects.filter(
+            empresa=ordem.empresa,
+            ordem_producao=ordem,
+            documento_origem=documento,
+        ).first()
+        if existente:
+            return existente
+
+        serie, numero = self._proximo_numero_nfe(loja_origem)
+        hoje = timezone.localdate()
+        cfop_padrao = itens[0]['cfop'] if itens else self._cfop_transferencia(ordem.empresa)
+        nfe = NotaFiscalSaida.objects.create(
+            empresa=ordem.empresa,
+            loja_origem=loja_origem,
+            loja_destino=loja_destino,
+            ordem_producao=ordem,
+            tipo_operacao=NotaFiscalSaida.TipoOperacao.TRANSFERENCIA,
+            modelo='55',
+            serie=serie,
+            numero=numero,
+            documento_origem=documento,
+            cfop=cfop_padrao,
+            natureza_operacao='Transferência de produção',
+            status=NotaFiscalSaida.Status.DIGITADA,
+            dt_emissao=hoje,
+            dt_saida=hoje,
+            observacoes=f'NF-e gerada pela distribuição da OP {ordem.numero} para {loja_destino.nome_loja}',
+            criado_por=getattr(request, 'user', None) if getattr(request, 'user', None) and request.user.is_authenticated else None,
+        )
+        for item in itens:
+            sku = item['sku']
+            produto = sku.produto
+            NotaFiscalSaidaItem.objects.create(
+                nota=nfe,
+                produto=produto,
+                sku=sku,
+                ean=sku.ean13,
+                referencia=produto.referencia or '',
+                descricao=produto.descricao or '',
+                cor=getattr(sku.idcor, 'Descricao', '') or '',
+                tamanho=getattr(sku.idtamanho, 'Tamanho', '') or '',
+                ncm=produto.ncm or '',
+                cfop=item['cfop'],
+                quantidade=item['quantidade'],
+                valor_unitario=item['valor_unitario'],
+            )
+        nfe.recalcular_totais()
+        return nfe
 
     @action(detail=True, methods=['post'], url_path='cancelar')
     def cancelar(self, request, pk=None):
@@ -1588,7 +1674,7 @@ class InventarioEstoqueViewSet(BaseViewSet):
     serializer_class = InventarioEstoqueSerializer
 
     def get_queryset(self):
-        qs = InventarioEstoque.objects.all()
+        qs = InventarioEstoque.objects.prefetch_related('itens').select_related('Idloja')
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(Idloja__empresa_id=empresa_id)
@@ -1605,6 +1691,8 @@ class InventarioEstoqueViewSet(BaseViewSet):
     @action(detail=True, methods=['post'], url_path='gerar-itens')
     def gerar_itens(self, request, pk=None):
         inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Somente inventário aberto pode gerar itens.'}, status=status.HTTP_400_BAD_REQUEST)
         estoques = Estoque.objects.filter(Idloja=inv.Idloja).order_by('referencia', 'CodigodeBarra')
         created = 0
         for est in estoques:
@@ -1614,19 +1702,51 @@ class InventarioEstoqueViewSet(BaseViewSet):
                 defaults={
                     'referencia': est.referencia,
                     'saldo_sistema': est.Estoque or 0,
-                    'saldo_contado': est.Estoque or 0,
+                    'saldo_contado': 0,
+                    'contado': False,
                 },
             )
             if was_created:
                 created += 1
         return Response({'created': created})
 
-    @action(detail=True, methods=['post'], url_path='fechar')
+    @action(detail=True, methods=['post'], url_path='validar')
     @transaction.atomic
-    def fechar(self, request, pk=None):
+    def validar(self, request, pk=None):
         inv = self.get_object()
         if inv.status != InventarioEstoque.STATUS_ABERTO:
-            return Response({'detail': 'Inventário não está aberto.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Somente inventário aberto pode ser validado.'}, status=status.HTTP_400_BAD_REQUEST)
+        total_itens = inv.itens.count()
+        if total_itens == 0:
+            return Response({'detail': 'Gere os itens antes de validar o inventário.'}, status=status.HTTP_400_BAD_REQUEST)
+        pendentes = inv.itens.filter(contado=False).count()
+        if pendentes:
+            return Response({'detail': f'Existem {pendentes} item(ns) sem contagem.'}, status=status.HTTP_400_BAD_REQUEST)
+        inv.status = InventarioEstoque.STATUS_VALIDADO
+        inv.save(update_fields=['status'])
+        divergencias = inv.itens.exclude(diferenca=0).count()
+        return Response({
+            'inventario': self.get_serializer(inv).data,
+            'total_itens': total_itens,
+            'divergencias': divergencias,
+            'diferenca_total': str(sum((item.diferenca or 0) for item in inv.itens.all())),
+        })
+
+    @action(detail=True, methods=['post'], url_path='fechar')
+    def fechar(self, request, pk=None):
+        return self._finalizar_inventario(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='finalizar')
+    def finalizar(self, request, pk=None):
+        return self._finalizar_inventario(request, pk)
+
+    @transaction.atomic
+    def _finalizar_inventario(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_VALIDADO:
+            return Response({'detail': 'Valide o inventário antes de finalizar.'}, status=status.HTTP_400_BAD_REQUEST)
+        documento = f'INV-{inv.pk}'
+        movimentos = 0
         for item in inv.itens.all():
             if item.diferenca == 0:
                 continue
@@ -1645,16 +1765,20 @@ class InventarioEstoqueViewSet(BaseViewSet):
                 CodigodeBarra=item.CodigodeBarra,
                 referencia=item.referencia,
                 tipo=mov_tipo,
-                quantidade=item.saldo_contado,
+                quantidade=item.diferenca,
                 saldo_anterior=anterior,
                 saldo_posterior=item.saldo_contado,
-                documento=f'INV-{inv.pk}',
-                observacao='Ajuste por inventário',
+                documento=documento,
+                observacao=f'Ajuste por inventário {inv.descricao}',
             )
+            movimentos += 1
         inv.status = InventarioEstoque.STATUS_FECHADO
         inv.data_fechamento = timezone.localdate()
         inv.save(update_fields=['status', 'data_fechamento'])
-        return Response(self.get_serializer(inv).data)
+        data = self.get_serializer(inv).data
+        data['movimentos_gerados'] = movimentos
+        data['documento'] = documento
+        return Response(data)
 
 
 class InventarioEstoqueItemViewSet(BaseViewSet):
@@ -1672,3 +1796,9 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
         if inventario:
             qs = qs.filter(inventario_id=inventario)
         return qs
+
+    def perform_update(self, serializer):
+        item = self.get_object()
+        if item.inventario.status != InventarioEstoque.STATUS_ABERTO:
+            raise ValidationError({'inventario': 'Somente itens de inventário aberto podem ser alterados.'})
+        serializer.save(contado=True)

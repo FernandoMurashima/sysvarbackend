@@ -1,5 +1,6 @@
 from .cfop import CfopSerializer
 from .nota_fiscal_entrada import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaSerializer
+from .nota_fiscal_saida import NotaFiscalSaidaItemSerializer, NotaFiscalSaidaSerializer
 from .tributacao import RegraTributariaSerializer, TributoSerializer
 from .venda_pdv import (
     NFCeSerializer,
@@ -17,6 +18,8 @@ __all__ = [
     "NFeDevolucaoSerializer",
     "NotaFiscalEntradaItemSerializer",
     "NotaFiscalEntradaSerializer",
+    "NotaFiscalSaidaItemSerializer",
+    "NotaFiscalSaidaSerializer",
     "RegraTributariaSerializer",
     "TributoSerializer",
     "VendaDevolucaoItemSerializer",

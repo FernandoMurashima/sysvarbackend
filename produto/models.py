@@ -963,10 +963,12 @@ class EstoqueMovimentacao(models.Model):
 
 class InventarioEstoque(models.Model):
     STATUS_ABERTO = 'ABERTO'
+    STATUS_VALIDADO = 'VALIDADO'
     STATUS_FECHADO = 'FECHADO'
     STATUS_CANCELADO = 'CANCELADO'
     STATUS_CHOICES = [
         (STATUS_ABERTO, 'Aberto'),
+        (STATUS_VALIDADO, 'Validado'),
         (STATUS_FECHADO, 'Fechado'),
         (STATUS_CANCELADO, 'Cancelado'),
     ]
@@ -999,6 +1001,7 @@ class InventarioEstoqueItem(models.Model):
     saldo_sistema = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     saldo_contado = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     diferenca = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    contado = models.BooleanField(default=False, db_index=True)
     observacao = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:

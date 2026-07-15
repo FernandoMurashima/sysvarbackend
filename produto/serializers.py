@@ -193,10 +193,34 @@ class InventarioEstoqueItemSerializer(serializers.ModelSerializer):
 
 class InventarioEstoqueSerializer(serializers.ModelSerializer):
     itens = InventarioEstoqueItemSerializer(many=True, read_only=True)
+    total_itens = serializers.SerializerMethodField()
+    total_contados = serializers.SerializerMethodField()
+    total_divergencias = serializers.SerializerMethodField()
+    saldo_sistema_total = serializers.SerializerMethodField()
+    saldo_contado_total = serializers.SerializerMethodField()
+    diferenca_total = serializers.SerializerMethodField()
 
     class Meta:
         model = InventarioEstoque
         fields = '__all__'
+
+    def get_total_itens(self, obj):
+        return obj.itens.count()
+
+    def get_total_contados(self, obj):
+        return obj.itens.filter(contado=True).count()
+
+    def get_total_divergencias(self, obj):
+        return obj.itens.exclude(diferenca=0).count()
+
+    def get_saldo_sistema_total(self, obj):
+        return sum((item.saldo_sistema or 0) for item in obj.itens.all())
+
+    def get_saldo_contado_total(self, obj):
+        return sum((item.saldo_contado or 0) for item in obj.itens.all())
+
+    def get_diferenca_total(self, obj):
+        return sum((item.diferenca or 0) for item in obj.itens.all())
 
 # ---------- Produto / SKU / Preço ----------
 class ProdutoSerializer(serializers.ModelSerializer):
