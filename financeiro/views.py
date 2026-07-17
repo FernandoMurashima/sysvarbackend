@@ -1176,19 +1176,22 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
                 .select_related('caixa', 'conta_bancaria')
                 .get(pk=self.get_object().pk)
             )
-            if obj.status != MovimentacaoFinanceira.STATUS_PREVISTA:
-                return Response({'detail': 'Apenas movimentações previstas podem ser conciliadas.'}, status=status.HTTP_400_BAD_REQUEST)
+            if obj.status == MovimentacaoFinanceira.STATUS_EFETIVA and obj.data_conciliacao:
+                return Response({'detail': 'Movimentação já conciliada.'}, status=status.HTTP_400_BAD_REQUEST)
+            if obj.status not in [MovimentacaoFinanceira.STATUS_PREVISTA, MovimentacaoFinanceira.STATUS_EFETIVA]:
+                return Response({'detail': 'Apenas movimentações previstas ou efetivas não conciliadas podem ser conciliadas.'}, status=status.HTTP_400_BAD_REQUEST)
             destino = obj.conta_bancaria or obj.caixa
             if not destino:
                 return Response({'detail': 'Movimentação sem caixa ou conta bancária vinculada.'}, status=status.HTTP_400_BAD_REQUEST)
-            if obj.tipo == MovimentacaoFinanceira.TIPO_ENTRADA:
-                destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor_conciliado
-            elif obj.tipo == MovimentacaoFinanceira.TIPO_SAIDA:
-                destino.saldo_atual = Decimal(destino.saldo_atual or 0) - valor_conciliado
-            else:
+            if obj.tipo not in [MovimentacaoFinanceira.TIPO_ENTRADA, MovimentacaoFinanceira.TIPO_SAIDA]:
                 return Response({'detail': 'Tipo de movimentação inválido para conciliação.'}, status=status.HTTP_400_BAD_REQUEST)
-            destino.save(update_fields=['saldo_atual'])
             before = obj.status
+            if obj.status == MovimentacaoFinanceira.STATUS_PREVISTA:
+                if obj.tipo == MovimentacaoFinanceira.TIPO_ENTRADA:
+                    destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor_conciliado
+                else:
+                    destino.saldo_atual = Decimal(destino.saldo_atual or 0) - valor_conciliado
+                destino.save(update_fields=['saldo_atual'])
             obj.status = MovimentacaoFinanceira.STATUS_EFETIVA
             obj.data_conciliacao = data_conciliacao
             obj.valor_conciliado = valor_conciliado
@@ -1212,24 +1215,23 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
         data_movimento = request.query_params.get('data_movimento')
         forma_pagamento = request.query_params.get('forma_pagamento')
         conta = request.query_params.get('conta_bancaria')
-        if not data_movimento:
-            return Response({'detail': 'Informe a data da conciliação.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not forma_pagamento:
-            return Response({'detail': 'Informe a forma de pagamento.'}, status=status.HTTP_400_BAD_REQUEST)
 
         qs = (
             self.get_queryset()
             .filter(
                 tipo=MovimentacaoFinanceira.TIPO_ENTRADA,
-                status=MovimentacaoFinanceira.STATUS_PREVISTA,
-                data_movimento=data_movimento,
-                FormaPagamento=forma_pagamento,
+                status__in=[MovimentacaoFinanceira.STATUS_PREVISTA, MovimentacaoFinanceira.STATUS_EFETIVA],
+                data_conciliacao__isnull=True,
                 conta_bancaria__isnull=False,
             )
             .order_by('data_movimento', 'documento', 'Idmovimentacao')
         )
         if conta:
             qs = qs.filter(conta_bancaria_id=conta)
+        if data_movimento:
+            qs = qs.filter(data_movimento=data_movimento)
+        if forma_pagamento:
+            qs = qs.filter(FormaPagamento=forma_pagamento)
         return Response(self.get_serializer(qs, many=True).data)
 
     @action(detail=False, methods=['post'], url_path='conciliar-lote')
@@ -1259,8 +1261,10 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
 
             for mov_id in ids:
                 obj = movimentos[mov_id]
-                if obj.status != MovimentacaoFinanceira.STATUS_PREVISTA:
-                    return Response({'detail': f'Movimentação {obj.pk} não está prevista.'}, status=status.HTTP_400_BAD_REQUEST)
+                if obj.status == MovimentacaoFinanceira.STATUS_EFETIVA and obj.data_conciliacao:
+                    return Response({'detail': f'Movimentação {obj.pk} já está conciliada.'}, status=status.HTTP_400_BAD_REQUEST)
+                if obj.status not in [MovimentacaoFinanceira.STATUS_PREVISTA, MovimentacaoFinanceira.STATUS_EFETIVA]:
+                    return Response({'detail': f'Movimentação {obj.pk} não pode ser conciliada.'}, status=status.HTTP_400_BAD_REQUEST)
                 if obj.tipo != MovimentacaoFinanceira.TIPO_ENTRADA:
                     return Response({'detail': f'Movimentação {obj.pk} não é uma entrada.'}, status=status.HTTP_400_BAD_REQUEST)
                 destino = obj.conta_bancaria or obj.caixa
@@ -1273,9 +1277,10 @@ class MovimentacaoFinanceiraViewSet(BaseViewSet):
                 if valor <= 0:
                     return Response({'detail': f'Valor conciliado deve ser maior que zero na movimentação {obj.pk}.'}, status=status.HTTP_400_BAD_REQUEST)
 
-                destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
-                destino.save(update_fields=['saldo_atual'])
                 before = obj.status
+                if obj.status == MovimentacaoFinanceira.STATUS_PREVISTA:
+                    destino.saldo_atual = Decimal(destino.saldo_atual or 0) + valor
+                    destino.save(update_fields=['saldo_atual'])
                 obj.status = MovimentacaoFinanceira.STATUS_EFETIVA
                 obj.data_conciliacao = data_conciliacao
                 obj.valor_conciliado = valor

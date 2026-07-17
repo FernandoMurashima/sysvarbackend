@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from auditoria.models import AuditLog
+from .permissions import user_module_access
 from .serializers import TIPOS_EXIGEM_LOJA, UserSerializer
 
 User = get_user_model()
@@ -237,6 +238,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         user = self.request.user
+        acesso = user_module_access(user, "configuracoes")
+        if not user.is_superuser and (getattr(user, "type", None) != "Admin" or acesso not in {None, "EDIT"}):
+            raise PermissionDenied("Somente administrador com acesso completo pode excluir usuários.")
         if not user.is_superuser and instance.empresa_id != getattr(user, "empresa_id", None):
             raise PermissionDenied("Você só pode excluir usuários da sua empresa.")
         instance.delete()

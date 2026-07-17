@@ -63,6 +63,17 @@ def user_module_access(user, modulo):
     return perm.acesso if perm else None
 
 
+def can_delete_in_module(user, modulo):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    if user_type(user) not in ADMIN_TYPES:
+        return False
+    acesso = user_module_access(user, modulo)
+    return acesso in {None, "EDIT"}
+
+
 def has_field_permission(user, campo, default_roles=None):
     if not user or not user.is_authenticated:
         return False
@@ -93,6 +104,8 @@ class HasModuleRole(BasePermission):
                 return False
             if request.method in SAFE_METHODS:
                 return acesso in {"VIEW", "EDIT"}
+            if request.method == "DELETE":
+                return can_delete_in_module(request.user, modulo)
             return acesso == "EDIT"
 
         action_roles = getattr(view, "action_roles", {}) or {}
@@ -105,6 +118,8 @@ class HasModuleRole(BasePermission):
         roles = read_roles if request.method in SAFE_METHODS else write_roles
         if roles is None:
             roles = getattr(view, "allowed_roles", None)
+        if request.method == "DELETE":
+            return has_role(request.user, ADMIN_TYPES) and has_role(request.user, roles)
         return has_role(request.user, roles)
 
 

@@ -326,6 +326,7 @@ class ContaBancaria(models.Model):
     conta = models.CharField(max_length=30)
     tipo_conta = models.CharField(max_length=15, choices=TIPO_CONTA_CHOICES, default='CORRENTE')
     pix_chave = models.CharField(max_length=120, null=True, blank=True)
+    conta_contabil = models.CharField(max_length=50, null=True, blank=True)
     saldo_inicial = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     saldo_atual = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     ativo = models.BooleanField(default=True)
