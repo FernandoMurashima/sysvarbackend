@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     FormaPagamento, FormaPagamentoParcela,
-    ConfigFinanceira,
+    ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     LancamentoContabil,
     CashbackConfig, CashbackMovimento,
@@ -16,6 +16,29 @@ class ConfigFinanceiraSerializer(serializers.ModelSerializer):
         model = ConfigFinanceira
         fields = '__all__'
         read_only_fields = ('empresa', 'atualizado_em')
+
+
+class TipoDespesaPdvSerializer(serializers.ModelSerializer):
+    natureza_codigo = serializers.CharField(source='Idnatureza.codigo', read_only=True)
+    natureza_descricao = serializers.CharField(source='Idnatureza.descricao', read_only=True)
+
+    class Meta:
+        model = TipoDespesaPdv
+        fields = '__all__'
+        read_only_fields = ('data_cadastro',)
+
+    def validate(self, attrs):
+        natureza = attrs.get('Idnatureza', getattr(self.instance, 'Idnatureza', None))
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        if not natureza:
+            raise serializers.ValidationError({'Idnatureza': 'Informe a natureza vinculada.'})
+        if getattr(natureza, 'ativo', True) is False:
+            raise serializers.ValidationError({'Idnatureza': 'A natureza selecionada está inativa.'})
+        if empresa and getattr(natureza, 'empresa_id', None) and natureza.empresa_id != empresa.id:
+            raise serializers.ValidationError({'Idnatureza': 'A natureza pertence a outra empresa.'})
+        if str(getattr(natureza, 'natureza_operacao', '') or '').upper() not in {'DESPESA', 'AJUSTE'}:
+            raise serializers.ValidationError({'Idnatureza': 'Use uma natureza de despesa ou ajuste.'})
+        return attrs
 
 
 class FormaPagamentoParcelaSerializer(serializers.ModelSerializer):

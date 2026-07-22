@@ -125,6 +125,11 @@ class LojaViewSet(BaseCadastroViewSet):
         if user.is_superuser:
             empresa = self.request.query_params.get("empresa")
             return qs.filter(empresa_id=empresa) if empresa else qs
+        if getattr(user, "type", None) in {"Caixa", "Vendedor"}:
+            lojas_ids = list(user.lojas.values_list("id", flat=True))
+            if getattr(user, "loja_id", None) and user.loja_id not in lojas_ids:
+                lojas_ids.append(user.loja_id)
+            return qs.filter(pk__in=lojas_ids) if lojas_ids else qs.none()
         empresa_id = getattr(user, "empresa_id", None)
         if empresa_id:
             return qs.filter(empresa_id=empresa_id)
@@ -163,6 +168,16 @@ class FuncionariosViewSet(BaseCadastroViewSet):
     search_fields = ["nomefuncionario", "apelido", "cpf"]
     ordering_fields = ["nomefuncionario", "categoria", "data_cadastro", "meta"]
     ordering = ["nomefuncionario"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not user.is_superuser and getattr(user, "type", None) in {"Caixa", "Vendedor"}:
+            lojas_ids = list(user.lojas.values_list("id", flat=True))
+            if getattr(user, "loja_id", None) and user.loja_id not in lojas_ids:
+                lojas_ids.append(user.loja_id)
+            return qs.filter(idloja_id__in=lojas_ids) if lojas_ids else qs.none()
+        return qs
 
 
 class PlanoContabilViewSet(BaseCadastroViewSet):

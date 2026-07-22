@@ -99,9 +99,11 @@ def _gerar_chave(nfce: NFCe) -> str:
 
 class VendaPdvViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    module_key = "vendas"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor"]
     write_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     action_roles = {
+        "finalizar": ["Admin", "Diretor", "Gerente", "Caixa"],
         "relatorio_vendas": ["Admin", "Diretor", "Gerente"],
         "relatorio_margem": ["Admin", "Diretor", "Gerente"],
     }
@@ -398,8 +400,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         )
         empresa_id = self._empresa_id_usuario()
         loja = request.query_params.get("loja")
-        data_ini = request.query_params.get("data_ini")
-        data_fim = request.query_params.get("data_fim")
+        data_ini = request.query_params.get("data_ini") or request.query_params.get("data_inicial")
+        data_fim = request.query_params.get("data_fim") or request.query_params.get("data_final")
         vendedor = request.query_params.get("vendedor")
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)

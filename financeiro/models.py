@@ -83,6 +83,27 @@ class ConfigFinanceira(models.Model):
         return f"Configuração financeira {self.empresa_id}"
 
 
+class TipoDespesaPdv(models.Model):
+    Idtipodespesapdv = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='tipos_despesa_pdv', db_index=True)
+    codigo = models.CharField(max_length=20)
+    descricao = models.CharField(max_length=120)
+    Idnatureza = models.ForeignKey(Nat_Lancamento, on_delete=models.PROTECT, related_name='tipos_despesa_pdv')
+    ativo = models.BooleanField(default=True, db_index=True)
+    exige_documento = models.BooleanField(default=False)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_tipo_despesa_pdv'
+        ordering = ['descricao']
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'codigo'], name='uq_empresa_tipo_despesa_pdv_codigo')
+        ]
+
+    def __str__(self):
+        return f"{self.codigo} - {self.descricao}"
+
+
 # =========================
 # Cashback
 # =========================

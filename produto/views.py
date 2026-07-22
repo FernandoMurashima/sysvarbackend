@@ -221,12 +221,24 @@ class ProdutoViewSet(BaseViewSet):
             qs = qs.filter(ativo=False)
 
         search = (self.request.query_params.get('search') or '').strip()
+      #  if search:
+      #      qs = qs.filter(
+      #          Q(descricao__icontains=search)
+      #          | Q(descricao_reduzida__icontains=search)
+      #          | Q(referencia__icontains=search)
+      #      )
+
+
+       # novo bloco inserido  
         if search:
             qs = qs.filter(
-                Q(descricao__icontains=search)
-                | Q(descricao_reduzida__icontains=search)
-                | Q(referencia__icontains=search)
-            )
+            Q(descricao__icontains=search)
+            | Q(descricao_reduzida__icontains=search)
+            | Q(referencia__icontains=search)
+            | Q(skus__ean13__iexact=search)
+            | Q(skus__codigo_item_ref__iexact=search)
+            ).distinct()
+        # fim do bloco
 
         return qs
 
@@ -423,12 +435,21 @@ class ProdutoDetalheViewSet(BaseViewSet):
         pid = self.request.query_params.get('produto')
         cor = self.request.query_params.get('idcor')
         tam = self.request.query_params.get('idtamanho')
+        search = (self.request.query_params.get('search') or '').strip()
         if pid:
             qs = qs.filter(produto_id=pid)
         if cor:
             qs = qs.filter(idcor_id=cor)
         if tam:
             qs = qs.filter(idtamanho_id=tam)
+        if search:
+            qs = qs.filter(
+                Q(ean13__icontains=search)
+                | Q(codigo_item_ref__icontains=search)
+                | Q(produto__referencia__icontains=search)
+                | Q(produto__descricao__icontains=search)
+                | Q(produto__descricao_reduzida__icontains=search)
+            ).distinct()
         return qs
 
     # -------------------- FLAGS (com permissão fina) --------------------

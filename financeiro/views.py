@@ -14,7 +14,7 @@ except Exception:
     AuditLog = None
 
 from .models import (
-    ConfigFinanceira,
+    ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira, LancamentoContabil,
     CashbackConfig, CashbackMovimento, saldo_cashback_cliente,
     ValeTroca, ValeTrocaMovimento, saldo_vale_troca_cliente,
@@ -24,7 +24,7 @@ from .models import (
     FormaPagamento, FormaPagamentoParcela
 )
 from .serializers import (
-    ConfigFinanceiraSerializer,
+    ConfigFinanceiraSerializer, TipoDespesaPdvSerializer,
     CaixaSerializer, ContaBancariaSerializer, MovimentacaoFinanceiraSerializer,
     LancamentoContabilSerializer,
     CashbackConfigSerializer, CashbackMovimentoSerializer,
@@ -315,6 +315,23 @@ class ConfigFinanceiraViewSet(BaseViewSet):
                 raise ValidationError({campo: 'A natureza selecionada pertence a outra empresa.'})
 
 
+class TipoDespesaPdvViewSet(BaseViewSet):
+    read_module_keys = ["financeiro", "vendas"]
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = TipoDespesaPdv.objects.select_related('empresa', 'Idnatureza').all()
+    serializer_class = TipoDespesaPdvSerializer
+    search_fields = ['codigo', 'descricao', 'Idnatureza__codigo', 'Idnatureza__descricao']
+    ordering_fields = ['codigo', 'descricao', 'ativo', 'data_cadastro']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        if ativo in ('true', 'false', '1', '0'):
+            qs = qs.filter(ativo=ativo in ('true', '1'))
+        return qs
+
+
 class CashbackConfigViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente"]
@@ -440,13 +457,21 @@ class ValeTrocaMovimentoViewSet(BaseViewSet):
 
 
 class CaixaViewSet(BaseViewSet):
+    read_module_keys = ["financeiro", "vendas"]
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente"]
+    action_roles = {"lancar_despesa": ["Admin", "Diretor", "Gerente", "Caixa"]}
     queryset = Caixa.objects.select_related('idloja').all()
     serializer_class = CaixaSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if not user.is_superuser and getattr(user, "type", None) in {"Caixa", "Vendedor"}:
+            lojas_ids = list(user.lojas.values_list("id", flat=True))
+            if getattr(user, "loja_id", None) and user.loja_id not in lojas_ids:
+                lojas_ids.append(user.loja_id)
+            qs = qs.filter(idloja_id__in=lojas_ids) if lojas_ids else qs.none()
         loja = self.request.query_params.get('loja')
         ativo = self.request.query_params.get('ativo')
         tipo_caixa = self.request.query_params.get('tipo_caixa')
@@ -561,6 +586,97 @@ class CaixaViewSet(BaseViewSet):
             'entrada': MovimentacaoFinanceiraSerializer(mov_entrada).data,
             'caixa_origem': CaixaSerializer(origem).data,
             'caixa_destino': CaixaSerializer(destino).data,
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='lancar-despesa')
+    def lancar_despesa(self, request, pk=None):
+        try:
+            valor = Decimal(str(request.data.get('valor')))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'detail': 'Informe valor numérico.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if valor <= 0:
+            return Response({'detail': 'Informe valor maior que zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        tipo_despesa_id = request.data.get('tipo_despesa') or request.data.get('tipo_despesa_pdv') or request.data.get('Idtipodespesapdv')
+        natureza_id = request.data.get('Idnatureza') or request.data.get('natureza')
+        if not tipo_despesa_id and not natureza_id:
+            return Response({'detail': 'Informe o tipo de despesa.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        data_movimento = request.data.get('data_movimento') or timezone.localdate().isoformat()
+        documento_informado = (request.data.get('documento') or '').strip()
+        historico_informado = (request.data.get('historico') or request.data.get('observacao') or '').strip()
+
+        with transaction.atomic():
+            caixa = (
+                self.get_queryset()
+                .select_for_update()
+                .select_related('empresa', 'idloja')
+                .filter(pk=pk, ativo=True)
+                .first()
+            )
+            if not caixa:
+                return Response({'detail': 'Caixa não encontrado ou inativo.'}, status=status.HTTP_404_NOT_FOUND)
+            if not caixa.idloja:
+                return Response({'detail': 'O caixa precisa estar vinculado a uma loja.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            tipo_despesa = None
+            if tipo_despesa_id:
+                tipo_despesa = (
+                    TipoDespesaPdv.objects
+                    .select_related('Idnatureza')
+                    .filter(pk=tipo_despesa_id, empresa=caixa.empresa, ativo=True)
+                    .first()
+                )
+                if not tipo_despesa:
+                    return Response({'detail': 'Tipo de despesa não encontrado para a empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+                if tipo_despesa.exige_documento and not documento_informado:
+                    return Response({'detail': 'Informe o documento desta despesa.'}, status=status.HTTP_400_BAD_REQUEST)
+                natureza = tipo_despesa.Idnatureza
+            else:
+                natureza = (
+                    Nat_Lancamento.objects
+                    .filter(pk=natureza_id, empresa=caixa.empresa, ativo=True)
+                    .first()
+                )
+            if not natureza:
+                return Response({'detail': 'Natureza de despesa não encontrada para a empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+            if str(natureza.natureza_operacao or '').upper() not in {'DESPESA', 'AJUSTE'}:
+                return Response({'detail': 'A natureza deve ser de despesa ou ajuste.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            agora = timezone.localtime()
+            documento = (documento_informado[:50] or f"DESP-{agora:%Y%m%d%H%M%S}-{request.user.pk or '0'}")
+            descricao_tipo = getattr(tipo_despesa, 'descricao', '') if tipo_despesa else ''
+            historico = historico_informado or f"Despesa PDV {descricao_tipo or natureza.descricao} {documento}"
+
+            caixa.saldo_atual = Decimal(caixa.saldo_atual or 0) - valor
+            caixa.save(update_fields=['saldo_atual'])
+
+            movimento = MovimentacaoFinanceira.objects.create(
+                empresa=caixa.empresa,
+                idloja=caixa.idloja,
+                data_movimento=data_movimento,
+                tipo=MovimentacaoFinanceira.TIPO_SAIDA,
+                status=MovimentacaoFinanceira.STATUS_EFETIVA,
+                origem=MovimentacaoFinanceira.ORIGEM_MANUAL,
+                valor=valor,
+                historico=historico[:255],
+                documento=documento,
+                Idnatureza=natureza,
+                caixa=caixa,
+            )
+            gerar_lancamento_contabil_movimentacao(movimento)
+
+        _audit('caixa', caixa.pk, {
+            'documento': documento,
+            'valor': str(valor),
+            'tipo_despesa': tipo_despesa.pk if tipo_despesa else None,
+            'natureza': natureza.pk,
+            'movimentacao': movimento.pk,
+        }, request, action='lancar_despesa')
+        return Response({
+            'movimentacao': MovimentacaoFinanceiraSerializer(movimento).data,
+            'caixa': CaixaSerializer(caixa).data,
         }, status=status.HTTP_201_CREATED)
 
 

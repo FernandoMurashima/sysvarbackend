@@ -53,6 +53,14 @@ def module_key_for_view(view):
     return APP_MODULE_MAP.get(app_label)
 
 
+def module_keys_for_read(view):
+    keys = getattr(view, "read_module_keys", None)
+    if keys:
+        return [key for key in keys if key]
+    key = module_key_for_view(view)
+    return [key] if key else []
+
+
 def user_module_access(user, modulo):
     if not user or not user.is_authenticated or not modulo:
         return None
@@ -97,6 +105,17 @@ class HasModuleRole(BasePermission):
         if request.user.is_superuser:
             return True
 
+        if request.method in SAFE_METHODS:
+            read_keys = module_keys_for_read(view)
+            if read_keys:
+                acessos = [user_module_access(request.user, key) for key in read_keys]
+                acessos_definidos = [acesso for acesso in acessos if acesso is not None]
+                if acessos_definidos:
+                    if any(acesso in {"VIEW", "EDIT"} for acesso in acessos_definidos):
+                        read_roles = getattr(view, "read_roles", None)
+                        return has_role(request.user, read_roles) if read_roles is not None else True
+                    return False
+
         modulo = module_key_for_view(view)
         acesso = user_module_access(request.user, modulo)
         if acesso is not None:
@@ -106,7 +125,13 @@ class HasModuleRole(BasePermission):
                 return acesso in {"VIEW", "EDIT"}
             if request.method == "DELETE":
                 return can_delete_in_module(request.user, modulo)
-            return acesso == "EDIT"
+            if acesso == "EDIT":
+                return True
+            action_roles = getattr(view, "action_roles", {}) or {}
+            action = getattr(view, "action", None)
+            if action in action_roles:
+                return has_role(request.user, action_roles[action])
+            return False
 
         action_roles = getattr(view, "action_roles", {}) or {}
         action = getattr(view, "action", None)

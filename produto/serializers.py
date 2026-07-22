@@ -293,6 +293,9 @@ class ProdutoSerializer(serializers.ModelSerializer):
 class ProdutoDetalheSerializer(serializers.ModelSerializer):
     ean13 = serializers.CharField(read_only=True)
     config_ean = serializers.PrimaryKeyRelatedField(read_only=True)
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
+    produto_tipo = serializers.CharField(source='produto.tipo_produto', read_only=True)
     cor_descricao = serializers.CharField(source='idcor.Descricao', read_only=True)
     tamanho_descricao = serializers.CharField(source='idtamanho.Tamanho', read_only=True)
     preco_venda = serializers.SerializerMethodField()
