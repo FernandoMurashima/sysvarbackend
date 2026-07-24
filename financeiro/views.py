@@ -460,18 +460,27 @@ class CaixaViewSet(BaseViewSet):
     read_module_keys = ["financeiro", "vendas"]
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente"]
-    action_roles = {"lancar_despesa": ["Admin", "Diretor", "Gerente", "Caixa"]}
+    action_roles = {
+        "lancar_despesa": ["Admin", "Diretor", "Gerente", "Caixa"],
+        "transferir": ["Admin", "Diretor", "Gerente", "Caixa"],
+    }
     queryset = Caixa.objects.select_related('idloja').all()
     serializer_class = CaixaSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        if not user.is_superuser and getattr(user, "type", None) in {"Caixa", "Vendedor"}:
+        tipo_usuario = getattr(user, "type", None)
+        if not user.is_superuser and tipo_usuario in {"Caixa", "Vendedor"}:
             lojas_ids = list(user.lojas.values_list("id", flat=True))
             if getattr(user, "loja_id", None) and user.loja_id not in lojas_ids:
                 lojas_ids.append(user.loja_id)
-            qs = qs.filter(idloja_id__in=lojas_ids) if lojas_ids else qs.none()
+            if tipo_usuario == "Caixa":
+                qs = qs.filter(
+                    models.Q(idloja_id__in=lojas_ids) | models.Q(tipo_caixa=Caixa.TIPO_MASTER)
+                ) if lojas_ids else qs.filter(tipo_caixa=Caixa.TIPO_MASTER)
+            else:
+                qs = qs.filter(idloja_id__in=lojas_ids) if lojas_ids else qs.none()
         loja = self.request.query_params.get('loja')
         ativo = self.request.query_params.get('ativo')
         tipo_caixa = self.request.query_params.get('tipo_caixa')
