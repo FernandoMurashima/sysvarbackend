@@ -480,7 +480,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if empresa_id and vendedor.empresa_id and vendedor.empresa_id != int(empresa_id):
             return Response({"detail": "O vendedor informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
 
-        documento = data.get("documento") or _proximo_documento_pdv()
+        documento = (data.get("documento") or "").strip()
+        if documento:
+            venda_existente = VendaPdv.objects.filter(empresa=caixa.idloja.empresa, documento=documento).first()
+            if venda_existente:
+                payload = VendaPdvSerializer(venda_existente, context={"request": request}).data
+                payload["cupom"] = self._cupom(venda_existente, getattr(venda_existente, "nfce", None))
+                return Response(payload, status=status.HTTP_200_OK)
+        else:
+            documento = _proximo_documento_pdv()
+
         venda = VendaPdv.objects.create(
             empresa=caixa.idloja.empresa,
             loja_id=loja_id,
@@ -540,10 +549,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         self._registrar_comissao(venda)
         self._registrar_uso_vale_troca(venda, pagamentos_payload)
         self._registrar_cashback(venda, pagamentos_payload)
-        nfce = self._autorizar_nfce(venda)
+        nfce = self._autorizar_nfce(venda, self._venda_em_contingencia(data))
         payload = VendaPdvSerializer(venda, context={"request": request}).data
         payload["cupom"] = self._cupom(venda, nfce)
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    def _venda_em_contingencia(self, data) -> bool:
+        documento = str(data.get("documento") or "")
+        return bool(data.get("contingencia") or data.get("local_uuid") or documento.upper().startswith("LOCAL-"))
 
     def _normalizar_pagamentos(self, data) -> List[Dict]:
         pagamentos = data.get("pagamentos") or []
@@ -1379,17 +1392,26 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         )
         gerar_lancamento_contabil_movimentacao(movimento)
 
-    def _autorizar_nfce(self, venda: VendaPdv) -> NFCe:
+    def _autorizar_nfce(self, venda: VendaPdv, contingencia: bool = False) -> NFCe:
         numero = int(venda.documento) if str(venda.documento or "").isdigit() else _proximo_numero_nfce()
         nfce = NFCe.objects.create(venda=venda, numero=numero, status=NFCe.Status.EMITINDO)
         nfce.chave_acesso = _gerar_chave(nfce)
-        nfce.protocolo = f"135{timezone.now().strftime('%y%m%d%H%M%S')}"
-        nfce.qr_code_url = f"https://homologacao.nfce.sysvar.local/consulta?p={nfce.chave_acesso}"
-        nfce.xml = f"<NFCe ambiente=\"homologacao\" chave=\"{nfce.chave_acesso}\" venda=\"{venda.documento}\" />"
-        nfce.status = NFCe.Status.AUTORIZADA
-        nfce.retorno_codigo = "100"
-        nfce.retorno_mensagem = "Autorizado o uso da NFC-e em ambiente de homologacao."
-        nfce.autorizada_em = timezone.now()
+        if contingencia:
+            nfce.protocolo = ""
+            nfce.qr_code_url = ""
+            nfce.xml = f"<NFCe ambiente=\"homologacao\" chave=\"{nfce.chave_acesso}\" venda=\"{venda.documento}\" contingencia=\"true\" />"
+            nfce.status = NFCe.Status.CONTINGENCIA
+            nfce.retorno_codigo = "FS"
+            nfce.retorno_mensagem = "NFC-e emitida em contingencia. Aguardando transmissao/autorizacao da SEFAZ."
+            nfce.autorizada_em = None
+        else:
+            nfce.protocolo = f"135{timezone.now().strftime('%y%m%d%H%M%S')}"
+            nfce.qr_code_url = f"https://homologacao.nfce.sysvar.local/consulta?p={nfce.chave_acesso}"
+            nfce.xml = f"<NFCe ambiente=\"homologacao\" chave=\"{nfce.chave_acesso}\" venda=\"{venda.documento}\" />"
+            nfce.status = NFCe.Status.AUTORIZADA
+            nfce.retorno_codigo = "100"
+            nfce.retorno_mensagem = "Autorizado o uso da NFC-e em ambiente de homologacao."
+            nfce.autorizada_em = timezone.now()
         nfce.save()
         return nfce
 
@@ -1452,11 +1474,23 @@ class NFCeViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
         empresa_id = self.request.query_params.get("empresa") if user.is_superuser else getattr(user, "empresa_id", None)
+        status_nfce = self.request.query_params.get("status")
+        loja_id = self.request.query_params.get("loja")
         if empresa_id:
             qs = qs.filter(venda__empresa_id=empresa_id)
         elif not user.is_superuser:
             return qs.none()
+        if status_nfce:
+            qs = qs.filter(status=status_nfce)
+        if loja_id:
+            qs = qs.filter(venda__loja_id=loja_id)
         return qs
+
+    @action(detail=False, methods=["get"], url_path="contingencia-pendente")
+    def contingencia_pendente(self, request):
+        qs = self.filter_queryset(self.get_queryset().filter(status=NFCe.Status.CONTINGENCIA))
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="cupom")
     def cupom(self, request, pk=None):

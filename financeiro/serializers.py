@@ -57,10 +57,17 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
         gera = attrs.get('gera_recebivel_bancario', getattr(self.instance, 'gera_recebivel_bancario', False))
         conta = attrs.get('conta_liquidacao', getattr(self.instance, 'conta_liquidacao', None))
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        tef = attrs.get('tef_habilitado', getattr(self.instance, 'tef_habilitado', False))
+        adquirente = attrs.get('adquirente', getattr(self.instance, 'adquirente', ''))
+        modalidade = attrs.get('tef_modalidade', getattr(self.instance, 'tef_modalidade', ''))
         if gera and not conta:
             raise serializers.ValidationError({'conta_liquidacao': 'Informe a conta de liquidação.'})
         if conta and empresa and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa.id:
             raise serializers.ValidationError({'conta_liquidacao': 'A conta de liquidação pertence a outra empresa.'})
+        if tef and not str(adquirente or '').strip():
+            raise serializers.ValidationError({'adquirente': 'Informe a adquirente do TEF.'})
+        if tef and not str(modalidade or '').strip():
+            raise serializers.ValidationError({'tef_modalidade': 'Informe a modalidade do TEF.'})
         return attrs
 
 

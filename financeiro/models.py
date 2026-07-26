@@ -27,6 +27,10 @@ class FormaPagamento(models.Model):
     prazo_credito_dias = models.PositiveIntegerField(default=0)
     taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
     taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    tef_habilitado = models.BooleanField(default=False)
+    tef_modalidade = models.CharField(max_length=20, blank=True, default='')
+    tef_adquirente_codigo = models.CharField(max_length=40, blank=True, default='')
+    tef_terminal_logico = models.CharField(max_length=40, blank=True, default='')
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     class Meta:
