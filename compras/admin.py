@@ -28,15 +28,15 @@ class PedidoCompraItemInline(admin.TabularInline):
 
 @admin.register(PedidoCompra)
 class PedidoCompraAdmin(admin.ModelAdmin):
-    list_display = ("id", "tipo", "loja", "fornecedor", "emissao", "status", "forma_pagamento", "total_pedido")
-    list_filter = ("tipo", "status", "loja", "fornecedor", "emissao", "forma_pagamento")
+    list_display = ("id", "tipo", "loja", "fornecedor", "emissao", "status", "forma_pagamento", "prazo_pagamento", "total_pedido")
+    list_filter = ("tipo", "status", "loja", "fornecedor", "emissao", "forma_pagamento", "prazo_pagamento")
     search_fields = ("id", "fornecedor__RazaoSocial", "fornecedor__NomeFantasia")
     date_hierarchy = "emissao"
     readonly_fields = ("total_itens", "total_desconto", "total_pedido", "data_cadastro")
     inlines = [PedidoCompraItemInline, PedidoCompraParcelaInline]
     fieldsets = (
         ("Identificação", {"fields": ("tipo", "loja", "fornecedor", "emissao", "previsao_entrega", "status")}),
-        ("Pagamento", {"fields": ("forma_pagamento",)}),
+        ("Pagamento", {"fields": ("forma_pagamento", "prazo_pagamento")}),
         ("Totais", {"fields": ("total_itens", "total_desconto", "frete", "total_pedido")}),
         ("Outros", {"fields": ("observacoes", "data_cadastro")}),
     )

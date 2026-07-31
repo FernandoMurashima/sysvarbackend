@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import (
     FormaPagamento, FormaPagamentoParcela,
+    PrazoPagamento, PrazoPagamentoParcela,
     ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
     LancamentoContabil,
@@ -46,6 +47,20 @@ class FormaPagamentoParcelaSerializer(serializers.ModelSerializer):
         model = FormaPagamentoParcela
         fields = '__all__'
 
+class PrazoPagamentoParcelaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrazoPagamentoParcela
+        fields = '__all__'
+
+
+class PrazoPagamentoSerializer(serializers.ModelSerializer):
+    parcelas = PrazoPagamentoParcelaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PrazoPagamento
+        fields = '__all__'
+
+
 class FormaPagamentoSerializer(serializers.ModelSerializer):
     parcelas = FormaPagamentoParcelaSerializer(many=True, read_only=True)
 
@@ -57,6 +72,7 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
         gera = attrs.get('gera_recebivel_bancario', getattr(self.instance, 'gera_recebivel_bancario', False))
         conta = attrs.get('conta_liquidacao', getattr(self.instance, 'conta_liquidacao', None))
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        prazo = attrs.get('prazo_pagamento', getattr(self.instance, 'prazo_pagamento', None))
         tef = attrs.get('tef_habilitado', getattr(self.instance, 'tef_habilitado', False))
         adquirente = attrs.get('adquirente', getattr(self.instance, 'adquirente', ''))
         modalidade = attrs.get('tef_modalidade', getattr(self.instance, 'tef_modalidade', ''))
@@ -64,6 +80,8 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'conta_liquidacao': 'Informe a conta de liquidação.'})
         if conta and empresa and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa.id:
             raise serializers.ValidationError({'conta_liquidacao': 'A conta de liquidação pertence a outra empresa.'})
+        if prazo and empresa and getattr(prazo, 'empresa_id', None) and prazo.empresa_id != empresa.id:
+            raise serializers.ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
         if tef and not str(adquirente or '').strip():
             raise serializers.ValidationError({'adquirente': 'Informe a adquirente do TEF.'})
         if tef and not str(modalidade or '').strip():

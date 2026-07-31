@@ -26,6 +26,8 @@ def _conta_operacional(movimentacao):
     empresa = movimentacao.empresa
     if movimentacao.origem == MovimentacaoFinanceira.ORIGEM_CMV:
         return _conta_analitica_por_classe(empresa, PlanoContabil.CLASSE_ATIVO, ('Estoque', 'Mercadoria'))
+    if movimentacao.origem == MovimentacaoFinanceira.ORIGEM_RECEBER and not movimentacao.conta_bancaria_id and not movimentacao.caixa_id:
+        return _conta_analitica_por_classe(empresa, PlanoContabil.CLASSE_ATIVO, ('Cliente', 'Receber', 'Duplicata'))
 
     destino = movimentacao.conta_bancaria or movimentacao.caixa
     codigo = getattr(destino, 'conta_contabil', None)

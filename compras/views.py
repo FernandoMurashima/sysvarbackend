@@ -34,10 +34,12 @@ try:
         PagarItem,
         FormaPagamento,
         FormaPagamentoParcela,
+        PrazoPagamento,
+        PrazoPagamentoParcela,
     )
 except Exception:
     FIN_OK = False
-    Pagar = PagarItem = FormaPagamento = FormaPagamentoParcela = None
+    Pagar = PagarItem = FormaPagamento = FormaPagamentoParcela = PrazoPagamento = PrazoPagamentoParcela = None
 
 # Natureza para aprovar
 from cadastros.models import Nat_Lancamento
@@ -142,7 +144,7 @@ class PedidoCompraViewSet(BaseViewSet):
         """
         Seta forma de pagamento (por id ou codigo) e RECRIA as parcelas planejadas (PLAN)
         em compras_pedido_compra_parcela com base em FormaPagamentoParcela.
-        Body: {"id_forma": 2} ou {"codigo_forma":"30/60"}.
+        Body: {"id_forma": 2} ou {"codigo_forma":"30/60", "id_prazo": 1}.
         """
         obj: PedidoCompra = self.get_object()
         if obj.status != "AB":
@@ -152,6 +154,8 @@ class PedidoCompraViewSet(BaseViewSet):
 
         id_forma = request.data.get("id_forma")
         codigo = (request.data.get("codigo_forma") or "").strip()
+        id_prazo = request.data.get("id_prazo") or request.data.get("prazo_pagamento")
+        codigo_prazo = (request.data.get("codigo_prazo") or "").strip()
 
         try:
             if id_forma:
@@ -163,9 +167,24 @@ class PedidoCompraViewSet(BaseViewSet):
         except FormaPagamento.DoesNotExist:
             return Response({"detail": "Forma não encontrada/inativa"}, status=status.HTTP_400_BAD_REQUEST)
 
-        cfg = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
+        prazo = None
+        if id_prazo or codigo_prazo:
+            try:
+                if id_prazo:
+                    prazo = PrazoPagamento.objects.filter(Q(empresa=obj.empresa) | Q(empresa__isnull=True), pk=id_prazo, ativo=True).get()
+                else:
+                    prazo = PrazoPagamento.objects.filter(Q(empresa=obj.empresa) | Q(empresa__isnull=True), codigo=codigo_prazo, ativo=True).get()
+            except PrazoPagamento.DoesNotExist:
+                return Response({"detail": "Prazo não encontrado/inativo"}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            prazo = forma.prazo_pagamento
+
+        if prazo:
+            cfg = list(PrazoPagamentoParcela.objects.filter(prazo=prazo).order_by("ordem"))
+        else:
+            cfg = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
         if not cfg:
-            return Response({"detail": "Forma sem parcelas configuradas"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Prazo sem parcelas configuradas"}, status=status.HTTP_400_BAD_REQUEST)
 
         # atualiza totais
         obj.recomputa_totais()
@@ -207,13 +226,15 @@ class PedidoCompraViewSet(BaseViewSet):
             vals.append({"parcela_n": i, "vencimento": vencto.isoformat(), "valor": float(val)})
 
         before = obj.forma_pagamento
+        before_prazo = obj.prazo_pagamento_id
         obj.forma_pagamento = forma.codigo
-        obj.save(update_fields=["forma_pagamento"])
+        obj.prazo_pagamento = prazo
+        obj.save(update_fields=["forma_pagamento", "prazo_pagamento"])
 
         _audit(
             "pedidocompra",
             obj.pk,
-            {"set_forma": {"before": before, "after": forma.codigo}, "parcelas": vals},
+            {"set_forma": {"before": before, "after": forma.codigo}, "set_prazo": {"before": before_prazo, "after": getattr(prazo, "pk", None)}, "parcelas": vals},
             request,
             action="set_forma_pagto",
         )
@@ -511,6 +532,8 @@ class PedidoCompraItemViewSet(BaseViewSet):
             raise ValidationError({"produto": "Produto pertence a outra empresa."})
         if pack and pack.empresa_id and empresa_id and pack.empresa_id != empresa_id:
             raise ValidationError({"pack": "Pack pertence a outra empresa."})
+        if produto and pack and produto.grade_id and pack.grade_id != produto.grade_id:
+            raise ValidationError({"pack": "Pack incompatível com a grade do produto."})
 
 
 # ----------------- Entregas -----------------

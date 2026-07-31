@@ -9,12 +9,39 @@ from cadastros.models import Loja, Cliente, Fornecedor, Nat_Lancamento, PlanoCon
 # Formas de Pagamento
 # =========================
 class FormaPagamento(models.Model):
+    TIPO_DINHEIRO = 'DINHEIRO'
+    TIPO_PIX = 'PIX'
+    TIPO_DEBITO = 'DEBITO'
+    TIPO_CREDITO_ROTATIVO = 'CREDITO_ROTATIVO'
+    TIPO_CREDITO_PARCELADO = 'CREDITO_PARCELADO'
+    TIPO_BOLETO = 'BOLETO'
+    TIPO_TRANSFERENCIA = 'TRANSFERENCIA'
+    TIPO_OUTRO = 'OUTRO'
+    TIPO_CHOICES = [
+        (TIPO_DINHEIRO, 'Dinheiro'),
+        (TIPO_PIX, 'Pix'),
+        (TIPO_DEBITO, 'Cartão de débito'),
+        (TIPO_CREDITO_ROTATIVO, 'Cartão crédito rotativo'),
+        (TIPO_CREDITO_PARCELADO, 'Cartão crédito parcelado'),
+        (TIPO_BOLETO, 'Boleto'),
+        (TIPO_TRANSFERENCIA, 'Transferência'),
+        (TIPO_OUTRO, 'Outro'),
+    ]
+
     Idformapagamento = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='formas_pagamento', db_index=True)
     codigo = models.CharField(max_length=10)   # ex.: 'AV', '30/60', '01'
     descricao = models.CharField(max_length=120)
+    tipo = models.CharField(max_length=24, choices=TIPO_CHOICES, default=TIPO_OUTRO)
     num_parcelas = models.IntegerField(default=1)
     ativo = models.BooleanField(default=True)
+    prazo_pagamento = models.ForeignKey(
+        'financeiro.PrazoPagamento',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='formas_pagamento',
+    )
     adquirente = models.CharField(max_length=80, null=True, blank=True)
     conta_liquidacao = models.ForeignKey(
         'financeiro.ContaBancaria',
@@ -63,6 +90,47 @@ class FormaPagamentoParcela(models.Model):
 
     def __str__(self):
         return f"{self.forma.codigo} - Parcela {self.ordem} ({self.dias} dias)"
+
+
+class PrazoPagamento(models.Model):
+    Idprazo = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='prazos_pagamento', db_index=True)
+    codigo = models.CharField(max_length=12)
+    descricao = models.CharField(max_length=120)
+    num_parcelas = models.PositiveIntegerField(default=1)
+    intervalo_dias = models.PositiveIntegerField(default=30)
+    ativo = models.BooleanField(default=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_prazo_pagamento'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'codigo'], name='uq_empresa_prazo_pagamento_codigo')
+        ]
+        ordering = ['num_parcelas', 'codigo']
+
+    def __str__(self):
+        return f"{self.codigo} - {self.descricao}"
+
+
+class PrazoPagamentoParcela(models.Model):
+    Idprazoparcela = models.BigAutoField(primary_key=True)
+    prazo = models.ForeignKey(PrazoPagamento, on_delete=models.CASCADE, related_name='parcelas')
+    ordem = models.PositiveIntegerField()
+    dias = models.PositiveIntegerField()
+    percentual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_prazo_pagamento_parcela'
+        constraints = [
+            models.UniqueConstraint(fields=['prazo', 'ordem'], name='uq_prazo_pagamento_parcela_ordem')
+        ]
+        indexes = [models.Index(fields=['prazo', 'ordem'])]
+        ordering = ['prazo', 'ordem']
+
+    def __str__(self):
+        return f"{self.prazo.codigo} - Parcela {self.ordem} ({self.dias} dias)"
 
 
 class ConfigFinanceira(models.Model):
@@ -315,6 +383,7 @@ class Caixa(models.Model):
     descricao = models.CharField(max_length=120)
     saldo_inicial = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     saldo_atual = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    conta_contabil = models.CharField(max_length=50, null=True, blank=True)
     ativo = models.BooleanField(default=True)
     data_abertura = models.DateField(default=timezone.now)
     data_cadastro = models.DateTimeField(default=timezone.now)

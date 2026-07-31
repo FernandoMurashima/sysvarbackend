@@ -1,8 +1,12 @@
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from accounts.permissions import HasModuleRole
 from fiscal.models import NotaFiscalSaida, NotaFiscalSaidaItem
 from fiscal.serializers import NotaFiscalSaidaItemSerializer, NotaFiscalSaidaSerializer
+from distribuicao.services import autorizar_nota_distribuicao
 
 
 class NotaFiscalSaidaViewSet(viewsets.ModelViewSet):
@@ -37,6 +41,16 @@ class NotaFiscalSaidaViewSet(viewsets.ModelViewSet):
         if search:
             qs = qs.filter(numero__icontains=search) | qs.filter(documento_origem__icontains=search) | qs.filter(chave_acesso__icontains=search)
         return qs.order_by("-dt_emissao", "-id")
+
+    @action(detail=True, methods=["post"], url_path="autorizar")
+    def autorizar(self, request, pk=None):
+        try:
+            nota = autorizar_nota_distribuicao(self.get_object(), request.user)
+            return Response(self.get_serializer(nota).data)
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                return Response(exc.message_dict, status=400)
+            return Response({"detail": str(exc)}, status=400)
 
 
 class NotaFiscalSaidaItemViewSet(viewsets.ReadOnlyModelViewSet):

@@ -42,6 +42,13 @@ class PedidoCompra(models.Model):
 
     # snapshot textual do código da forma (ex.: 'AV', '30/60')
     forma_pagamento = models.CharField(max_length=30, null=True, blank=True)
+    prazo_pagamento = models.ForeignKey(
+        'financeiro.PrazoPagamento',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='pedidos_compra',
+    )
 
     status = models.CharField(max_length=2, choices=STATUS_PC, default='AB')
 

@@ -105,6 +105,7 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
 
     # proteção: forma de pagamento setada via ação específica
     forma_pagamento = serializers.CharField(read_only=True)
+    prazo_pagamento_descricao = serializers.CharField(source="prazo_pagamento.descricao", read_only=True)
 
     class Meta:
         model = PedidoCompra

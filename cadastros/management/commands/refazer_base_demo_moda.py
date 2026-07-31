@@ -24,6 +24,8 @@ from financeiro.models import (
     Pagar,
     PagarItem,
     PagarRateio,
+    PrazoPagamento,
+    PrazoPagamentoParcela,
     Receber,
     ReceberItem,
     ReceberRateio,
@@ -405,27 +407,54 @@ class Command(BaseCommand):
             contas.append(conta)
             contas_por_loja[loja.id] = conta
         conta_padrao = contas[0]
-        formas = [
-            ("DIN", "Dinheiro", 1, [0], False, "", None, Decimal("0.0000")),
-            ("PIX", "Pix", 1, [0], True, "Itau Empresas", conta_padrao, Decimal("0.0000")),
-            ("DEB", "Cartao de debito", 1, [1], True, "Rede", conta_padrao, Decimal("1.2500")),
-            ("CRE", "Cartao de credito", 1, [30], True, "Rede", conta_padrao, Decimal("2.4900")),
-            ("CRE2", "Cartao de credito 2x", 2, [30, 60], True, "Rede", conta_padrao, Decimal("2.9900")),
-            ("TRC", "Vale troca", 1, [0], False, "", None, Decimal("0.0000")),
+        prazos_specs = [
+            ("AVISTA", "A vista", 1, 0, [0]),
+            ("7D", "7 dias", 1, 7, [7]),
+            ("30D", "30 dias", 1, 30, [30]),
+            ("2X30", "2 parcelas - 30/60", 2, 30, [30, 60]),
+            ("3X30", "3 parcelas - 30/60/90", 3, 30, [30, 60, 90]),
+            ("4X30", "4 parcelas - 30/60/90/120", 4, 30, [30, 60, 90, 120]),
+            ("6X30", "6 parcelas - 30/60/90/120/150/180", 6, 30, [30, 60, 90, 120, 150, 180]),
         ]
-        formas_criadas = []
-        for codigo, descricao, parcelas, dias, recebivel, adquirente, conta_liq, taxa in formas:
-            forma = FormaPagamento.objects.create(
+        prazos = {}
+        for codigo, descricao, parcelas, intervalo, dias in prazos_specs:
+            prazo = PrazoPagamento.objects.create(
                 empresa=empresa,
                 codigo=codigo,
                 descricao=descricao,
                 num_parcelas=parcelas,
+                intervalo_dias=intervalo,
+                ativo=True,
+            )
+            percentual = Decimal("100.000000") / Decimal(parcelas)
+            for ordem, dia in enumerate(dias, start=1):
+                PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=ordem, dias=dia, percentual=percentual)
+            prazos[codigo] = prazo
+        formas = [
+            ("DIN", "Dinheiro", "DINHEIRO", 1, [0], False, None, "AVISTA", Decimal("0.0000")),
+            ("PIX", "Pix", "PIX", 1, [0], True, conta_padrao, "AVISTA", Decimal("0.0000")),
+            ("DEB", "Cartao de debito", "DEBITO", 1, [1], True, conta_padrao, "AVISTA", Decimal("0.0000")),
+            ("CCR", "Cartao credito rotativo", "CREDITO_ROTATIVO", 1, [30], True, conta_padrao, "30D", Decimal("0.0000")),
+            ("CCP", "Cartao credito parcelado", "CREDITO_PARCELADO", 6, [30, 60, 90, 120, 150, 180], True, conta_padrao, "6X30", Decimal("0.0000")),
+            ("BOL", "Boleto", "BOLETO", 1, [30], True, conta_padrao, "30D", Decimal("0.0000")),
+            ("TRC", "Vale troca", "OUTRO", 1, [0], False, None, "AVISTA", Decimal("0.0000")),
+        ]
+        formas_criadas = []
+        for codigo, descricao, tipo, parcelas, dias, recebivel, conta_liq, prazo_codigo, taxa in formas:
+            forma = FormaPagamento.objects.create(
+                empresa=empresa,
+                codigo=codigo,
+                descricao=descricao,
+                tipo=tipo,
+                num_parcelas=parcelas,
                 ativo=True,
                 gera_recebivel_bancario=recebivel,
-                adquirente=adquirente,
+                adquirente=None,
                 conta_liquidacao=conta_liq,
+                prazo_pagamento=prazos[prazo_codigo],
                 prazo_credito_dias=max(dias),
                 taxa_percentual=taxa,
+                tef_habilitado=False,
             )
             percentual = Decimal("100.000000") / Decimal(parcelas)
             for ordem, prazo in enumerate(dias, start=1):

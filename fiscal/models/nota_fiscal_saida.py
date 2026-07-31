@@ -32,6 +32,8 @@ class NotaFiscalSaida(models.Model):
     numero = models.CharField(max_length=20)
     documento_origem = models.CharField(max_length=50, blank=True, default="", db_index=True)
     chave_acesso = models.CharField(max_length=60, blank=True, default="")
+    protocolo_autorizacao = models.CharField(max_length=40, blank=True, default="")
+    xml = models.TextField(blank=True, default="")
     cfop = models.CharField(max_length=4, blank=True, default="")
     natureza_operacao = models.CharField(max_length=120, blank=True, default="Transferência de produção")
     status = models.CharField(max_length=2, choices=Status.choices, default=Status.DIGITADA, db_index=True)
@@ -43,6 +45,7 @@ class NotaFiscalSaida(models.Model):
     valor_frete = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     valor_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     observacoes = models.CharField(max_length=255, blank=True, default="")
+    autorizada_em = models.DateTimeField(null=True, blank=True)
 
     criado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,

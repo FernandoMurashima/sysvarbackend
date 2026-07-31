@@ -5,7 +5,7 @@ from .models import (
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
-    FormaPagamento, FormaPagamentoParcela
+    FormaPagamento, FormaPagamentoParcela, PrazoPagamento, PrazoPagamentoParcela
 )
 
 class PagarRateioInline(admin.TabularInline):
@@ -76,9 +76,9 @@ class ReceberRateioInline(admin.TabularInline):
 
 @admin.register(Caixa)
 class CaixaAdmin(admin.ModelAdmin):
-    list_display = ("Idcaixa", "tipo_caixa", "idloja", "codigo", "descricao", "saldo_atual", "ativo")
+    list_display = ("Idcaixa", "tipo_caixa", "idloja", "codigo", "descricao", "conta_contabil", "saldo_atual", "ativo")
     list_filter = ("idloja", "ativo")
-    search_fields = ("codigo", "descricao")
+    search_fields = ("codigo", "descricao", "conta_contabil")
     readonly_fields = ("data_cadastro",)
 
 
@@ -159,8 +159,8 @@ class FormaPagamentoParcelaInline(admin.TabularInline):
 
 @admin.register(FormaPagamento)
 class FormaPagamentoAdmin(admin.ModelAdmin):
-    list_display = ("Idformapagamento", "codigo", "descricao", "num_parcelas", "ativo", "data_cadastro")
-    list_filter = ("ativo",)
+    list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "num_parcelas", "prazo_pagamento", "ativo", "data_cadastro")
+    list_filter = ("ativo", "tipo")
     search_fields = ("codigo", "descricao")
     readonly_fields = ("data_cadastro",)
     inlines = [FormaPagamentoParcelaInline]
@@ -170,6 +170,31 @@ class FormaPagamentoParcelaAdmin(admin.ModelAdmin):
     list_display = ("Idformapagparcela", "forma", "ordem", "dias", "percentual", "valor_fixo", "data_cadastro")
     list_filter = ("forma",)
     search_fields = ("forma__codigo", "forma__descricao")
+    readonly_fields = ("data_cadastro",)
+
+
+class PrazoPagamentoParcelaInline(admin.TabularInline):
+    model = PrazoPagamentoParcela
+    extra = 0
+    fields = ("ordem", "dias", "percentual", "data_cadastro")
+    readonly_fields = ("data_cadastro",)
+    show_change_link = True
+
+
+@admin.register(PrazoPagamento)
+class PrazoPagamentoAdmin(admin.ModelAdmin):
+    list_display = ("Idprazo", "codigo", "descricao", "num_parcelas", "intervalo_dias", "ativo", "data_cadastro")
+    list_filter = ("ativo",)
+    search_fields = ("codigo", "descricao")
+    readonly_fields = ("data_cadastro",)
+    inlines = [PrazoPagamentoParcelaInline]
+
+
+@admin.register(PrazoPagamentoParcela)
+class PrazoPagamentoParcelaAdmin(admin.ModelAdmin):
+    list_display = ("Idprazoparcela", "prazo", "ordem", "dias", "percentual", "data_cadastro")
+    list_filter = ("prazo",)
+    search_fields = ("prazo__codigo", "prazo__descricao")
     readonly_fields = ("data_cadastro",)
 
 

@@ -1565,6 +1565,22 @@ class PackViewSet(BaseViewSet):
     queryset = Pack.objects.all().order_by('-data_cadastro')
     serializer_class = PackSerializer
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        grade = self.request.query_params.get('grade')
+        ativo = self.request.query_params.get('ativo')
+        search = (self.request.query_params.get('search') or '').strip()
+        ordering = self.request.query_params.get('ordering')
+        if grade:
+            qs = qs.filter(grade_id=grade)
+        if ativo is not None and ativo != '':
+            qs = qs.filter(ativo=str(ativo).lower() in ('true', '1', 'sim'))
+        if search:
+            qs = qs.filter(nome__icontains=search)
+        if ordering:
+            qs = qs.order_by(ordering)
+        return qs
+
 
 class PackItemViewSet(BaseViewSet):
     queryset = PackItem.objects.all()

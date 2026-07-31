@@ -21,7 +21,7 @@ from .models import (
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     AntecipacaoRecebivel, AntecipacaoRecebivelItem,
-    FormaPagamento, FormaPagamentoParcela
+    FormaPagamento, FormaPagamentoParcela, PrazoPagamento, PrazoPagamentoParcela
 )
 from .serializers import (
     ConfigFinanceiraSerializer, TipoDespesaPdvSerializer,
@@ -32,7 +32,8 @@ from .serializers import (
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     AntecipacaoRecebivelSerializer,
-    FormaPagamentoSerializer, FormaPagamentoParcelaSerializer
+    FormaPagamentoSerializer, FormaPagamentoParcelaSerializer,
+    PrazoPagamentoSerializer, PrazoPagamentoParcelaSerializer
 )
 from .services import (
     estornar_lancamento_contabil_movimentacao,
@@ -208,6 +209,9 @@ class BaseViewSet(viewsets.ModelViewSet):
             conta = data.get(campo)
             if conta and getattr(conta, 'empresa_id', None) and conta.empresa_id != empresa_id:
                 raise ValidationError({campo: 'A conta bancária pertence a outra empresa.'})
+        prazo = data.get('prazo_pagamento') or data.get('prazo')
+        if prazo and getattr(prazo, 'empresa_id', None) and prazo.empresa_id != empresa_id:
+            raise ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
         natureza = data.get('Idnatureza')
         if natureza and getattr(natureza, 'empresa_id', None) and natureza.empresa_id != empresa_id:
             raise ValidationError({'Idnatureza': 'A natureza informada pertence a outra empresa.'})
@@ -264,6 +268,43 @@ class FormaPagamentoParcelaViewSet(BaseViewSet):
             qs = qs.filter(forma_id=forma)
         if codigo:
             qs = qs.filter(forma__codigo=codigo)
+        return qs
+
+
+class PrazoPagamentoViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = PrazoPagamento.objects.all().order_by('num_parcelas', 'codigo')
+    serializer_class = PrazoPagamentoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        codigo = self.request.query_params.get('codigo')
+        if ativo in ('true', 'false', '1', '0'):
+            qs = qs.filter(ativo=ativo in ('true', '1'))
+        if codigo:
+            qs = qs.filter(codigo=codigo)
+        return qs
+
+
+class PrazoPagamentoParcelaViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = PrazoPagamentoParcela.objects.select_related('prazo').all().order_by('prazo__codigo', 'ordem')
+    serializer_class = PrazoPagamentoParcelaSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        prazo = self.request.query_params.get('prazo')
+        codigo = self.request.query_params.get('codigo')
+        if empresa_id:
+            qs = qs.filter(prazo__empresa_id=empresa_id)
+        if prazo:
+            qs = qs.filter(prazo_id=prazo)
+        if codigo:
+            qs = qs.filter(prazo__codigo=codigo)
         return qs
 
 
@@ -1837,7 +1878,6 @@ class PagarItemViewSet(BaseViewSet):
             .filter(
                 empresa=titulo.empresa,
                 idloja=titulo.idloja,
-                tipo_caixa=Caixa.TIPO_LOJA,
                 ativo=True,
             )
             .order_by('Idcaixa')
@@ -2058,7 +2098,6 @@ class ReceberItemViewSet(BaseViewSet):
             .filter(
                 empresa=titulo.empresa,
                 idloja=titulo.idloja,
-                tipo_caixa=Caixa.TIPO_LOJA,
                 ativo=True,
             )
             .order_by('Idcaixa')

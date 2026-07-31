@@ -57,6 +57,8 @@ urlpatterns = [
     path('api/financeiro/', include('financeiro.urls')),
     path('api/compras/', include('compras.urls')),
     path('api/fiscal/', include('fiscal.urls')),
+    path('api/distribuicao/', include('distribuicao.urls')),
+    path('api/dashboard/', include('dashboard.urls')),
 
     # Documentacao (Swagger/Redoc)
     re_path(r"^api/schema(?P<format>\.json|\.yaml)$", schema_view.without_ui(cache_timeout=0), name="schema-json"),

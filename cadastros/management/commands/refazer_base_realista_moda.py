@@ -500,8 +500,13 @@ class Command(BaseCommand):
 
     def _plano_naturezas(self, empresa):
         contas = [
-            ("1.1.01", "Caixa Geral", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
-            ("1.1.02.001", "Banco Conta Movimento", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.01.001", "Caixa Loja Matriz", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.01.002", "Caixa Loja Filial", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.01.003", "Caixa Fabrica", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.01.004", "Caixa Master", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.02.001", "Conta Corrente Matriz", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.02.002", "Conta Corrente Filial", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
+            ("1.1.02.003", "Conta Corrente Fabrica", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
             ("1.1.03", "Clientes", PlanoContabil.CLASSE_ATIVO, PlanoContabil.NATUREZA_DEBITO),
             ("2.1.01", "Fornecedores", PlanoContabil.CLASSE_PASSIVO, PlanoContabil.NATUREZA_CREDITO),
             ("3.1.01", "Capital Social", PlanoContabil.CLASSE_PATRIMONIO, PlanoContabil.NATUREZA_CREDITO),
