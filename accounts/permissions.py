@@ -4,7 +4,7 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 ADMIN_TYPES = {"Admin", "Administrador"}
 
 APP_MODULE_MAP = {
-    "accounts": "configuracoes",
+    "accounts": "operacional",
     "auth": "configuracoes",
     "authtoken": "configuracoes",
     "cadastros": "cadastros",
@@ -13,6 +13,7 @@ APP_MODULE_MAP = {
     "compras": "compras",
     "financeiro": "financeiro",
     "relatorios": "relatorios",
+    "distribuicao": "distribuicao",
 }
 
 EMPRESA_FIELD_MODULE_MAP = {
@@ -24,7 +25,7 @@ EMPRESA_FIELD_MODULE_MAP = {
     "usa_producao": "producao",
     "usa_ficha_tecnica": "producao",
     "usa_faccao": "producao",
-    "usa_distribuicao_producao": "producao",
+    "usa_distribuicao_producao": "distribuicao",
 }
 
 

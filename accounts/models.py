@@ -33,10 +33,13 @@ class User(AbstractUser):
 
 class UserModulePermission(models.Model):
     class Module(models.TextChoices):
+        OPERACIONAL = "operacional", "Operacional"
         CADASTROS = "cadastros", "Cadastros"
         PRODUTOS = "produtos", "Produtos"
         FISCAL = "fiscal", "Fiscal"
+        FISCAL_CONTABIL = "fiscal_contabil", "Fiscal e Contábil"
         ESTOQUE = "estoque", "Estoque"
+        DISTRIBUICAO = "distribuicao", "Distribuição"
         VENDAS = "vendas", "Vendas"
         COMPRAS = "compras", "Compras"
         PRODUCAO = "producao", "Produção"

@@ -572,6 +572,31 @@ class OrdemProducaoSerializer(serializers.ModelSerializer):
     sku_ean = serializers.CharField(source='sku_final.ean13', read_only=True)
     sku_cor = serializers.CharField(source='sku_final.idcor.Descricao', read_only=True)
     sku_tamanho = serializers.CharField(source='sku_final.idtamanho.Tamanho', read_only=True)
+    distribuicao_id = serializers.SerializerMethodField()
+    distribuicao_numero = serializers.SerializerMethodField()
+    distribuicao_status = serializers.SerializerMethodField()
+
+    def _distribuicao_producao(self, obj):
+        from distribuicao.models import Distribuicao
+        return (
+            Distribuicao.objects
+            .filter(empresa=obj.empresa, origem_operacao=Distribuicao.ORIGEM_PRODUCAO, origem_id=obj.pk)
+            .exclude(status=Distribuicao.STATUS_CANCELADA)
+            .order_by('-id')
+            .first()
+        )
+
+    def get_distribuicao_id(self, obj):
+        dist = self._distribuicao_producao(obj)
+        return dist.pk if dist else None
+
+    def get_distribuicao_numero(self, obj):
+        dist = self._distribuicao_producao(obj)
+        return dist.numero if dist else None
+
+    def get_distribuicao_status(self, obj):
+        dist = self._distribuicao_producao(obj)
+        return dist.status if dist else None
 
     class Meta:
         model = OrdemProducao

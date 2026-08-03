@@ -238,7 +238,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         user = self.request.user
-        acesso = user_module_access(user, "configuracoes")
+        acesso = user_module_access(user, "operacional")
+        if acesso is None:
+            acesso = user_module_access(user, "configuracoes")
         if not user.is_superuser and (getattr(user, "type", None) != "Admin" or acesso not in {None, "EDIT"}):
             raise PermissionDenied("Somente administrador com acesso completo pode excluir usuários.")
         if not user.is_superuser and instance.empresa_id != getattr(user, "empresa_id", None):

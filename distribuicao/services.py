@@ -104,6 +104,124 @@ def buscar_skus_disponiveis(empresa_id, unidade_origem_id, search=""):
     return rows
 
 
+def loja_central_producao(empresa):
+    loja = (
+        Loja.objects
+        .filter(empresa=empresa, ativo=True, tipo_unidade=Loja.TIPO_FABRICA)
+        .order_by("id")
+        .first()
+    )
+    if loja:
+        return loja
+    loja = (
+        Loja.objects
+        .filter(empresa=empresa, ativo=True, tipo_unidade=Loja.TIPO_MATRIZ)
+        .order_by("id")
+        .first()
+    )
+    if loja:
+        return loja
+    loja = Loja.objects.filter(empresa=empresa, ativo=True, Matriz="SIM").order_by("id").first()
+    if loja:
+        return loja
+    loja = Loja.objects.filter(empresa=empresa, ativo=True).order_by("id").first()
+    if not loja:
+        raise ValidationError({"loja": "Cadastre uma fábrica ou matriz/estoque central ativo para distribuir a produção."})
+    return loja
+
+
+@transaction.atomic
+def preparar_distribuicao_producao(ordem, perfil=None, user=None):
+    from produto.models import OrdemProducao
+
+    if ordem.status != OrdemProducao.STATUS_FINALIZADA:
+        raise ValidationError("Somente OP finalizada pode seguir para distribuição.")
+
+    existente = (
+        Distribuicao.objects
+        .select_for_update()
+        .filter(
+            empresa=ordem.empresa,
+            origem_operacao=Distribuicao.ORIGEM_PRODUCAO,
+            origem_id=ordem.pk,
+        )
+        .exclude(status=Distribuicao.STATUS_CANCELADA)
+        .order_by("-id")
+        .first()
+    )
+    if existente:
+        if perfil and existente.status in {Distribuicao.STATUS_RASCUNHO, Distribuicao.STATUS_CALCULADA}:
+            aplicar_perfil(existente, perfil)
+            existente.refresh_from_db()
+        return existente
+
+    perfil = perfil or (
+        PerfilDistribuicao.objects
+        .filter(empresa=ordem.empresa, ativo=True)
+        .prefetch_related("itens")
+        .order_by("codigo", "id")
+        .first()
+    )
+    loja_origem = loja_central_producao(ordem.empresa)
+    distribuicao = Distribuicao.objects.create(
+        empresa=ordem.empresa,
+        numero=proximo_numero(Distribuicao, ordem.empresa_id, "DIST"),
+        unidade_origem=loja_origem,
+        data=timezone.localdate(),
+        perfil=perfil,
+        tipo=perfil.tipo if perfil else PerfilDistribuicao.TIPO_MANUAL,
+        fator_preco=perfil.fator_preco if perfil else Decimal("0.2000"),
+        origem_operacao=Distribuicao.ORIGEM_PRODUCAO,
+        origem_id=ordem.pk,
+        observacao=f"Distribuição gerada pela OP {ordem.numero}",
+        criado_por=user if getattr(user, "is_authenticated", False) else None,
+    )
+
+    estoques = {
+        est.CodigodeBarra: est
+        for est in Estoque.objects.filter(Idloja=loja_origem, CodigodeBarra__in=ordem.grade_producao.values_list("sku_final__ean13", flat=True))
+    }
+    for linha in ordem.grade_producao.select_related("sku_final", "sku_final__produto", "sku_final__idcor", "sku_final__idtamanho"):
+        sku = linha.sku_final
+        produto = sku.produto
+        estoque = estoques.get(sku.ean13)
+        qtd = decimal_qtd(linha.quantidade)
+        custo_unitario = (
+            sku.custo_medio
+            or sku.custo_ultima_compra
+            or sku.custo_original
+            or produto.custo_medio
+            or produto.custo_ultima_compra
+            or produto.custo_original
+            or (Decimal(ordem.custo_real or 0) / Decimal(ordem.quantidade or 1))
+            or Decimal("0")
+        )
+        custo_unitario = Decimal(custo_unitario or 0).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        DistribuicaoItem.objects.create(
+            distribuicao=distribuicao,
+            produto=produto,
+            sku=sku,
+            referencia=produto.referencia or "",
+            descricao=produto.descricao,
+            cor_descricao=getattr(sku.idcor, "Descricao", "") if sku.idcor_id else "",
+            tamanho_descricao=getattr(sku.idtamanho, "Tamanho", "") if sku.idtamanho_id else "",
+            ean13=sku.ean13,
+            estoque_fisico=decimal_qtd(estoque.Estoque if estoque else 0),
+            estoque_reservado=decimal_qtd(estoque.reserva if estoque else 0),
+            estoque_disponivel=qtd,
+            quantidade_selecionada=qtd,
+            custo_unitario=custo_unitario,
+            custo_total=decimal_money(qtd * custo_unitario),
+        )
+
+    if perfil:
+        aplicar_perfil(distribuicao, perfil)
+    else:
+        montar_matriz_manual(distribuicao)
+    distribuicao.refresh_from_db()
+    return distribuicao
+
+
 @transaction.atomic
 def carregar_estoque(distribuicao, search="", quantidade=None, manter_minimo=0):
     if distribuicao.status not in {Distribuicao.STATUS_RASCUNHO, Distribuicao.STATUS_CALCULADA}:

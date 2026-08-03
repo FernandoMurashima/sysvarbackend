@@ -1168,6 +1168,27 @@ class OrdemProducaoViewSet(BaseViewSet):
     @action(detail=True, methods=['post'], url_path='distribuir')
     @transaction.atomic
     def distribuir(self, request, pk=None):
+        from distribuicao.serializers import DistribuicaoSerializer
+        from distribuicao.services import preparar_distribuicao_producao
+        from distribuicao.models import PerfilDistribuicao
+
+        ordem = self.get_object()
+        perfil = None
+        perfil_id = request.data.get('perfil')
+        if perfil_id:
+            try:
+                perfil = PerfilDistribuicao.objects.get(pk=perfil_id, empresa=ordem.empresa, ativo=True)
+            except PerfilDistribuicao.DoesNotExist:
+                return Response({'detail': 'Perfil de distribuição não encontrado para esta empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            distribuicao = preparar_distribuicao_producao(ordem, perfil=perfil, user=request.user)
+            return Response(DistribuicaoSerializer(distribuicao).data, status=status.HTTP_200_OK)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='distribuir-direto-legado')
+    @transaction.atomic
+    def distribuir_direto_legado(self, request, pk=None):
         ordem = self.get_object()
         if ordem.status != OrdemProducao.STATUS_FINALIZADA:
             return Response({'detail': 'Somente OP finalizada pode ser distribuída.'}, status=status.HTTP_400_BAD_REQUEST)
