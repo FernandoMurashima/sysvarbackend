@@ -125,6 +125,7 @@ def _natureza_taxa_antecipacao(empresa):
 
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "financeiro"
     read_roles = ["Admin", "Diretor", "Gerente"]
     write_roles = ["Admin", "Diretor", "Gerente"]
 

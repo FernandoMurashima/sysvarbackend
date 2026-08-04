@@ -1,4 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+from accounts.services.effective_access import EDIT, NONE, VIEW, EffectiveAccessService
 
 
 ADMIN_TYPES = {"Admin", "Administrador"}
@@ -63,13 +64,7 @@ def module_keys_for_read(view):
 
 
 def user_module_access(user, modulo):
-    if not user or not user.is_authenticated or not modulo:
-        return None
-    try:
-        perm = user.module_permissions.filter(modulo=modulo).only("acesso").first()
-    except Exception:
-        return None
-    return perm.acesso if perm else None
+    return EffectiveAccessService(user).module_access(modulo)
 
 
 def can_delete_in_module(user, modulo):
@@ -77,10 +72,7 @@ def can_delete_in_module(user, modulo):
         return False
     if user.is_superuser:
         return True
-    if user_type(user) not in ADMIN_TYPES:
-        return False
-    acesso = user_module_access(user, modulo)
-    return acesso in {None, "EDIT"}
+    return user_module_access(user, modulo) == EDIT
 
 
 def has_field_permission(user, campo, default_roles=None):
@@ -101,52 +93,7 @@ class HasModuleRole(BasePermission):
     message = "Usuário sem permissão para acessar este módulo."
 
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        if request.user.is_superuser:
-            return True
-
-        if request.method in SAFE_METHODS:
-            read_keys = module_keys_for_read(view)
-            if read_keys:
-                acessos = [user_module_access(request.user, key) for key in read_keys]
-                acessos_definidos = [acesso for acesso in acessos if acesso is not None]
-                if acessos_definidos:
-                    if any(acesso in {"VIEW", "EDIT"} for acesso in acessos_definidos):
-                        read_roles = getattr(view, "read_roles", None)
-                        return has_role(request.user, read_roles) if read_roles is not None else True
-                    return False
-
-        modulo = module_key_for_view(view)
-        acesso = user_module_access(request.user, modulo)
-        if acesso is not None:
-            if acesso == "NONE":
-                return False
-            if request.method in SAFE_METHODS:
-                return acesso in {"VIEW", "EDIT"}
-            if request.method == "DELETE":
-                return can_delete_in_module(request.user, modulo)
-            if acesso == "EDIT":
-                return True
-            action_roles = getattr(view, "action_roles", {}) or {}
-            action = getattr(view, "action", None)
-            if action in action_roles:
-                return has_role(request.user, action_roles[action])
-            return False
-
-        action_roles = getattr(view, "action_roles", {}) or {}
-        action = getattr(view, "action", None)
-        if action in action_roles:
-            return has_role(request.user, action_roles[action])
-
-        read_roles = getattr(view, "read_roles", None)
-        write_roles = getattr(view, "write_roles", None)
-        roles = read_roles if request.method in SAFE_METHODS else write_roles
-        if roles is None:
-            roles = getattr(view, "allowed_roles", None)
-        if request.method == "DELETE":
-            return has_role(request.user, ADMIN_TYPES) and has_role(request.user, roles)
-        return has_role(request.user, roles)
+        return HasEffectiveModuleAccess().has_permission(request, view)
 
 
 class HasEmpresaModulo(BasePermission):
@@ -166,4 +113,64 @@ class HasEmpresaModulo(BasePermission):
         empresa = getattr(user, "empresa", None)
         if not empresa:
             return False
-        return getattr(empresa, campo, False) is True
+        modulo = EMPRESA_FIELD_MODULE_MAP.get(campo)
+        return EffectiveAccessService(user).module_access(modulo) != NONE
+
+
+class HasActiveCompanyContract(BasePermission):
+    message = "Contrato da empresa inválido."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        return EffectiveAccessService(user).contract_state().active
+
+
+class HasEffectiveModuleAccess(BasePermission):
+    message = "Usuário sem permissão efetiva para acessar este módulo."
+
+    def required_modules(self, view, request):
+        modules = getattr(view, "required_modules", None)
+        if modules:
+            return [m for m in modules if m]
+        module = getattr(view, "required_module", None) or module_key_for_view(view)
+        return [module] if module else []
+
+    def required_access(self, view, request):
+        action_map = getattr(view, "action_required_access", {}) or {}
+        action = getattr(view, "action", None)
+        if action in action_map:
+            return action_map[action]
+        if request.method in SAFE_METHODS:
+            return getattr(view, "read_access", VIEW)
+        return getattr(view, "write_access", EDIT)
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        service = EffectiveAccessService(user)
+        modules = self.required_modules(view, request)
+        if not modules:
+            return user.is_superuser
+        return service.has_module_access(modules, self.required_access(view, request))
+
+
+class CanManageCompanyUsers(BasePermission):
+    message = "Usuário sem permissão para administrar usuários."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        service = EffectiveAccessService(user)
+        return service.is_company_master() or service.has_module_access("configuracoes", EDIT)
+
+
+class CanManageAccessProfiles(CanManageCompanyUsers):
+    message = "Usuário sem permissão para administrar perfis."

@@ -9,6 +9,7 @@ from fiscal.serializers import RegraTributariaSerializer, TributoSerializer
 
 class EmpresaScopedFiscalViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "fiscal"
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
     write_roles = ["Admin", "Diretor", "Gerente"]
 

@@ -1,4 +1,5 @@
 # auditoria/signals.py
+from django.db import connection
 from django.db.models.signals import pre_save, post_save, pre_delete
 from django.dispatch import receiver
 from django.forms.models import model_to_dict
@@ -13,6 +14,8 @@ ALLOWED_APPS = {"cadastros", "produto"}  # adicione outros apps quando quiser
 
 def _safe_create_audit(**payload):
     try:
+        if AuditLog._meta.db_table not in connection.introspection.table_names():
+            return
         AuditLog.objects.create(**payload)
     except Exception:
         # A auditoria nao pode impedir migracoes, testes ou a operacao principal.

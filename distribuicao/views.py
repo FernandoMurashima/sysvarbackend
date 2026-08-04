@@ -47,6 +47,7 @@ from .services import (
 
 class BaseDistribuicaoViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "distribuicao"
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
     write_roles = ["Admin", "Diretor", "Gerente"]
 

@@ -7,6 +7,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from accounts.permissions import HasEffectiveModuleAccess
 
 from auditoria.models import AuditLog
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
@@ -92,7 +93,8 @@ def period_datetimes(start, end):
 
 
 class DashboardExecutivoView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasEffectiveModuleAccess]
+    required_module = "relatorios"
 
     def get(self, request):
         if not self._can_view(request.user):
@@ -485,6 +487,7 @@ class DashboardExecutivoView(APIView):
 
 
 class DashboardProdutosView(DashboardExecutivoView):
+    required_modules = ["relatorios", "produtos"]
     def get(self, request):
         if not self._can_view(request.user):
             self._audit(request, "dashboard_produtos_negado", False)
@@ -760,6 +763,7 @@ class DashboardProdutosView(DashboardExecutivoView):
 
 
 class DashboardVendasView(DashboardProdutosView):
+    required_modules = ["relatorios", "vendas"]
     def get(self, request):
         if not self._can_view(request.user) and not request.user.has_perm("dashboard.visualizar_vendas"):
             raise PermissionDenied("Usuário sem permissão para acessar este dashboard.")
@@ -876,6 +880,7 @@ class DashboardVendasView(DashboardProdutosView):
 
 
 class DashboardEstoqueView(DashboardProdutosView):
+    required_modules = ["relatorios", "estoque"]
     def get(self, request):
         if not self._can_view(request.user) and not request.user.has_perm("dashboard.visualizar_estoque"):
             raise PermissionDenied("Usuário sem permissão para acessar este dashboard.")
@@ -1174,6 +1179,7 @@ class DashboardEstoqueView(DashboardProdutosView):
 
 
 class DashboardFinanceiroView(DashboardExecutivoView):
+    required_modules = ["relatorios", "financeiro"]
     def get(self, request):
         if not self._can_view(request.user):
             self._audit(request, "dashboard_financeiro_negado", False)

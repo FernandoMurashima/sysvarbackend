@@ -1465,6 +1465,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
 class NFCeViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "fiscal"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente"]
     serializer_class = NFCeSerializer
@@ -1501,6 +1502,7 @@ class NFCeViewSet(viewsets.ModelViewSet):
 
 class VendaDevolucaoViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "vendas"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     serializer_class = VendaDevolucaoSerializer

@@ -1,8 +1,12 @@
+from django.contrib.auth import get_user_model
 from rest_framework import viewsets, permissions, filters
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.db.models import ProtectedError
 from django_filters.rest_framework import DjangoFilterBackend
 from accounts.permissions import HasModuleRole
+from accounts.services.effective_access import MasterTransferService
 
 from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
 from .serializers import (
@@ -15,9 +19,12 @@ from .serializers import (
     PlanoContabilSerializer,
 )
 
+User = get_user_model()
+
 
 class BaseCadastroViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "cadastros"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "AssistenteReceber", "AssistentePagar", "Auxiliar", "Assistente", "Regular"]
     write_roles = ["Admin", "Diretor", "Gerente"]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -74,6 +81,7 @@ class BaseCadastroViewSet(viewsets.ModelViewSet):
 
 
 class EmpresaViewSet(BaseCadastroViewSet):
+    required_module = "operacional"
     queryset = Empresa.objects.all()
     serializer_class = EmpresaSerializer
     read_roles = ["Admin", "Diretor", "Gerente"]
@@ -109,8 +117,22 @@ class EmpresaViewSet(BaseCadastroViewSet):
         self._exigir_superusuario()
         instance.delete()
 
+    @action(detail=True, methods=["post"], url_path="transferir-master")
+    def transferir_master(self, request, pk=None):
+        empresa = self.get_object()
+        user_id = request.data.get("usuario_master") or request.data.get("novo_master_id") or request.data.get("user_id")
+        if not user_id:
+            raise ValidationError({"usuario_master": "Informe o novo usuário master."})
+        try:
+            new_master = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            raise ValidationError({"usuario_master": "Usuário não encontrado."})
+        contrato = MasterTransferService(request.user, empresa, new_master, request).transfer()
+        return Response({"empresa": empresa.pk, "usuario_master": contrato.usuario_master_id})
+
 
 class LojaViewSet(BaseCadastroViewSet):
+    required_module = "operacional"
     queryset = Loja.objects.select_related("empresa").all()
     serializer_class = LojaSerializer
 
@@ -181,6 +203,7 @@ class FuncionariosViewSet(BaseCadastroViewSet):
 
 
 class PlanoContabilViewSet(BaseCadastroViewSet):
+    required_module = "fiscal"
     queryset = PlanoContabil.objects.select_related("empresa", "conta_pai").all()
     serializer_class = PlanoContabilSerializer
     read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
@@ -195,6 +218,7 @@ class NatLancamentoViewSet(viewsets.ModelViewSet):
     queryset = Nat_Lancamento.objects.all().order_by("codigo")
     serializer_class = NatLancamentoSerializer
     permission_classes = [HasModuleRole]
+    required_module = "financeiro"
     read_roles = ["Admin", "Diretor", "Gerente", "AssistenteReceber", "AssistentePagar"]
     write_roles = ["Admin", "Diretor"]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]

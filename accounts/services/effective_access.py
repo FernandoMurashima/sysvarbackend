@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+from rest_framework.exceptions import PermissionDenied, ValidationError
+
+from cadastros.models import EmpresaContrato, EmpresaModulo, ModuloSistema
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+
+
+NONE = UserModulePermission.Access.NONE
+VIEW = UserModulePermission.Access.VIEW
+EDIT = UserModulePermission.Access.EDIT
+BASIC_MODULES = {"operacional", "cadastros", "produtos", "configuracoes"}
+COMMERCIAL_MODULES = {"vendas", "compras", "estoque", "financeiro", "fiscal", "producao", "distribuicao", "relatorios"}
+
+
+@dataclass(frozen=True)
+class ContractState:
+    active: bool
+    reason: str = ""
+
+
+def audit_event(action, request=None, user=None, model="security", object_id="", changes=None):
+    try:
+        from auditoria.models import AuditLog
+
+        req_user = user or getattr(request, "user", None)
+        AuditLog.objects.create(
+            action=action,
+            app_label="accounts",
+            model=model,
+            object_id=str(object_id or ""),
+            changes=changes or {},
+            user=req_user if getattr(req_user, "is_authenticated", False) else None,
+            ip=(getattr(request, "META", {}) or {}).get("REMOTE_ADDR", "")[:45] if request else "",
+            user_agent=(getattr(request, "META", {}) or {}).get("HTTP_USER_AGENT", "")[:400] if request else "",
+        )
+    except Exception:
+        pass
+
+
+def increment_permissions_version(empresa):
+    try:
+        contrato = empresa.contrato
+    except EmpresaContrato.DoesNotExist:
+        return
+    contrato.incrementar_versao()
+
+
+class CompanyModuleService:
+    def __init__(self, empresa):
+        self.empresa = empresa
+
+    def contract(self):
+        try:
+            return self.empresa.contrato
+        except EmpresaContrato.DoesNotExist:
+            return None
+
+    def contract_state(self) -> ContractState:
+        if not self.empresa:
+            return ContractState(False, "Usuário sem empresa vinculada.")
+        if not self.empresa.ativo:
+            return ContractState(False, "Empresa inativa.")
+        contrato = self.contract()
+        if not contrato:
+            return ContractState(False, "Empresa sem contrato.")
+        today = timezone.localdate()
+        if contrato.status != EmpresaContrato.STATUS_ATIVO:
+            return ContractState(False, f"Contrato {contrato.get_status_display().lower()}.")
+        if contrato.data_inicio and contrato.data_inicio > today:
+            return ContractState(False, "Contrato ainda não iniciado.")
+        if contrato.data_fim and contrato.data_fim < today:
+            return ContractState(False, "Contrato vencido.")
+        if contrato.limite_usuarios < 1:
+            return ContractState(False, "Contrato sem licenças.")
+        return ContractState(True, "")
+
+    def available_module_keys(self) -> set[str]:
+        state = self.contract_state()
+        if not state.active:
+            return set()
+        contrato = self.contract()
+        keys = set(
+            ModuloSistema.objects.filter(ativo=True, basico=True).values_list("chave", flat=True)
+        )
+        if contrato and contrato.plano_completo:
+            keys.update(
+                ModuloSistema.objects.filter(ativo=True, basico=False, categoria=ModuloSistema.CATEGORIA_COMERCIAL)
+                .values_list("chave", flat=True)
+            )
+            return keys
+        today = timezone.localdate()
+        contratados = (
+            EmpresaModulo.objects
+            .filter(empresa=self.empresa, contratado=True, modulo__ativo=True)
+            .filter(Q(data_inicio__isnull=True) | Q(data_inicio__lte=today))
+            .filter(Q(data_fim__isnull=True) | Q(data_fim__gte=today))
+        )
+        keys.update(contratados.values_list("modulo__chave", flat=True))
+        return keys
+
+    def module_available(self, module_key: str) -> bool:
+        return module_key in self.available_module_keys()
+
+
+class LicenseService:
+    def __init__(self, empresa):
+        self.empresa = empresa
+
+    def usage(self):
+        contrato = self.empresa.contrato
+        used = self.empresa.usuarios.filter(is_active=True, is_superuser=False).count()
+        limit = int(contrato.limite_usuarios or 0)
+        return {
+            "limite_usuarios": limit,
+            "usuarios_ativos": used,
+            "licencas_disponiveis": max(0, limit - used),
+            "excedido": used > limit,
+        }
+
+    def assert_can_consume(self):
+        contrato = EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
+        used = self.empresa.usuarios.select_for_update().filter(is_active=True, is_superuser=False).count()
+        if used >= int(contrato.limite_usuarios or 0):
+            raise ValidationError({"licencas": "Limite de licenças atingido."})
+        return contrato
+
+
+class EffectiveAccessService:
+    def __init__(self, user):
+        self.user = user
+        self._available = None
+        self._contract_state = None
+
+    def contract_state(self) -> ContractState:
+        if self._contract_state is not None:
+            return self._contract_state
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            self._contract_state = ContractState(False, "Usuário não autenticado.")
+        elif user.is_superuser:
+            self._contract_state = ContractState(True, "")
+        elif not user.is_active:
+            self._contract_state = ContractState(False, "Usuário inativo.")
+        elif not user.empresa_id:
+            self._contract_state = ContractState(False, "Usuário sem empresa vinculada.")
+        else:
+            self._contract_state = CompanyModuleService(user.empresa).contract_state()
+        return self._contract_state
+
+    def available_modules(self) -> set[str]:
+        if self.user and self.user.is_superuser:
+            return set(ModuloSistema.objects.filter(ativo=True).values_list("chave", flat=True))
+        if self._available is None:
+            self._available = CompanyModuleService(self.user.empresa).available_module_keys() if getattr(self.user, "empresa_id", None) else set()
+        return self._available
+
+    def is_company_master(self) -> bool:
+        user = self.user
+        if not user or user.is_superuser or not getattr(user, "empresa_id", None):
+            return False
+        try:
+            contrato = user.empresa.contrato
+        except EmpresaContrato.DoesNotExist:
+            return False
+        return contrato.usuario_master_id == user.id and user.is_active
+
+    def module_access(self, module_key: str | None):
+        if not module_key:
+            return NONE
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            return NONE
+        if user.is_superuser:
+            return EDIT
+        if not self.contract_state().active:
+            return NONE
+        if module_key not in self.available_modules():
+            return NONE
+        if self.is_company_master():
+            return EDIT
+        override = user.module_permissions.filter(modulo=module_key).only("acesso").first()
+        if override:
+            return override.acesso
+        perfil = getattr(user, "perfil_principal", None)
+        if not perfil or not perfil.ativo:
+            return NONE
+        perm = PerfilModuloPermissao.objects.filter(perfil=perfil, modulo__chave=module_key).select_related("modulo").first()
+        return perm.acesso if perm else NONE
+
+    def has_module_access(self, module_keys: str | Iterable[str], required=VIEW):
+        keys = [module_keys] if isinstance(module_keys, str) else list(module_keys or [])
+        if not keys:
+            return False
+        for key in keys:
+            access = self.module_access(key)
+            if required == EDIT and access != EDIT:
+                return False
+            if required == VIEW and access not in {VIEW, EDIT}:
+                return False
+        return True
+
+    def allowed_store_ids(self):
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            return []
+        if user.is_superuser:
+            return None
+        ids = set(user.lojas.values_list("id", flat=True))
+        if user.loja_id:
+            ids.add(user.loja_id)
+        return sorted(ids)
+
+    def can_access_store(self, loja):
+        user = self.user
+        if user.is_superuser:
+            return True
+        if not loja or loja.empresa_id != user.empresa_id:
+            return False
+        allowed = self.allowed_store_ids()
+        return allowed is None or loja.id in allowed
+
+    def effective_permissions_payload(self):
+        return {key: self.module_access(key) for key in sorted(self.available_modules())}
+
+    def session_payload(self):
+        user = self.user
+        contrato = None
+        if getattr(user, "empresa_id", None):
+            try:
+                c = user.empresa.contrato
+                usage = LicenseService(user.empresa).usage()
+                contrato = {
+                    "status": c.status,
+                    "data_inicio": c.data_inicio,
+                    "data_fim": c.data_fim,
+                    "limite_usuarios": c.limite_usuarios,
+                    "usuarios_ativos": usage["usuarios_ativos"],
+                    "licencas_disponiveis": usage["licencas_disponiveis"],
+                    "excedido": usage["excedido"],
+                    "plano_completo": c.plano_completo,
+                    "permissions_version": c.permissions_version,
+                }
+            except EmpresaContrato.DoesNotExist:
+                contrato = None
+        return {
+            "is_platform_superuser": bool(getattr(user, "is_superuser", False)),
+            "is_company_master": self.is_company_master(),
+            "contrato": contrato,
+            "loja_principal": {
+                "id": user.loja_id,
+                "nome_loja": getattr(user.loja, "nome_loja", None),
+                "apelido_loja": getattr(user.loja, "apelido_loja", None),
+            } if getattr(user, "loja_id", None) else None,
+            "perfil_principal": {
+                "id": user.perfil_principal_id,
+                "nome": getattr(user.perfil_principal, "nome", None),
+            } if getattr(user, "perfil_principal_id", None) else None,
+            "permissoes_administrativas": {
+                "usuarios_gerenciar": self.is_company_master() or self.has_module_access("operacional", EDIT),
+                "perfis_gerenciar": self.is_company_master() or self.has_module_access("configuracoes", EDIT),
+            },
+            "modulos_disponiveis_empresa": sorted(self.available_modules()) if getattr(user, "is_authenticated", False) else [],
+            "permissoes_efetivas": self.effective_permissions_payload() if getattr(user, "is_authenticated", False) else {},
+            "lojas_permitidas": list(user.lojas.values("id", "nome_loja", "apelido_loja")) if getattr(user, "is_authenticated", False) and not user.is_superuser else [],
+        }
+
+
+class MasterTransferService:
+    def __init__(self, actor, empresa, new_master, request=None):
+        self.actor = actor
+        self.empresa = empresa
+        self.new_master = new_master
+        self.request = request
+
+    def transfer(self):
+        with transaction.atomic():
+            contrato = EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
+            if not (self.actor.is_superuser or contrato.usuario_master_id == self.actor.id):
+                audit_event("master_transfer_denied", self.request, self.actor, "empresa", self.empresa.pk)
+                raise PermissionDenied("Somente superusuário ou master atual pode transferir o master.")
+            if self.new_master.empresa_id != self.empresa.id or not self.new_master.is_active or self.new_master.is_superuser:
+                raise ValidationError({"usuario_master": "Novo master inválido para esta empresa."})
+            old = contrato.usuario_master_id
+            contrato.usuario_master = self.new_master
+            contrato.incrementar_versao(save=False)
+            contrato.save(update_fields=["usuario_master", "permissions_version", "updated_at"])
+            audit_event("master_transfer", self.request, self.actor, "empresa", self.empresa.pk, {"old": old, "new": self.new_master.pk})
+            return contrato
+
+
+class ProfileDefaultService:
+    def __init__(self, actor, perfil, request=None):
+        self.actor = actor
+        self.perfil = perfil
+        self.request = request
+
+    def assert_can_manage(self):
+        if self.actor.is_superuser:
+            return
+        if self.perfil.empresa_id != getattr(self.actor, "empresa_id", None):
+            raise PermissionDenied("Perfil pertence a outra empresa.")
+        access = EffectiveAccessService(self.actor)
+        if not access.is_company_master() and not access.has_module_access("configuracoes", EDIT):
+            raise PermissionDenied("Sem permissão para gerenciar perfis.")
+
+    def set_default(self):
+        self.assert_can_manage()
+        with transaction.atomic():
+            perfil = PerfilAcesso.objects.select_for_update().select_related("empresa").get(pk=self.perfil.pk)
+            if not perfil.ativo:
+                raise ValidationError({"padrao": "Perfil inativo não pode ser definido como padrão."})
+            PerfilAcesso.objects.select_for_update().filter(
+                empresa=perfil.empresa,
+                ativo=True,
+                padrao=True,
+            ).exclude(pk=perfil.pk).update(padrao=False)
+            if not perfil.padrao:
+                perfil.padrao = True
+                perfil.save(update_fields=["padrao", "updated_at"])
+            increment_permissions_version(perfil.empresa)
+            audit_event("profile_set_default", self.request, self.actor, "perfil_acesso", perfil.pk)
+            return perfil

@@ -66,6 +66,7 @@ def _q4(value):
 
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "produtos"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "Auxiliar", "Assistente", "Regular"]
     write_roles = ["Admin", "Diretor", "Gerente"]
 
@@ -558,6 +559,7 @@ class TabelaprecoProdutoViewSet(BaseViewSet):
 class FichaTecnicaViewSet(BaseViewSet):
     permission_classes = [HasModuleRole, HasEmpresaModulo]
     empresa_modulo_field = 'usa_ficha_tecnica'
+    required_module = "producao"
     queryset = FichaTecnica.objects.select_related('empresa', 'produto_final').prefetch_related('itens').order_by('-data_cadastro')
     serializer_class = FichaTecnicaSerializer
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
@@ -610,6 +612,7 @@ class FichaTecnicaViewSet(BaseViewSet):
 class FichaTecnicaItemViewSet(BaseViewSet):
     permission_classes = [HasModuleRole, HasEmpresaModulo]
     empresa_modulo_field = 'usa_ficha_tecnica'
+    required_module = "producao"
     queryset = FichaTecnicaItem.objects.select_related('ficha', 'produto', 'fornecedor', 'unidade').order_by('ordem', 'id')
     serializer_class = FichaTecnicaItemSerializer
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
@@ -638,6 +641,7 @@ class FichaTecnicaItemViewSet(BaseViewSet):
 class OrdemProducaoViewSet(BaseViewSet):
     permission_classes = [HasModuleRole, HasEmpresaModulo]
     empresa_modulo_field = 'usa_producao'
+    required_module = "producao"
     queryset = (
         OrdemProducao.objects
         .select_related('empresa', 'ficha_tecnica', 'produto_final', 'sku_final', 'sku_final__idcor', 'sku_final__idtamanho')
@@ -1424,6 +1428,7 @@ class OrdemProducaoViewSet(BaseViewSet):
 class OrdemProducaoItemViewSet(BaseViewSet):
     permission_classes = [HasModuleRole, HasEmpresaModulo]
     empresa_modulo_field = 'usa_producao'
+    required_module = "producao"
     queryset = OrdemProducaoItem.objects.select_related('ordem', 'produto', 'fornecedor', 'unidade', 'ficha_item')
     serializer_class = OrdemProducaoItemSerializer
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
@@ -1624,6 +1629,7 @@ class PackItemViewSet(BaseViewSet):
 
 
 class EstoqueViewSet(BaseViewSet):
+    required_module = "estoque"
     queryset = Estoque.objects.all()
     serializer_class = EstoqueSerializer
 
@@ -1662,6 +1668,7 @@ class EstoqueViewSet(BaseViewSet):
 
 
 class EstoqueMovimentacaoViewSet(BaseViewSet):
+    required_module = "estoque"
     queryset = EstoqueMovimentacao.objects.all()
     serializer_class = EstoqueMovimentacaoSerializer
 
@@ -1728,6 +1735,7 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
 
 
 class InventarioEstoqueViewSet(BaseViewSet):
+    required_module = "estoque"
     queryset = InventarioEstoque.objects.all()
     serializer_class = InventarioEstoqueSerializer
 
@@ -1840,6 +1848,7 @@ class InventarioEstoqueViewSet(BaseViewSet):
 
 
 class InventarioEstoqueItemViewSet(BaseViewSet):
+    required_module = "estoque"
     queryset = InventarioEstoqueItem.objects.all()
     serializer_class = InventarioEstoqueItemSerializer
 

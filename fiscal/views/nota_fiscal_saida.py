@@ -12,6 +12,7 @@ from distribuicao.services import autorizar_nota_distribuicao
 class NotaFiscalSaidaViewSet(viewsets.ModelViewSet):
     serializer_class = NotaFiscalSaidaSerializer
     permission_classes = [HasModuleRole]
+    required_module = "fiscal"
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
     write_roles = ["Admin", "Diretor", "Gerente"]
     queryset = NotaFiscalSaida.objects.select_related("empresa", "loja_origem", "loja_destino", "ordem_producao").prefetch_related("itens")
@@ -56,6 +57,7 @@ class NotaFiscalSaidaViewSet(viewsets.ModelViewSet):
 class NotaFiscalSaidaItemViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotaFiscalSaidaItemSerializer
     permission_classes = [HasModuleRole]
+    required_module = "fiscal"
     queryset = NotaFiscalSaidaItem.objects.select_related("nota", "produto", "sku")
 
     def get_queryset(self):

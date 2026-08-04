@@ -1,9 +1,21 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import UserViewSet, TokenLoginView, TokenLogoutView
+from .views import (
+    EmpresaContratoViewSet,
+    EmpresaModuloViewSet,
+    ModuloSistemaViewSet,
+    PerfilAcessoViewSet,
+    UserViewSet,
+    TokenLoginView,
+    TokenLogoutView,
+)
 
 router = DefaultRouter()
 router.register(r"users", UserViewSet, basename="users")
+router.register(r"modulos", ModuloSistemaViewSet, basename="modulos")
+router.register(r"contratos", EmpresaContratoViewSet, basename="contratos")
+router.register(r"empresa-modulos", EmpresaModuloViewSet, basename="empresa-modulos")
+router.register(r"perfis", PerfilAcessoViewSet, basename="perfis")
 
 urlpatterns = [
     path("", include(router.urls)),

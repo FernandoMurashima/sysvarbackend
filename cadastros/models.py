@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -31,6 +33,8 @@ class Empresa(models.Model):
     nome_fantasia = models.CharField(max_length=120, null=True, blank=True, db_index=True)
     documento = models.CharField(max_length=18, null=True, blank=True, unique=True)
     ativo = models.BooleanField(default=True, db_index=True)
+    plano_completo = models.BooleanField(default=False, db_index=True)
+    # Legado: este campo representava plano completo, nunca usuário master.
     licenca_master = models.BooleanField(default=False, db_index=True)
     usa_vendas = models.BooleanField(default=False, db_index=True)
     usa_compras = models.BooleanField(default=False, db_index=True)
@@ -74,7 +78,9 @@ class Empresa(models.Model):
         return self.nome_fantasia or self.nome
 
     def save(self, *args, **kwargs):
-        if self.licenca_master:
+        if self.licenca_master and not self.plano_completo:
+            self.plano_completo = True
+        if self.plano_completo:
             self.usa_vendas = True
             self.usa_compras = True
             self.usa_estoque = True
@@ -90,6 +96,147 @@ class Empresa(models.Model):
             self.usa_faccao = False
             self.usa_distribuicao_producao = False
         super().save(*args, **kwargs)
+
+
+class ModuloSistema(models.Model):
+    CATEGORIA_BASICO = "BASICO"
+    CATEGORIA_COMERCIAL = "COMERCIAL"
+    CATEGORIA_INTERNO = "INTERNO"
+    CATEGORIA_CHOICES = [
+        (CATEGORIA_BASICO, "Básico"),
+        (CATEGORIA_COMERCIAL, "Comercial"),
+        (CATEGORIA_INTERNO, "Interno"),
+    ]
+
+    chave = models.CharField(max_length=40, unique=True, db_index=True)
+    nome = models.CharField(max_length=80)
+    descricao = models.TextField(blank=True, default="")
+    categoria = models.CharField(max_length=20, choices=CATEGORIA_CHOICES, db_index=True)
+    basico = models.BooleanField(default=False, db_index=True)
+    ativo = models.BooleanField(default=True, db_index=True)
+    ordem = models.PositiveSmallIntegerField(default=0, db_index=True)
+    dependencias = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["ordem", "nome"]
+        indexes = [
+            models.Index(fields=["chave"]),
+            models.Index(fields=["basico", "ativo"]),
+        ]
+
+    def __str__(self):
+        return f"{self.chave} - {self.nome}"
+
+
+class EmpresaContrato(models.Model):
+    STATUS_PENDENTE = "PENDENTE"
+    STATUS_ATIVO = "ATIVO"
+    STATUS_SUSPENSO = "SUSPENSO"
+    STATUS_VENCIDO = "VENCIDO"
+    STATUS_CANCELADO = "CANCELADO"
+    STATUS_CHOICES = [
+        (STATUS_PENDENTE, "Pendente"),
+        (STATUS_ATIVO, "Ativo"),
+        (STATUS_SUSPENSO, "Suspenso"),
+        (STATUS_VENCIDO, "Vencido"),
+        (STATUS_CANCELADO, "Cancelado"),
+    ]
+
+    empresa = models.OneToOneField(Empresa, on_delete=models.PROTECT, related_name="contrato")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDENTE, db_index=True)
+    data_inicio = models.DateField(default=timezone.localdate, db_index=True)
+    data_fim = models.DateField(null=True, blank=True, db_index=True)
+    limite_usuarios = models.PositiveIntegerField(default=1)
+    plano_completo = models.BooleanField(default=False, db_index=True)
+    usuario_master = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="empresas_master",
+    )
+    observacoes = models.TextField(blank=True, default="")
+    permissions_version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "data_inicio", "data_fim"]),
+            models.Index(fields=["plano_completo"]),
+        ]
+
+    def __str__(self):
+        return f"Contrato {self.empresa_id} - {self.status}"
+
+    def clean(self):
+        if self.status == self.STATUS_ATIVO and self.limite_usuarios < 1:
+            raise ValidationError({"limite_usuarios": "Contrato ativo exige pelo menos uma licença."})
+        if self.data_fim and self.data_inicio and self.data_fim < self.data_inicio:
+            raise ValidationError({"data_fim": "A data final não pode ser anterior à data inicial."})
+        if self.usuario_master_id:
+            if self.usuario_master.is_superuser:
+                raise ValidationError({"usuario_master": "Superusuário interno não pode ser master de cliente."})
+            if not self.usuario_master.is_active:
+                raise ValidationError({"usuario_master": "Usuário master deve estar ativo."})
+            if self.usuario_master.empresa_id != self.empresa_id:
+                raise ValidationError({"usuario_master": "Usuário master deve pertencer à empresa."})
+
+    @property
+    def ativo_no_periodo(self):
+        hoje = timezone.localdate()
+        return (
+            self.empresa.ativo
+            and self.status == self.STATUS_ATIVO
+            and self.data_inicio <= hoje
+            and (self.data_fim is None or self.data_fim >= hoje)
+        )
+
+    @property
+    def usuarios_ativos(self):
+        return self.empresa.usuarios.filter(is_active=True, is_superuser=False).count()
+
+    @property
+    def licencas_disponiveis(self):
+        return max(0, int(self.limite_usuarios or 0) - self.usuarios_ativos)
+
+    @property
+    def excedido(self):
+        return self.usuarios_ativos > int(self.limite_usuarios or 0)
+
+    def incrementar_versao(self, save=True):
+        self.permissions_version = int(self.permissions_version or 0) + 1
+        if save:
+            self.save(update_fields=["permissions_version", "updated_at"])
+        return self.permissions_version
+
+
+class EmpresaModulo(models.Model):
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="modulos_contratados")
+    modulo = models.ForeignKey(ModuloSistema, on_delete=models.PROTECT, related_name="empresas_modulo")
+    contratado = models.BooleanField(default=False, db_index=True)
+    data_inicio = models.DateField(null=True, blank=True, db_index=True)
+    data_fim = models.DateField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "modulo"], name="uq_empresa_modulo")
+        ]
+        indexes = [
+            models.Index(fields=["empresa", "contratado"]),
+            models.Index(fields=["data_inicio", "data_fim"]),
+        ]
+
+    def __str__(self):
+        return f"{self.empresa_id} - {self.modulo.chave}: {self.contratado}"
+
+    def clean(self):
+        if self.modulo.basico and not self.contratado:
+            return
+        if self.data_fim and self.data_inicio and self.data_fim < self.data_inicio:
+            raise ValidationError({"data_fim": "A data final não pode ser anterior à data inicial."})
 
 
 class Loja(models.Model):

@@ -1,7 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from cadastros.models import Empresa, Loja
-from .models import UserModulePermission, UserFieldPermission
+from django.db import transaction
+from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
+from accounts.services.effective_access import EffectiveAccessService, LicenseService, increment_permissions_version
+from .models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission, UserFieldPermission
 
 User = get_user_model()
 
@@ -30,6 +32,7 @@ class EmpresaMiniSerializer(serializers.ModelSerializer):
             "id", "nome", "nome_fantasia",
             "licenca_master", "usa_vendas", "usa_compras", "usa_estoque", "usa_financeiro",
             "usa_fiscal", "usa_producao", "usa_ficha_tecnica", "usa_faccao", "usa_distribuicao_producao",
+            "plano_completo",
         )
 
 
@@ -43,6 +46,12 @@ class UserFieldPermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserFieldPermission
         fields = ("campo", "pode_ver")
+
+
+class PerfilMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerfilAcesso
+        fields = ("id", "nome", "descricao", "ativo", "padrao")
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -64,6 +73,11 @@ class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     permissoes_modulos = UserModulePermissionSerializer(source="module_permissions", many=True, required=False)
     permissoes_campos = UserFieldPermissionSerializer(source="field_permissions", many=True, required=False)
+    perfil_principal = PerfilMiniSerializer(read_only=True)
+    perfil_principal_id = serializers.PrimaryKeyRelatedField(
+        source="perfil_principal", queryset=PerfilAcesso.objects.filter(ativo=True), allow_null=True, required=False
+    )
+    permissoes_efetivas_detalhadas = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -76,17 +90,21 @@ class UserSerializer(serializers.ModelSerializer):
             self.fields["Idempresa"].queryset = Empresa.objects.filter(pk=empresa_id)
             self.fields["Idloja"].queryset = Loja.objects.filter(empresa_id=empresa_id)
             self.fields["Idlojas"].queryset = Loja.objects.filter(empresa_id=empresa_id)
+            self.fields["perfil_principal_id"].queryset = PerfilAcesso.objects.filter(empresa_id=empresa_id, ativo=True)
         else:
             self.fields["Idempresa"].queryset = Empresa.objects.none()
             self.fields["Idloja"].queryset = Loja.objects.none()
             self.fields["Idlojas"].queryset = Loja.objects.none()
+            self.fields["perfil_principal_id"].queryset = PerfilAcesso.objects.none()
 
     class Meta:
         model = User
         fields = (
             "id", "username", "email", "first_name", "last_name",
             "type", "Idempresa", "empresa", "Idloja", "loja", "Idlojas", "lojas",
+            "perfil_principal", "perfil_principal_id",
             "permissoes_modulos", "permissoes_campos",
+            "permissoes_efetivas_detalhadas",
             "is_active", "is_staff", "is_superuser", "date_joined",
             "password",
         )
@@ -99,6 +117,7 @@ class UserSerializer(serializers.ModelSerializer):
         empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         loja = attrs.get("loja", getattr(self.instance, "loja", None))
         lojas = attrs.get("lojas", None)
+        perfil = attrs.get("perfil_principal", getattr(self.instance, "perfil_principal", None))
         if request_user and request_user.is_authenticated and not request_user.is_superuser:
             user_empresa = getattr(request_user, "empresa", None)
             if not user_empresa:
@@ -111,6 +130,8 @@ class UserSerializer(serializers.ModelSerializer):
                 })
             attrs["empresa"] = user_empresa
             empresa = user_empresa
+            if "is_staff" in self.initial_data or "is_superuser" in self.initial_data:
+                raise serializers.ValidationError("Usuário cliente não pode alterar campos internos.")
         if not empresa and not getattr(self.instance, "is_superuser", False):
             raise serializers.ValidationError({
                 "Idempresa": "Vincule este usuário a uma empresa."
@@ -136,47 +157,98 @@ class UserSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({
                         "Idlojas": "Todas as lojas permitidas devem pertencer à empresa do usuário."
                     })
+        if perfil:
+            if not empresa or perfil.empresa_id != empresa.id:
+                raise serializers.ValidationError({"perfil_principal_id": "Perfil pertence a outra empresa."})
+            if not perfil.ativo:
+                raise serializers.ValidationError({"perfil_principal_id": "Perfil inativo não pode ser atribuído."})
+        if self.instance and EffectiveAccessService(self.instance).is_company_master() and request_user and not request_user.is_superuser:
+            protected = {"empresa", "perfil_principal", "is_active", "module_permissions"}
+            if any(key in attrs for key in protected) or "is_active" in self.initial_data:
+                raise serializers.ValidationError("Transfira o master antes de alterar empresa, perfil, permissões ou status deste usuário.")
+        if not getattr(self.instance, "is_superuser", False) and tipo != User.Type.ADMIN:
+            if request_user and request_user.is_authenticated and not EffectiveAccessService(request_user).is_company_master() and perfil is None:
+                raise serializers.ValidationError({"perfil_principal_id": "Usuário comum deve possuir perfil principal."})
         return attrs
+
+    def get_permissoes_efetivas_detalhadas(self, obj):
+        if not obj.empresa_id:
+            return []
+        available = sorted(EffectiveAccessService(obj).available_modules())
+        profile_perms = {}
+        if obj.perfil_principal_id:
+            profile_perms = {
+                p.modulo.chave: p.acesso
+                for p in obj.perfil_principal.permissoes_modulos.select_related("modulo").all()
+            }
+        overrides = {p.modulo: p.acesso for p in obj.module_permissions.all()}
+        effective = EffectiveAccessService(obj)
+        return [
+            {
+                "modulo": key,
+                "perfil": profile_perms.get(key, UserModulePermission.Access.NONE),
+                "override": overrides.get(key),
+                "efetivo": effective.module_access(key),
+            }
+            for key in available
+        ]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+        if not password:
+            raise serializers.ValidationError({"password": "Senha inicial é obrigatória."})
         lojas = validated_data.pop("lojas", [])
         permissoes_modulos = validated_data.pop("module_permissions", [])
         permissoes_campos = validated_data.pop("field_permissions", [])
-        user = User(**validated_data)
-        if password:
+        with transaction.atomic():
+            if validated_data.get("is_active", True) and validated_data.get("empresa") and not validated_data.get("is_superuser", False):
+                LicenseService(validated_data["empresa"]).assert_can_consume()
+            user = User(**validated_data)
             user.set_password(password)
-        else:
-            # senha padrão se não for enviada (opcional)
-            user.set_password(User.objects.make_random_password())
-        user.save()
-        if lojas:
-            user.lojas.set(lojas)
-        elif user.loja_id:
-            user.lojas.set([user.loja])
-        self._salvar_permissoes(user, permissoes_modulos, permissoes_campos)
+            user.save()
+            if lojas:
+                user.lojas.set(lojas)
+            elif user.loja_id:
+                user.lojas.set([user.loja])
+            self._salvar_permissoes(user, permissoes_modulos, permissoes_campos)
+            if user.empresa_id:
+                increment_permissions_version(user.empresa)
         return user
 
     def update(self, instance, validated_data):
+        if instance.empresa_id:
+            service = EffectiveAccessService(self.context.get("request").user) if self.context.get("request") else None
+            if service and service.is_company_master() and instance.id == self.context["request"].user.id and "perfil_principal" in validated_data:
+                raise serializers.ValidationError("Usuário não pode alterar seu próprio perfil.")
         password = validated_data.pop("password", None)
         lojas = validated_data.pop("lojas", None)
         permissoes_modulos = validated_data.pop("module_permissions", None)
         permissoes_campos = validated_data.pop("field_permissions", None)
+        was_active = instance.is_active
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        if password:
-            instance.set_password(password)
-        instance.save()
-        if lojas is not None:
-            instance.lojas.set(lojas)
-        elif instance.loja_id and not instance.lojas.filter(pk=instance.loja_id).exists():
-            instance.lojas.add(instance.loja)
-        self._salvar_permissoes(instance, permissoes_modulos, permissoes_campos)
+        with transaction.atomic():
+            if not was_active and instance.is_active and instance.empresa_id and not instance.is_superuser:
+                LicenseService(instance.empresa).assert_can_consume()
+            if password:
+                instance.set_password(password)
+            instance.save()
+            if lojas is not None:
+                instance.lojas.set(lojas)
+            elif instance.loja_id and not instance.lojas.filter(pk=instance.loja_id).exists():
+                instance.lojas.add(instance.loja)
+            self._salvar_permissoes(instance, permissoes_modulos, permissoes_campos)
+            if instance.empresa_id:
+                increment_permissions_version(instance.empresa)
         return instance
 
     def _salvar_permissoes(self, user, permissoes_modulos, permissoes_campos):
+        available = EffectiveAccessService(user).available_modules() if user.empresa_id else set()
         if permissoes_modulos is not None:
             recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos}
+            invalidos = [modulo for modulo in recebidos if modulo not in available and not user.is_superuser]
+            if invalidos:
+                raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {', '.join(invalidos)}"})
             UserModulePermission.objects.filter(user=user).exclude(modulo__in=recebidos.keys()).delete()
             for modulo, acesso in recebidos.items():
                 UserModulePermission.objects.update_or_create(
@@ -193,3 +265,121 @@ class UserSerializer(serializers.ModelSerializer):
                     campo=campo,
                     defaults={"pode_ver": pode_ver},
                 )
+
+
+class ModuloSistemaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuloSistema
+        fields = ("id", "chave", "nome", "descricao", "categoria", "basico", "ativo", "ordem", "dependencias")
+        read_only_fields = fields
+
+
+class EmpresaContratoSerializer(serializers.ModelSerializer):
+    usuarios_ativos = serializers.IntegerField(read_only=True)
+    licencas_disponiveis = serializers.IntegerField(read_only=True)
+    excedido = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = EmpresaContrato
+        fields = (
+            "id", "empresa", "status", "data_inicio", "data_fim", "limite_usuarios",
+            "plano_completo", "usuario_master", "observacoes", "permissions_version",
+            "usuarios_ativos", "licencas_disponiveis", "excedido", "created_at", "updated_at",
+        )
+        read_only_fields = ("permissions_version", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        data_inicio = attrs.get("data_inicio", getattr(self.instance, "data_inicio", None))
+        data_fim = attrs.get("data_fim", getattr(self.instance, "data_fim", None))
+        if data_inicio and data_fim and data_fim < data_inicio:
+            raise serializers.ValidationError({"data_fim": "A data final não pode ser anterior à inicial."})
+        if attrs.get("status", getattr(self.instance, "status", None)) == EmpresaContrato.STATUS_ATIVO and int(attrs.get("limite_usuarios", getattr(self.instance, "limite_usuarios", 0)) or 0) < 1:
+            raise serializers.ValidationError({"limite_usuarios": "Contrato ativo exige pelo menos uma licença."})
+        return attrs
+
+
+class EmpresaModuloSerializer(serializers.ModelSerializer):
+    modulo_chave = serializers.CharField(source="modulo.chave", read_only=True)
+    modulo_nome = serializers.CharField(source="modulo.nome", read_only=True)
+
+    class Meta:
+        model = EmpresaModulo
+        fields = ("id", "empresa", "modulo", "modulo_chave", "modulo_nome", "contratado", "data_inicio", "data_fim", "created_at", "updated_at")
+        read_only_fields = ("created_at", "updated_at")
+
+
+class PerfilModuloPermissaoSerializer(serializers.ModelSerializer):
+    modulo_chave = serializers.CharField(source="modulo.chave", read_only=True)
+    modulo_nome = serializers.CharField(source="modulo.nome", read_only=True)
+
+    class Meta:
+        model = PerfilModuloPermissao
+        fields = ("id", "modulo", "modulo_chave", "modulo_nome", "acesso")
+
+
+class PerfilAcessoSerializer(serializers.ModelSerializer):
+    permissoes_modulos = PerfilModuloPermissaoSerializer(many=True, required=False)
+    usuarios_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PerfilAcesso
+        fields = ("id", "empresa", "nome", "descricao", "ativo", "padrao", "usuarios_count", "permissoes_modulos", "created_at", "updated_at")
+        read_only_fields = ("created_at", "updated_at")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and not user.is_superuser and getattr(user, "empresa_id", None):
+            self.fields["empresa"].queryset = Empresa.objects.filter(pk=user.empresa_id)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and not user.is_superuser:
+            attrs["empresa"] = user.empresa
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        padrao = attrs.get("padrao", getattr(self.instance, "padrao", False))
+        ativo = attrs.get("ativo", getattr(self.instance, "ativo", True))
+        if empresa and padrao and ativo:
+            qs = PerfilAcesso.objects.filter(empresa=empresa, padrao=True, ativo=True)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"padrao": "Já existe um perfil padrão ativo para esta empresa. Use definir-padrao."})
+        return attrs
+
+    def _save_perms(self, perfil, perms):
+        if perms is None:
+            return
+        available = CompanyModuleKeys(perfil.empresa)
+        received = {item["modulo"].id: item for item in perms}
+        PerfilModuloPermissao.objects.filter(perfil=perfil).exclude(modulo_id__in=received.keys()).delete()
+        for modulo_id, item in received.items():
+            modulo = item["modulo"]
+            acesso = item.get("acesso") or UserModulePermission.Access.NONE
+            if modulo.chave not in available and acesso != UserModulePermission.Access.NONE:
+                raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {modulo.chave}"})
+            PerfilModuloPermissao.objects.update_or_create(perfil=perfil, modulo=modulo, defaults={"acesso": acesso})
+        increment_permissions_version(perfil.empresa)
+
+    def create(self, validated_data):
+        perms = validated_data.pop("permissoes_modulos", None)
+        perfil = PerfilAcesso.objects.create(**validated_data)
+        self._save_perms(perfil, perms)
+        return perfil
+
+    def update(self, instance, validated_data):
+        perms = validated_data.pop("permissoes_modulos", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        self._save_perms(instance, perms)
+        increment_permissions_version(instance.empresa)
+        return instance
+
+
+def CompanyModuleKeys(empresa):
+    from accounts.services.effective_access import CompanyModuleService
+
+    return CompanyModuleService(empresa).available_module_keys()

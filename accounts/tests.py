@@ -7,6 +7,9 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
+from cadastros.models import EmpresaContrato, ModuloSistema
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+from accounts.services.effective_access import EffectiveAccessService
 from compras.models import PedidoCompra
 from financeiro.models import Caixa, ContaBancaria, LancamentoContabil, MovimentacaoFinanceira, Pagar, Receber
 from fiscal.models import VendaPdv
@@ -32,8 +35,8 @@ class MultiEmpresaIsolationTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
-        self.empresa_a = Empresa.objects.create(nome="Empresa Isolamento A", documento="11111111000191")
-        self.empresa_b = Empresa.objects.create(nome="Empresa Isolamento B", documento="22222222000102")
+        self.empresa_a = Empresa.objects.create(nome="Empresa Isolamento A", documento="11111111000191", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Isolamento B", documento="22222222000102", plano_completo=True)
         self.user_a = self._user("admin_a", self.empresa_a)
         self.user_b = self._user("admin_b", self.empresa_b)
         self.ctx_a = self._contexto_empresa(self.empresa_a, "A", "11111111000191")
@@ -284,3 +287,110 @@ class MultiEmpresaIsolationTests(TestCase):
                 self._assert_isolado(url, proprio, outra_empresa)
 
 # Create your tests here.
+
+
+class SaaSAccessControlTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa SaaS", documento="55555555000155", plano_completo=True)
+        self.master = get_user_model().objects.create_user(
+            username="master_saas",
+            password="12345678",
+            type="Admin",
+            empresa=self.empresa,
+        )
+        self.operacional = ModuloSistema.objects.get(chave="operacional")
+        self.config = ModuloSistema.objects.get(chave="configuracoes")
+        self.vendas = ModuloSistema.objects.get(chave="vendas")
+        self.perfil_padrao = PerfilAcesso.objects.create(empresa=self.empresa, nome="Operador", padrao=True)
+        PerfilModuloPermissao.objects.create(perfil=self.perfil_padrao, modulo=self.operacional, acesso=UserModulePermission.Access.VIEW)
+        PerfilModuloPermissao.objects.create(perfil=self.perfil_padrao, modulo=self.config, acesso=UserModulePermission.Access.NONE)
+
+    def test_login_bloqueia_contrato_suspenso(self):
+        contrato = self.empresa.contrato
+        contrato.status = EmpresaContrato.STATUS_SUSPENSO
+        contrato.save(update_fields=["status", "updated_at"])
+
+        response = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Contrato suspenso", str(response.data))
+
+    def test_limite_licenca_bloqueia_criacao_usuario_ativo(self):
+        contrato = self.empresa.contrato
+        contrato.limite_usuarios = 1
+        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        self.client.force_authenticate(self.master)
+
+        response = self.client.post(
+            "/api/accounts/users/",
+            {
+                "username": "novo_usuario",
+                "password": "12345678",
+                "type": "Regular",
+                "Idempresa": self.empresa.pk,
+                "perfil_principal_id": self.perfil_padrao.pk,
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Limite de licenças atingido", str(response.data))
+
+    def test_perfil_padrao_deve_ser_unico_por_empresa_via_endpoint(self):
+        outro = PerfilAcesso.objects.create(empresa=self.empresa, nome="Outro", padrao=False)
+        self.client.force_authenticate(self.master)
+
+        response = self.client.post(f"/api/accounts/perfis/{outro.pk}/definir-padrao/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PerfilAcesso.objects.get(pk=outro.pk).padrao)
+        self.assertFalse(PerfilAcesso.objects.get(pk=self.perfil_padrao.pk).padrao)
+
+    def test_crud_comum_nao_inativa_master(self):
+        self.client.force_authenticate(self.master)
+
+        response = self.client.patch(f"/api/accounts/users/{self.master.pk}/", {"is_active": False}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.master.refresh_from_db()
+        self.assertTrue(self.master.is_active)
+
+    def test_transferencia_master_por_endpoint_empresa(self):
+        novo = get_user_model().objects.create_user(
+            username="novo_master",
+            password="12345678",
+            type="Admin",
+            empresa=self.empresa,
+        )
+        contrato = self.empresa.contrato
+        contrato.limite_usuarios = 5
+        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        self.client.force_authenticate(self.master)
+
+        response = self.client.post(
+            f"/api/cadastros/empresas/{self.empresa.pk}/transferir-master/",
+            {"novo_master_id": novo.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.empresa.contrato.refresh_from_db()
+        self.assertEqual(self.empresa.contrato.usuario_master_id, novo.pk)
+
+    def test_permissao_efetiva_usa_perfil_e_override(self):
+        user = get_user_model().objects.create_user(
+            username="operador_saas",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        UserModulePermission.objects.create(user=user, modulo="operacional", acesso=UserModulePermission.Access.EDIT)
+
+        access = EffectiveAccessService(user)
+
+        self.assertEqual(access.module_access("operacional"), UserModulePermission.Access.EDIT)
+        self.assertEqual(access.module_access("configuracoes"), UserModulePermission.Access.NONE)
+        self.assertEqual(access.module_access("vendas"), UserModulePermission.Access.NONE)

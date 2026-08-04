@@ -77,6 +77,7 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "
 
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
+    required_module = "compras"
     read_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
 

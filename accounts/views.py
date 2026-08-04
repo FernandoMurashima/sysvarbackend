@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.http import JsonResponse
-from rest_framework import viewsets, permissions
+from django.db.models import Count
+from rest_framework import viewsets, permissions, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -9,25 +10,24 @@ from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 
-from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 
 from auditoria.models import AuditLog
-from .permissions import user_module_access
-from .serializers import TIPOS_EXIGEM_LOJA, UserSerializer
+from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version
+from .permissions import CanManageAccessProfiles, CanManageCompanyUsers
+from .serializers import (
+    EmpresaContratoSerializer,
+    EmpresaModuloSerializer,
+    ModuloSistemaSerializer,
+    PerfilAcessoSerializer,
+    UserSerializer,
+)
+from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, ModuloSistema
+from .models import PerfilAcesso
 
 User = get_user_model()
 
 
-class CanManageCompanyUsers(permissions.BasePermission):
-    message = "Usuário sem permissão para administrar usuários."
-
-    def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        return user.is_superuser or getattr(user, "type", None) == "Admin"
 
 # ---- Health (público) ----
 @api_view(["GET"])
@@ -37,126 +37,14 @@ def health(request):
 
 # ---- Register legado (bloqueado para uso público) ----
 class RegisterView(APIView):
-    permission_classes = [CanManageCompanyUsers]
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
-        data = request.data or {}
-        username = (data.get("username") or "").strip()
-        password = (data.get("password") or "").strip()
-        email = (data.get("email") or "").strip()
-        first_name = (data.get("first_name") or "").strip()
-        last_name = (data.get("last_name") or "").strip()
-        user_type = (data.get("type") or "Regular").strip()
-
-        if not username or not password:
-            return Response({"error": "username e password são obrigatórios."}, status=400)
-
-        allowed_types = {
-            "Regular",
-            "Vendedor",
-            "Caixa",
-            "Gerente",
-            "Diretor",
-            "Admin",
-            "Auxiliar",
-            "Assistente",
-            "AssistenteReceber",
-            "AssistentePagar",
-        }
-        if user_type not in allowed_types:
-            user_type = "Regular"
-
-        if User.objects.filter(username=username).exists():
-            return Response({"error": "username já existe."}, status=400)
-
-        loja_key = data.get("Idloja") or data.get("loja") or data.get("loja_id")
-        empresa_key = data.get("Idempresa") or data.get("empresa") or data.get("empresa_id")
-        lojas_keys = data.get("Idlojas") or data.get("lojas") or []
-        if user_type in TIPOS_EXIGEM_LOJA and not loja_key:
-            return Response({"Idloja": ["Vincule este usuário a uma filial ou matriz."]}, status=400)
-
-        user = User(
-            username=username,
-            email=email or None,
-            first_name=first_name,
-            last_name=last_name,
-        )
-        # se seu User tiver campo 'type', define:
-        try:
-            setattr(user, "type", user_type)
-        except Exception:
-            pass
-
-        user.set_password(password)
-        user.save()
-
-        # vincular loja, se enviada
-        if loja_key:
-            try:
-                from cadastros.models import Loja  # evita import circular
-                loja = Loja.objects.get(pk=int(loja_key))
-                user.loja = loja
-                user.empresa = loja.empresa
-                user.save(update_fields=["loja", "empresa"])
-                user.lojas.add(loja)
-            except Exception:
-                pass
-        elif empresa_key:
-            try:
-                from cadastros.models import Empresa
-                user.empresa = Empresa.objects.get(pk=int(empresa_key))
-                user.save(update_fields=["empresa"])
-            except Exception:
-                pass
-        if isinstance(lojas_keys, list) and lojas_keys:
-            try:
-                from cadastros.models import Loja
-                qs = Loja.objects.filter(pk__in=[int(pk) for pk in lojas_keys])
-                if user.empresa_id:
-                    qs = qs.filter(empresa_id=user.empresa_id)
-                user.lojas.set(qs)
-                if user.loja_id and not user.lojas.filter(pk=user.loja_id).exists():
-                    user.lojas.add(user.loja)
-            except Exception:
-                pass
-
-        token, _ = Token.objects.get_or_create(user=user)
-
-        # auditoria (login não, apenas criação de usuário)
-        try:
-            AuditLog.objects.create(
-                action="create",
-                app_label="accounts",
-                model="user",
-                object_id=str(user.pk),
-                changes={"username": user.username, "type": getattr(user, "type", None)},
-                user=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
-                ip=(request.META.get("REMOTE_ADDR") or "")[:45],
-                user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:400],
-            )
-        except Exception:
-            pass
-
-        return Response(
-            {
-                "message": "Usuário criado com sucesso.",
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "type": getattr(user, "type", "Regular"),
-                    "Idempresa": getattr(user, "empresa_id", None),
-                    "empresa_nome": getattr(getattr(user, "empresa", None), "nome", None),
-                    "Idloja": getattr(user, "loja_id", None),
-                    "loja_nome": getattr(getattr(user, "loja", None), "nome_loja", None),
-                    "Idlojas": list(user.lojas.values_list("id", flat=True)),
-                },
-                "token": token.key,
-            },
-            status=201,
-        )
+        serializer = UserSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        audit_event("legacy_register_user", request, request.user, "user", user.pk, {"username": user.username})
+        return Response({"message": "Usuário criado com sucesso.", "user": UserSerializer(user, context={"request": request}).data}, status=201)
 
 # ---- Login (público) → token ----
 class TokenLoginView(APIView):
@@ -166,6 +54,13 @@ class TokenLoginView(APIView):
         serializer = AuthTokenSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
+        if not user.is_superuser:
+            access = EffectiveAccessService(user)
+            state = access.contract_state()
+            if not state.active:
+                return Response({"non_field_errors": [state.reason or "Acesso indisponível."]}, status=400)
+            if not access.is_company_master() and not getattr(user, "perfil_principal_id", None):
+                return Response({"non_field_errors": ["Usuário sem perfil de acesso."]}, status=400)
         token, created = Token.objects.get_or_create(user=user)
 
         # auditoria
@@ -183,7 +78,7 @@ class TokenLoginView(APIView):
         except Exception:
             pass
 
-        return Response({"token": token.key, "user": UserSerializer(user).data})
+        return Response({"token": token.key, "user": UserSerializer(user).data | EffectiveAccessService(user).session_payload()})
 
 # ---- Logout (autenticado) → revoga todos os tokens do usuário ----
 class TokenLogoutView(APIView):
@@ -238,21 +133,162 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         user = self.request.user
-        acesso = user_module_access(user, "operacional")
-        if acesso is None:
-            acesso = user_module_access(user, "configuracoes")
-        if not user.is_superuser and (getattr(user, "type", None) != "Admin" or acesso not in {None, "EDIT"}):
-            raise PermissionDenied("Somente administrador com acesso completo pode excluir usuários.")
+        if not user.is_superuser:
+            raise PermissionDenied("Usuários de empresas devem ser inativados, não excluídos.")
         if not user.is_superuser and instance.empresa_id != getattr(user, "empresa_id", None):
             raise PermissionDenied("Você só pode excluir usuários da sua empresa.")
+        if EffectiveAccessService(instance).is_company_master():
+            raise PermissionDenied("Transfira o master antes de excluir este usuário.")
         instance.delete()
+
+    @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="ativar")
+    def ativar(self, request, pk=None):
+        user = self.get_object()
+        serializer = self.get_serializer(user, data={"is_active": True}, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        Token.objects.filter(user=user).delete()
+        audit_event("user_activate", request, request.user, "user", user.pk)
+        return Response(self.get_serializer(user).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="inativar")
+    def inativar(self, request, pk=None):
+        user = self.get_object()
+        if EffectiveAccessService(user).is_company_master():
+            raise PermissionDenied("Transfira o master antes de inativar este usuário.")
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        Token.objects.filter(user=user).delete()
+        if user.empresa_id:
+            increment_permissions_version(user.empresa)
+        audit_event("user_deactivate", request, request.user, "user", user.pk)
+        return Response(self.get_serializer(user).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="desativar")
+    def desativar(self, request, pk=None):
+        return self.inativar(request, pk=pk)
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):
         serializer = self.get_serializer(request.user)
-        return Response(serializer.data)
+        return Response(serializer.data | EffectiveAccessService(request.user).session_payload())
 
 class UserMeView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user).data | EffectiveAccessService(request.user).session_payload())
+
+
+class ModuloSistemaViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ModuloSistema.objects.all().order_by("ordem", "nome")
+    serializer_class = ModuloSistemaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class EmpresaContratoViewSet(viewsets.ModelViewSet):
+    queryset = EmpresaContrato.objects.select_related("empresa", "usuario_master").all()
+    serializer_class = EmpresaContratoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.is_superuser:
+            return qs
+        empresa_id = getattr(self.request.user, "empresa_id", None)
+        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        obj.incrementar_versao()
+        audit_event("contract_update", self.request, self.request.user, "contrato", obj.pk)
+
+    @action(detail=True, methods=["post"], url_path="transferir-master")
+    def transferir_master(self, request, pk=None):
+        contrato = self.get_object()
+        user_id = request.data.get("usuario_master") or request.data.get("user_id")
+        new_master = User.objects.get(pk=user_id)
+        MasterTransferService(request.user, contrato.empresa, new_master, request).transfer()
+        return Response(self.get_serializer(contrato).data)
+
+
+class EmpresaModuloViewSet(viewsets.ModelViewSet):
+    queryset = EmpresaModulo.objects.select_related("empresa", "modulo").all()
+    serializer_class = EmpresaModuloSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.is_superuser:
+            return qs
+        empresa_id = getattr(self.request.user, "empresa_id", None)
+        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        from accounts.services.effective_access import increment_permissions_version
+        increment_permissions_version(obj.empresa)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        from accounts.services.effective_access import increment_permissions_version
+        increment_permissions_version(obj.empresa)
+
+
+class PerfilAcessoViewSet(viewsets.ModelViewSet):
+    queryset = PerfilAcesso.objects.annotate(usuarios_count=Count("usuarios")).prefetch_related("permissoes_modulos__modulo")
+    serializer_class = PerfilAcessoSerializer
+    permission_classes = [CanManageAccessProfiles]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.is_superuser:
+            return qs
+        empresa_id = getattr(self.request.user, "empresa_id", None)
+        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+
+    @action(detail=True, methods=["post"], url_path="duplicar")
+    def duplicar(self, request, pk=None):
+        perfil = self.get_object()
+        novo = PerfilAcesso.objects.create(
+            empresa=perfil.empresa,
+            nome=request.data.get("nome") or f"{perfil.nome} (cópia)",
+            descricao=perfil.descricao,
+            ativo=True,
+            padrao=False,
+        )
+        for perm in perfil.permissoes_modulos.all():
+            novo.permissoes_modulos.create(modulo=perm.modulo, acesso=perm.acesso)
+        return Response(self.get_serializer(novo).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="definir-padrao")
+    def definir_padrao(self, request, pk=None):
+        perfil = self.get_object()
+        perfil = ProfileDefaultService(request.user, perfil, request).set_default()
+        return Response(self.get_serializer(perfil).data)
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        perfil = self.get_object()
+        perfil.ativo = True
+        perfil.save(update_fields=["ativo", "updated_at"])
+        increment_permissions_version(perfil.empresa)
+        audit_event("profile_activate", request, request.user, "perfil_acesso", perfil.pk)
+        return Response(self.get_serializer(perfil).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        perfil = self.get_object()
+        if perfil.padrao:
+            raise PermissionDenied("Defina outro perfil padrão antes de inativar este perfil.")
+        if perfil.usuarios.filter(is_active=True).exists():
+            raise PermissionDenied("Perfil em uso por usuários ativos não pode ser inativado.")
+        perfil.ativo = False
+        perfil.save(update_fields=["ativo", "updated_at"])
+        increment_permissions_version(perfil.empresa)
+        audit_event("profile_deactivate", request, request.user, "perfil_acesso", perfil.pk)
+        return Response(self.get_serializer(perfil).data)
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        increment_permissions_version(instance.empresa)
+        audit_event("profile_delete", self.request, self.request.user, "perfil_acesso", instance.pk)

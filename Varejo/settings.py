@@ -43,8 +43,8 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
 
     # Apps do projeto
-    'cadastros',
-    'accounts',
+    'cadastros.apps.CadastrosConfig',
+    'accounts.apps.AccountsConfig',
     'auditoria',
     'produto',
     'financeiro',
@@ -167,7 +167,7 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_PAGINATION_CLASS': 'Varejo.pagination.DefaultPageNumberPagination',
-    'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.TokenAuthentication'],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['accounts.authentication.CompanyTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'PAGE_SIZE': 25,
 }

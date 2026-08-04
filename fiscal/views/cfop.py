@@ -9,6 +9,7 @@ from fiscal.serializers import CfopSerializer
 class CfopViewSet(viewsets.ModelViewSet):
     serializer_class = CfopSerializer
     permission_classes = [HasModuleRole]
+    required_module = "fiscal"
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar"]
     write_roles = ["Admin", "Diretor", "Gerente"]
     queryset = Cfop.objects.all().order_by("codigo")
