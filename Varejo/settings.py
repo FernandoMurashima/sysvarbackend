@@ -188,3 +188,4 @@ LOGGING = {
 }
 
 AUTH_USER_MODEL = 'accounts.User'
+SESSION_IDLE_TIMEOUT_MINUTES = config('SESSION_IDLE_TIMEOUT_MINUTES', cast=int, default=30)

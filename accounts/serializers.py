@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
 from accounts.services.effective_access import EffectiveAccessService, LicenseService, increment_permissions_version
-from .models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission, UserFieldPermission
+from .models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission, UserFieldPermission
 
 User = get_user_model()
 
@@ -201,8 +201,6 @@ class UserSerializer(serializers.ModelSerializer):
         permissoes_modulos = validated_data.pop("module_permissions", [])
         permissoes_campos = validated_data.pop("field_permissions", [])
         with transaction.atomic():
-            if validated_data.get("is_active", True) and validated_data.get("empresa") and not validated_data.get("is_superuser", False):
-                LicenseService(validated_data["empresa"]).assert_can_consume()
             user = User(**validated_data)
             user.set_password(password)
             user.save()
@@ -228,8 +226,6 @@ class UserSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         with transaction.atomic():
-            if not was_active and instance.is_active and instance.empresa_id and not instance.is_superuser:
-                LicenseService(instance.empresa).assert_can_consume()
             if password:
                 instance.set_password(password)
             instance.save()
@@ -277,11 +273,15 @@ class EmpresaContratoSerializer(serializers.ModelSerializer):
     usuarios_ativos = serializers.IntegerField(read_only=True)
     licencas_disponiveis = serializers.IntegerField(read_only=True)
     excedido = serializers.BooleanField(read_only=True)
+    sessoes_ativas = serializers.IntegerField(read_only=True)
+    sessoes_disponiveis = serializers.IntegerField(read_only=True)
+    limite_excedido = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = EmpresaContrato
         fields = (
             "id", "empresa", "status", "data_inicio", "data_fim", "limite_usuarios",
+            "limite_sessoes_simultaneas", "sessoes_ativas", "sessoes_disponiveis", "limite_excedido",
             "plano_completo", "usuario_master", "observacoes", "permissions_version",
             "usuarios_ativos", "licencas_disponiveis", "excedido", "created_at", "updated_at",
         )
@@ -292,8 +292,8 @@ class EmpresaContratoSerializer(serializers.ModelSerializer):
         data_fim = attrs.get("data_fim", getattr(self.instance, "data_fim", None))
         if data_inicio and data_fim and data_fim < data_inicio:
             raise serializers.ValidationError({"data_fim": "A data final não pode ser anterior à inicial."})
-        if attrs.get("status", getattr(self.instance, "status", None)) == EmpresaContrato.STATUS_ATIVO and int(attrs.get("limite_usuarios", getattr(self.instance, "limite_usuarios", 0)) or 0) < 1:
-            raise serializers.ValidationError({"limite_usuarios": "Contrato ativo exige pelo menos uma licença."})
+        if attrs.get("status", getattr(self.instance, "status", None)) == EmpresaContrato.STATUS_ATIVO and int(attrs.get("limite_sessoes_simultaneas", getattr(self.instance, "limite_sessoes_simultaneas", 0)) or 0) < 1:
+            raise serializers.ValidationError({"limite_sessoes_simultaneas": "Contrato ativo exige pelo menos uma sessão simultânea."})
         return attrs
 
 
@@ -337,6 +337,7 @@ class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
         fields = (
             "id", "empresa", "empresa_id", "status", "data_inicio", "data_fim",
             "limite_usuarios", "usuarios_ativos", "licencas_disponiveis", "excedido",
+            "limite_sessoes_simultaneas", "sessoes_ativas", "sessoes_disponiveis", "limite_excedido",
             "excedente", "plano_completo", "usuario_master", "usuario_master_id",
             "permissions_version", "observacoes", "modulos_contratados", "warning",
             "created_at", "updated_at",
@@ -344,12 +345,12 @@ class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
         read_only_fields = ("permissions_version", "created_at", "updated_at", "empresa", "empresa_id")
 
     def get_excedente(self, obj):
-        return max(0, int(obj.usuarios_ativos or 0) - int(obj.limite_usuarios or 0))
+        return max(0, int(obj.sessoes_ativas or 0) - int(obj.limite_sessoes_simultaneas or 0))
 
     def get_warning(self, obj):
         excedente = self.get_excedente(obj)
         if excedente > 0:
-            return f"A empresa ficará com {excedente} usuário(s) acima do limite contratado."
+            return f"A empresa ficará com {excedente} sessão(ões) acima do limite contratado."
         return ""
 
     def get_modulos_contratados(self, obj):
@@ -360,14 +361,33 @@ class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        limite = attrs.get("limite_usuarios", getattr(self.instance, "limite_usuarios", 0))
+        limite = attrs.get("limite_sessoes_simultaneas", getattr(self.instance, "limite_sessoes_simultaneas", 0))
         if limite is not None and int(limite) < 0:
-            raise serializers.ValidationError({"limite_usuarios": "Limite de usuários não pode ser negativo."})
+            raise serializers.ValidationError({"limite_sessoes_simultaneas": "Limite de sessões simultâneas não pode ser negativo."})
         master = attrs.get("usuario_master", getattr(self.instance, "usuario_master", None))
         empresa = getattr(self.instance, "empresa", None) or attrs.get("empresa")
         if master and empresa and master.empresa_id != empresa.id:
             raise serializers.ValidationError({"usuario_master_id": "Master deve pertencer à empresa do contrato."})
         return attrs
+
+
+class SessaoUsuarioSerializer(serializers.ModelSerializer):
+    usuario_username = serializers.CharField(source="usuario.username", read_only=True)
+    usuario_nome = serializers.SerializerMethodField()
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True, allow_null=True)
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True, allow_null=True)
+
+    class Meta:
+        model = SessaoUsuario
+        fields = (
+            "id", "empresa", "empresa_nome", "usuario", "usuario_username", "usuario_nome",
+            "loja", "loja_nome", "session_id", "dispositivo_id", "ip", "user_agent",
+            "iniciada_em", "ultima_atividade_em", "encerrada_em", "motivo_encerramento", "ativa",
+        )
+        read_only_fields = fields
+
+    def get_usuario_nome(self, obj):
+        return obj.usuario.get_full_name() or obj.usuario.username
 
 
 class PerfilModuloPermissaoSerializer(serializers.ModelSerializer):

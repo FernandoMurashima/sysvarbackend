@@ -2,29 +2,29 @@ from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 from django.db.models import Count
 from rest_framework import viewsets, permissions, status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.views import APIView
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.serializers import AuthTokenSerializer
 
 from rest_framework.permissions import IsAuthenticated
 
 from auditoria.models import AuditLog
 from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version, sync_legacy_license_flags
 from accounts.services.profiles import hidden_profile_names_for_company
+from accounts.services.sessions import ConcurrentSessionService
 from .permissions import CanManageAccessProfiles, CanManageCompanyUsers
 from .serializers import (
     EmpresaContratoSerializer,
     EmpresaModuloSerializer,
     ModuloSistemaSerializer,
     PerfilAcessoSerializer,
+    SessaoUsuarioSerializer,
     UserSerializer,
 )
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, ModuloSistema
-from .models import PerfilAcesso
+from .models import PerfilAcesso, SessaoUsuario
 
 User = get_user_model()
 
@@ -52,55 +52,27 @@ class TokenLoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        serializer = AuthTokenSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
-        if not user.is_superuser:
-            access = EffectiveAccessService(user)
-            state = access.contract_state()
-            if not state.active:
-                return Response({"non_field_errors": [state.reason or "Acesso indisponível."]}, status=400)
-            if not access.is_company_master() and not getattr(user, "perfil_principal_id", None):
-                return Response({"non_field_errors": ["Usuário sem perfil de acesso."]}, status=400)
-        token, created = Token.objects.get_or_create(user=user)
-
-        # auditoria
-        try:
-            AuditLog.objects.create(
-                action="login",
-                app_label="accounts",
-                model="token",
-                object_id=str(user.pk),
-                changes={"auth": "token", "token_created": bool(created)},
-                user=user,
-                ip=(request.META.get("REMOTE_ADDR") or "")[:45],
-                user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:400],
-            )
-        except Exception:
-            pass
-
-        return Response({"token": token.key, "user": UserSerializer(user).data | EffectiveAccessService(user).session_payload()})
+        raw_token, sessao, user = ConcurrentSessionService.login(
+            request,
+            request.data.get("username"),
+            request.data.get("password"),
+            request.data.get("device_id") or request.data.get("dispositivo_id"),
+        )
+        user._current_access_session = sessao
+        return Response({
+            "token": raw_token,
+            "session_id": str(sessao.session_id),
+            "user": UserSerializer(user).data | EffectiveAccessService(user).session_payload(),
+        })
 
 # ---- Logout (autenticado) → revoga todos os tokens do usuário ----
 class TokenLogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        user = request.user
-        Token.objects.filter(user=user).delete()
-        try:
-            AuditLog.objects.create(
-                action="logout",
-                app_label="accounts",
-                model="token",
-                object_id=str(user.pk),
-                changes={"auth": "token"},
-                user=user,
-                ip=(request.META.get("REMOTE_ADDR") or "")[:45],
-                user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:400],
-            )
-        except Exception:
-            pass
+        sessao = getattr(request, "access_session", None)
+        if sessao:
+            ConcurrentSessionService.close_session(sessao, "LOGOUT", request.user, request)
         return Response({"detail": "logged out"})
 
 # ---- Users CRUD + /users/me ----
@@ -148,7 +120,6 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(user, data={"is_active": True}, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        Token.objects.filter(user=user).delete()
         audit_event("user_activate", request, request.user, "user", user.pk)
         return Response(self.get_serializer(user).data)
 
@@ -159,7 +130,8 @@ class UserViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Transfira o master antes de inativar este usuário.")
         user.is_active = False
         user.save(update_fields=["is_active"])
-        Token.objects.filter(user=user).delete()
+        for sessao in user.sessoes_acesso.filter(ativa=True):
+            ConcurrentSessionService.close_session(sessao, "USER_INACTIVE", request.user, request)
         if user.empresa_id:
             increment_permissions_version(user.empresa)
         audit_event("user_deactivate", request, request.user, "user", user.pk)
@@ -177,7 +149,60 @@ class UserViewSet(viewsets.ModelViewSet):
 class UserMeView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
+        if hasattr(request, "access_session"):
+            request.user._current_access_session = request.access_session
         return Response(UserSerializer(request.user).data | EffectiveAccessService(request.user).session_payload())
+
+
+class SessaoUsuarioViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = SessaoUsuario.objects.select_related("empresa", "usuario", "loja").all().order_by("-ultima_atividade_em")
+    serializer_class = SessaoUsuarioSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        empresa = self.request.query_params.get("empresa")
+        ativa = self.request.query_params.get("ativa")
+        if not user.is_superuser:
+            if not EffectiveAccessService(user).is_company_master():
+                qs = qs.filter(usuario=user)
+            else:
+                qs = qs.filter(empresa_id=user.empresa_id)
+        elif empresa:
+            qs = qs.filter(empresa_id=empresa)
+        if ativa is not None and ativa != "":
+            qs = qs.filter(ativa=str(ativa).lower() in {"1", "true", "sim"})
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="heartbeat")
+    def heartbeat(self, request):
+        sessao = getattr(request, "access_session", None)
+        if not sessao:
+            raise PermissionDenied("Sessão não identificada.")
+        ConcurrentSessionService.touch(sessao, force=True)
+        permissions_version = None
+        if sessao.empresa_id:
+            permissions_version = sessao.empresa.contrato.permissions_version
+        return Response({
+            "session_id": str(sessao.session_id),
+            "ativa": sessao.ativa,
+            "ultima_atividade_em": sessao.ultima_atividade_em,
+            "permissions_version": permissions_version,
+        })
+
+    @action(detail=True, methods=["post"], url_path="encerrar")
+    def encerrar(self, request, pk=None):
+        sessao = self.get_object()
+        user = request.user
+        allowed = user.is_superuser or sessao.usuario_id == user.id or (
+            sessao.empresa_id == getattr(user, "empresa_id", None) and EffectiveAccessService(user).is_company_master()
+        )
+        if not allowed:
+            audit_event("session_close_denied", request, user, "sessao_usuario", sessao.pk)
+            raise PermissionDenied("Sem permissão para encerrar esta sessão.")
+        ConcurrentSessionService.close_session(sessao, "ADMIN_TERMINATED" if sessao.usuario_id != user.id else "SELF_TERMINATED", user, request)
+        return Response(self.get_serializer(sessao).data)
 
 
 class ModuloSistemaViewSet(viewsets.ReadOnlyModelViewSet):

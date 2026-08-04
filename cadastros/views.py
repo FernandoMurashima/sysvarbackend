@@ -157,7 +157,7 @@ class EmpresaViewSet(BaseCadastroViewSet):
             "status": contrato.status,
             "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
             "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
-            "limite_usuarios": contrato.limite_usuarios,
+            "limite_sessoes_simultaneas": contrato.limite_sessoes_simultaneas,
             "plano_completo": contrato.plano_completo,
             "usuario_master_id": contrato.usuario_master_id,
         }
@@ -175,14 +175,14 @@ class EmpresaViewSet(BaseCadastroViewSet):
             "status": contrato.status,
             "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
             "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
-            "limite_usuarios": contrato.limite_usuarios,
+            "limite_sessoes_simultaneas": contrato.limite_sessoes_simultaneas,
             "plano_completo": contrato.plano_completo,
             "usuario_master_id": contrato.usuario_master_id,
         }
         action_name = "contract_update"
-        if old["limite_usuarios"] != new["limite_usuarios"]:
+        if old["limite_sessoes_simultaneas"] != new["limite_sessoes_simultaneas"]:
             action_name = "contract_limit_update"
-        if old["limite_usuarios"] > new["limite_usuarios"] and contrato.excedido:
+        if old["limite_sessoes_simultaneas"] > new["limite_sessoes_simultaneas"] and contrato.limite_excedido:
             action_name = "contract_limit_reduced_with_excess"
         audit_event(action_name, request, request.user, "contrato", contrato.pk, {"old": old, "new": new})
         return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)

@@ -146,6 +146,7 @@ class EmpresaContrato(models.Model):
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDENTE, db_index=True)
     data_inicio = models.DateField(default=timezone.localdate, db_index=True)
     data_fim = models.DateField(null=True, blank=True, db_index=True)
+    limite_sessoes_simultaneas = models.PositiveIntegerField(default=1)
     limite_usuarios = models.PositiveIntegerField(default=1)
     plano_completo = models.BooleanField(default=False, db_index=True)
     usuario_master = models.ForeignKey(
@@ -170,8 +171,8 @@ class EmpresaContrato(models.Model):
         return f"Contrato {self.empresa_id} - {self.status}"
 
     def clean(self):
-        if self.status == self.STATUS_ATIVO and self.limite_usuarios < 1:
-            raise ValidationError({"limite_usuarios": "Contrato ativo exige pelo menos uma licença."})
+        if self.status == self.STATUS_ATIVO and self.limite_sessoes_simultaneas < 1:
+            raise ValidationError({"limite_sessoes_simultaneas": "Contrato ativo exige pelo menos uma sessão simultânea."})
         if self.data_fim and self.data_inicio and self.data_fim < self.data_inicio:
             raise ValidationError({"data_fim": "A data final não pode ser anterior à data inicial."})
         if self.usuario_master_id:
@@ -197,12 +198,25 @@ class EmpresaContrato(models.Model):
         return self.empresa.usuarios.filter(is_active=True, is_superuser=False).count()
 
     @property
+    def sessoes_ativas(self):
+        cutoff = timezone.now() - timezone.timedelta(minutes=getattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 30))
+        return self.empresa.sessoes_usuarios.filter(ativa=True, ultima_atividade_em__gte=cutoff).count()
+
+    @property
+    def sessoes_disponiveis(self):
+        return max(0, int(self.limite_sessoes_simultaneas or 0) - self.sessoes_ativas)
+
+    @property
+    def limite_excedido(self):
+        return self.sessoes_ativas > int(self.limite_sessoes_simultaneas or 0)
+
+    @property
     def licencas_disponiveis(self):
-        return max(0, int(self.limite_usuarios or 0) - self.usuarios_ativos)
+        return self.sessoes_disponiveis
 
     @property
     def excedido(self):
-        return self.usuarios_ativos > int(self.limite_usuarios or 0)
+        return self.limite_excedido
 
     def incrementar_versao(self, save=True):
         self.permissions_version = int(self.permissions_version or 0) + 1

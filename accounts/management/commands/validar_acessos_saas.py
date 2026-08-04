@@ -42,6 +42,7 @@ class Command(BaseCommand):
                             status=EmpresaContrato.STATUS_ATIVO,
                             data_inicio=today,
                             limite_usuarios=max(1, empresa.usuarios.filter(is_active=True, is_superuser=False).count()),
+                            limite_sessoes_simultaneas=1,
                             plano_completo=empresa.plano_completo or empresa.licenca_master,
                         )
                         fixes.append(f"empresa:{empresa.pk}:contrato_criado")
@@ -69,9 +70,9 @@ class Command(BaseCommand):
                         contrato.save(update_fields=["usuario_master", "updated_at"])
                         fixes.append(f"empresa:{empresa.pk}:master_definido:{candidatos[0].pk}")
 
-                active_users = empresa.usuarios.filter(is_active=True, is_superuser=False).count()
-                if active_users > int(contrato.limite_usuarios or 0):
-                    issues.append(f"empresa:{empresa.pk}:limite_usuarios_excedido:{active_users}/{contrato.limite_usuarios}")
+                active_sessions = empresa.sessoes_usuarios.filter(ativa=True).count()
+                if active_sessions > int(contrato.limite_sessoes_simultaneas or 0):
+                    issues.append(f"empresa:{empresa.pk}:limite_sessoes_excedido:{active_sessions}/{contrato.limite_sessoes_simultaneas}")
 
                 defaults = list(PerfilAcesso.objects.filter(empresa=empresa, ativo=True, padrao=True).order_by("id"))
                 if not empresa.perfis_acesso.exists():

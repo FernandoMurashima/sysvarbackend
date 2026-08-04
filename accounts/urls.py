@@ -5,6 +5,7 @@ from .views import (
     EmpresaModuloViewSet,
     ModuloSistemaViewSet,
     PerfilAcessoViewSet,
+    SessaoUsuarioViewSet,
     UserViewSet,
     TokenLoginView,
     TokenLogoutView,
@@ -16,6 +17,7 @@ router.register(r"modulos", ModuloSistemaViewSet, basename="modulos")
 router.register(r"contratos", EmpresaContratoViewSet, basename="contratos")
 router.register(r"empresa-modulos", EmpresaModuloViewSet, basename="empresa-modulos")
 router.register(r"perfis", PerfilAcessoViewSet, basename="perfis")
+router.register(r"sessoes", SessaoUsuarioViewSet, basename="sessoes")
 
 urlpatterns = [
     path("", include(router.urls)),

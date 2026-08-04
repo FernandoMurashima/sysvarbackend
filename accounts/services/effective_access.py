@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -138,7 +139,7 @@ class CompanyModuleService:
             return ContractState(False, "Contrato ainda não iniciado.")
         if contrato.data_fim and contrato.data_fim < today:
             return ContractState(False, "Contrato vencido.")
-        if contrato.limite_usuarios < 1:
+        if contrato.limite_sessoes_simultaneas < 1:
             return ContractState(False, "Contrato sem licenças.")
         return ContractState(True, "")
 
@@ -176,21 +177,22 @@ class LicenseService:
 
     def usage(self):
         contrato = self.empresa.contrato
-        used = self.empresa.usuarios.filter(is_active=True, is_superuser=False).count()
-        limit = int(contrato.limite_usuarios or 0)
+        cutoff = timezone.now() - timezone.timedelta(minutes=getattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 30))
+        used = self.empresa.sessoes_usuarios.filter(ativa=True, ultima_atividade_em__gte=cutoff).count()
+        limit = int(contrato.limite_sessoes_simultaneas or 0)
         return {
+            "limite_sessoes_simultaneas": limit,
+            "sessoes_ativas": used,
+            "sessoes_disponiveis": max(0, limit - used),
+            "limite_excedido": used > limit,
             "limite_usuarios": limit,
-            "usuarios_ativos": used,
+            "usuarios_ativos": self.empresa.usuarios.filter(is_active=True, is_superuser=False).count(),
             "licencas_disponiveis": max(0, limit - used),
             "excedido": used > limit,
         }
 
     def assert_can_consume(self):
-        contrato = EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
-        used = self.empresa.usuarios.select_for_update().filter(is_active=True, is_superuser=False).count()
-        if used >= int(contrato.limite_usuarios or 0):
-            raise ValidationError({"licencas": "Limite de licenças atingido."})
-        return contrato
+        return EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
 
 
 class EffectiveAccessService:
@@ -302,9 +304,13 @@ class EffectiveAccessService:
                     "data_inicio": c.data_inicio,
                     "data_fim": c.data_fim,
                     "limite_usuarios": c.limite_usuarios,
+                    "limite_sessoes_simultaneas": c.limite_sessoes_simultaneas,
                     "usuarios_ativos": usage["usuarios_ativos"],
+                    "sessoes_ativas": usage["sessoes_ativas"],
                     "licencas_disponiveis": usage["licencas_disponiveis"],
+                    "sessoes_disponiveis": usage["sessoes_disponiveis"],
                     "excedido": usage["excedido"],
+                    "limite_excedido": usage["limite_excedido"],
                     "plano_completo": c.plano_completo,
                     "permissions_version": c.permissions_version,
                 }
@@ -330,6 +336,18 @@ class EffectiveAccessService:
             "modulos_disponiveis_empresa": sorted(self.available_modules()) if getattr(user, "is_authenticated", False) else [],
             "permissoes_efetivas": self.effective_permissions_payload() if getattr(user, "is_authenticated", False) else {},
             "lojas_permitidas": list(user.lojas.values("id", "nome_loja", "apelido_loja")) if getattr(user, "is_authenticated", False) and not user.is_superuser else [],
+            "sessao_atual": self.current_session_payload(),
+        }
+
+    def current_session_payload(self):
+        sessao = getattr(self.user, "_current_access_session", None)
+        if not sessao:
+            return None
+        return {
+            "session_id": str(sessao.session_id),
+            "dispositivo_id": sessao.dispositivo_id,
+            "iniciada_em": sessao.iniciada_em,
+            "ultima_atividade_em": sessao.ultima_atividade_em,
         }
 
 

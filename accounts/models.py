@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.core.exceptions import ValidationError
+import uuid
 
 # Obs.: FK para 'cadastros.Loja' — o app 'cadastros' terá o modelo Loja.
 # Se ainda não existir a migração de Loja, tudo bem: a migration do accounts
@@ -155,3 +156,35 @@ class PerfilModuloPermissao(models.Model):
 
     def __str__(self):
         return f"{self.perfil_id} - {self.modulo.chave}: {self.acesso}"
+
+
+class SessaoUsuario(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='sessoes_usuarios')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sessoes_acesso')
+    loja = models.ForeignKey('cadastros.Loja', on_delete=models.SET_NULL, null=True, blank=True, related_name='sessoes_usuarios')
+    session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    token_key_hash = models.CharField(max_length=128, unique=True, db_index=True)
+    dispositivo_id = models.CharField(max_length=128, db_index=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True, default="")
+    iniciada_em = models.DateTimeField(auto_now_add=True)
+    ultima_atividade_em = models.DateTimeField(db_index=True)
+    encerrada_em = models.DateTimeField(null=True, blank=True)
+    motivo_encerramento = models.CharField(max_length=50, blank=True, default="")
+    ativa = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["empresa", "ativa"]),
+            models.Index(fields=["usuario", "ativa"]),
+            models.Index(fields=["dispositivo_id"]),
+            models.Index(fields=["ultima_atividade_em"]),
+            models.Index(fields=["empresa", "ativa", "ultima_atividade_em"]),
+        ]
+
+
+class SessionToken(models.Model):
+    key_hash = models.CharField(max_length=128, unique=True, db_index=True)
+    session = models.OneToOneField(SessaoUsuario, on_delete=models.CASCADE, related_name="session_token")
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)

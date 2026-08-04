@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
 from cadastros.models import EmpresaContrato, ModuloSistema
-from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from compras.models import PedidoCompra
 from financeiro.models import Caixa, ContaBancaria, LancamentoContabil, MovimentacaoFinanceira, Pagar, Receber
@@ -305,21 +305,23 @@ class SaaSAccessControlTests(TestCase):
         self.perfil_padrao = PerfilAcesso.objects.create(empresa=self.empresa, nome="Operador", padrao=True)
         PerfilModuloPermissao.objects.create(perfil=self.perfil_padrao, modulo=self.operacional, acesso=UserModulePermission.Access.VIEW)
         PerfilModuloPermissao.objects.create(perfil=self.perfil_padrao, modulo=self.config, acesso=UserModulePermission.Access.NONE)
+        self.empresa.contrato.usuario_master = self.master
+        self.empresa.contrato.save(update_fields=["usuario_master", "updated_at"])
 
     def test_login_bloqueia_contrato_suspenso(self):
         contrato = self.empresa.contrato
         contrato.status = EmpresaContrato.STATUS_SUSPENSO
         contrato.save(update_fields=["status", "updated_at"])
 
-        response = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678"})
+        response = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "dev-suspenso"})
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 401)
         self.assertIn("Contrato suspenso", str(response.data))
 
-    def test_limite_licenca_bloqueia_criacao_usuario_ativo(self):
+    def test_usuario_ativo_nao_consume_licenca_ate_fazer_login(self):
         contrato = self.empresa.contrato
-        contrato.limite_usuarios = 1
-        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
         self.client.force_authenticate(self.master)
 
         response = self.client.post(
@@ -335,8 +337,44 @@ class SaaSAccessControlTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("Limite de licenças atingido", str(response.data))
+        self.assertEqual(response.status_code, 201)
+        contrato.refresh_from_db()
+        self.assertEqual(contrato.sessoes_ativas, 0)
+
+    def test_limite_de_sessoes_bloqueia_login_concorrente(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        get_user_model().objects.create_user(
+            username="outro_login",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+
+        first = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "dev-1"}, format="json")
+        second = self.client.post("/api/accounts/auth/token/", {"username": "outro_login", "password": "12345678", "device_id": "dev-2"}, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 403)
+        self.assertIn("CONCURRENT_SESSION_LIMIT_REACHED", str(second.data))
+        self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 1)
+
+    def test_logout_encerra_sessao_e_libera_licenca(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+
+        login = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "dev-logout"}, format="json")
+        self.assertEqual(login.status_code, 200)
+        token = login.data["token"]
+        self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 1)
+
+        logout = self.client.post("/api/accounts/auth/logout/", {}, HTTP_AUTHORIZATION=f"Token {token}", format="json")
+
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 0)
 
     def test_perfil_padrao_deve_ser_unico_por_empresa_via_endpoint(self):
         outro = PerfilAcesso.objects.create(empresa=self.empresa, nome="Outro", padrao=False)
@@ -365,8 +403,8 @@ class SaaSAccessControlTests(TestCase):
             empresa=self.empresa,
         )
         contrato = self.empresa.contrato
-        contrato.limite_usuarios = 5
-        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        contrato.limite_sessoes_simultaneas = 5
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
         self.client.force_authenticate(self.master)
 
         response = self.client.post(
@@ -428,13 +466,13 @@ class SaaSAccessControlTests(TestCase):
 
         response = self.client.patch(
             f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
-            {"limite_usuarios": 5, "status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True},
+            {"limite_sessoes_simultaneas": 5, "status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True},
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
         contrato.refresh_from_db()
-        self.assertEqual(contrato.limite_usuarios, 5)
+        self.assertEqual(contrato.limite_sessoes_simultaneas, 5)
         self.assertTrue(contrato.plano_completo)
         self.assertGreater(contrato.permissions_version, versao)
 
@@ -444,7 +482,7 @@ class SaaSAccessControlTests(TestCase):
         detail = self.client.get(f"/api/cadastros/empresas/{self.empresa.pk}/contrato/")
         update = self.client.patch(
             f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
-            {"limite_usuarios": 9},
+            {"limite_sessoes_simultaneas": 9},
             format="json",
         )
 
@@ -454,22 +492,25 @@ class SaaSAccessControlTests(TestCase):
     def test_reducao_limite_retorna_excedente_sem_desativar(self):
         superuser = get_user_model().objects.create_superuser(username="root_reduce", password="12345678")
         contrato = self.empresa.contrato
-        contrato.limite_usuarios = 5
-        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        contrato.limite_sessoes_simultaneas = 5
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
         get_user_model().objects.create_user(username="ativo_extra", password="12345678", empresa=self.empresa, type="Regular", perfil_principal=self.perfil_padrao)
+        self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "reduce-1"}, format="json")
+        self.client.post("/api/accounts/auth/token/", {"username": "ativo_extra", "password": "12345678", "device_id": "reduce-2"}, format="json")
         self.client.force_authenticate(superuser)
 
         response = self.client.patch(
             f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
-            {"limite_usuarios": 1},
+            {"limite_sessoes_simultaneas": 1},
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["excedido"])
+        self.assertTrue(response.data["limite_excedido"])
         self.assertEqual(response.data["excedente"], 1)
         self.assertIn("acima do limite", response.data["warning"])
         self.assertEqual(self.empresa.usuarios.filter(is_active=True, is_superuser=False).count(), 2)
+        self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 2)
 
     def test_contrato_ativo_limite_zero_rejeitado(self):
         superuser = get_user_model().objects.create_superuser(username="root_zero", password="12345678")
@@ -477,9 +518,9 @@ class SaaSAccessControlTests(TestCase):
 
         response = self.client.patch(
             f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
-            {"status": EmpresaContrato.STATUS_ATIVO, "limite_usuarios": 0},
+            {"status": EmpresaContrato.STATUS_ATIVO, "limite_sessoes_simultaneas": 0},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("limite_usuarios", response.data)
+        self.assertIn("limite_sessoes_simultaneas", response.data)

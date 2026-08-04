@@ -15,6 +15,7 @@ def ensure_empresa_contract(sender, instance, created, **kwargs):
             "status": EmpresaContrato.STATUS_ATIVO if instance.ativo else EmpresaContrato.STATUS_SUSPENSO,
             "data_inicio": getattr(instance, "data_cadastro", None).date() if getattr(instance, "data_cadastro", None) else timezone.localdate(),
             "limite_usuarios": 1,
+            "limite_sessoes_simultaneas": 1,
             "plano_completo": bool(instance.plano_completo or instance.licenca_master),
             "observacoes": "Contrato inicial criado automaticamente.",
         },
