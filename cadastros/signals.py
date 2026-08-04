@@ -37,3 +37,9 @@ def ensure_empresa_contract(sender, instance, created, **kwargs):
                 modulo=modulo,
                 defaults={"contratado": bool(getattr(instance, field, False)), "data_inicio": contrato.data_inicio},
             )
+    try:
+        from accounts.services.profiles import ensure_default_profiles
+
+        ensure_default_profiles(instance)
+    except Exception:
+        pass

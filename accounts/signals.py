@@ -1,7 +1,8 @@
-from django.db.models.signals import post_save, m2m_changed
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from accounts.models import PerfilAcesso, User
+from accounts.services.profiles import ensure_default_profiles
 from cadastros.models import EmpresaContrato
 
 
@@ -9,6 +10,7 @@ from cadastros.models import EmpresaContrato
 def ensure_user_access_defaults(sender, instance, created, **kwargs):
     if not created or instance.is_superuser or not instance.empresa_id:
         return
+    ensure_default_profiles(instance.empresa)
     if not instance.perfil_principal_id:
         perfil = (
             PerfilAcesso.objects.filter(empresa=instance.empresa, ativo=True, nome="Administrador delegado").first()

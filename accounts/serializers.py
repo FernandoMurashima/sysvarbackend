@@ -246,9 +246,8 @@ class UserSerializer(serializers.ModelSerializer):
         available = EffectiveAccessService(user).available_modules() if user.empresa_id else set()
         if permissoes_modulos is not None:
             recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos}
-            invalidos = [modulo for modulo in recebidos if modulo not in available and not user.is_superuser]
-            if invalidos:
-                raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {', '.join(invalidos)}"})
+            if not user.is_superuser:
+                recebidos = {modulo: acesso for modulo, acesso in recebidos.items() if modulo in available}
             UserModulePermission.objects.filter(user=user).exclude(modulo__in=recebidos.keys()).delete()
             for modulo, acesso in recebidos.items():
                 UserModulePermission.objects.update_or_create(

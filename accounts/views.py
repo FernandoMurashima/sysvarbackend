@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from auditoria.models import AuditLog
 from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version
+from accounts.services.profiles import visible_profile_names_for_company
 from .permissions import CanManageAccessProfiles, CanManageCompanyUsers
 from .serializers import (
     EmpresaContratoSerializer,
@@ -192,8 +193,9 @@ class EmpresaContratoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa = self.request.query_params.get("empresa")
         if self.request.user.is_superuser:
-            return qs
+            return qs.filter(empresa_id=empresa) if empresa else qs
         empresa_id = getattr(self.request.user, "empresa_id", None)
         return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
 
@@ -218,8 +220,9 @@ class EmpresaModuloViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa = self.request.query_params.get("empresa")
         if self.request.user.is_superuser:
-            return qs
+            return qs.filter(empresa_id=empresa) if empresa else qs
         empresa_id = getattr(self.request.user, "empresa_id", None)
         return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
 
@@ -235,16 +238,20 @@ class EmpresaModuloViewSet(viewsets.ModelViewSet):
 
 
 class PerfilAcessoViewSet(viewsets.ModelViewSet):
-    queryset = PerfilAcesso.objects.annotate(usuarios_count=Count("usuarios")).prefetch_related("permissoes_modulos__modulo")
+    queryset = PerfilAcesso.objects.annotate(usuarios_count=Count("usuarios")).prefetch_related("permissoes_modulos__modulo").order_by("empresa_id", "nome")
     serializer_class = PerfilAcessoSerializer
     permission_classes = [CanManageAccessProfiles]
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa = self.request.query_params.get("empresa")
         if self.request.user.is_superuser:
-            return qs
+            return qs.filter(empresa_id=empresa) if empresa else qs
         empresa_id = getattr(self.request.user, "empresa_id", None)
-        return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
+        if not empresa_id:
+            return qs.none()
+        visible_names = visible_profile_names_for_company(self.request.user.empresa)
+        return qs.filter(empresa_id=empresa_id, nome__in=visible_names)
 
     @action(detail=True, methods=["post"], url_path="duplicar")
     def duplicar(self, request, pk=None):

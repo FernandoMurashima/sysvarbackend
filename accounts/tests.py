@@ -394,3 +394,28 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(access.module_access("operacional"), UserModulePermission.Access.EDIT)
         self.assertEqual(access.module_access("configuracoes"), UserModulePermission.Access.NONE)
         self.assertEqual(access.module_access("vendas"), UserModulePermission.Access.NONE)
+
+    def test_admin_empresa_nao_lista_perfis_de_modulos_nao_contratados(self):
+        empresa = Empresa.objects.create(nome="Empresa Perfil Limitado", documento="66666666000166", usa_vendas=True)
+        master = get_user_model().objects.create_user(
+            username="master_perfil_limitado",
+            password="12345678",
+            type="Admin",
+            empresa=empresa,
+        )
+        contrato = empresa.contrato
+        contrato.plano_completo = False
+        contrato.save(update_fields=["plano_completo", "updated_at"])
+        self.client.force_authenticate(master)
+
+        response = self.client.get("/api/accounts/perfis/")
+        data = response.data.get("results", response.data)
+        nomes = {item["nome"] for item in data}
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Administrador delegado", nomes)
+        self.assertIn("Regular", nomes)
+        self.assertNotIn("Financeiro", nomes)
+        self.assertNotIn("Compras", nomes)
+        self.assertNotIn("Estoque", nomes)
+        self.assertNotIn("Fiscal", nomes)
