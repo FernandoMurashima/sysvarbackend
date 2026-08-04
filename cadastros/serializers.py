@@ -30,6 +30,26 @@ class EmpresaSerializer(serializers.ModelSerializer):
         cnpj_validator(value)
         return _norm_digits(value)
 
+    def create(self, validated_data):
+        empresa = super().create(validated_data)
+        try:
+            from accounts.services.effective_access import sync_empresa_modulos_from_legacy_flags
+
+            sync_empresa_modulos_from_legacy_flags(empresa)
+        except Exception:
+            pass
+        return empresa
+
+    def update(self, instance, validated_data):
+        empresa = super().update(instance, validated_data)
+        try:
+            from accounts.services.effective_access import sync_empresa_modulos_from_legacy_flags
+
+            sync_empresa_modulos_from_legacy_flags(empresa)
+        except Exception:
+            pass
+        return empresa
+
 
 # ---------------------------
 # Loja

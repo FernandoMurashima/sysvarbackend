@@ -307,6 +307,69 @@ class EmpresaModuloSerializer(serializers.ModelSerializer):
         read_only_fields = ("created_at", "updated_at")
 
 
+class UsuarioMasterMiniSerializer(serializers.ModelSerializer):
+    nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ("id", "username", "nome", "email", "is_active")
+        read_only_fields = fields
+
+    def get_nome(self, obj):
+        return (obj.get_full_name() or obj.username).strip()
+
+
+class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
+    empresa_id = serializers.IntegerField(read_only=True)
+    usuario_master = UsuarioMasterMiniSerializer(read_only=True)
+    usuario_master_id = serializers.PrimaryKeyRelatedField(
+        source="usuario_master",
+        queryset=User.objects.filter(is_superuser=False, is_active=True),
+        allow_null=True,
+        required=False,
+        write_only=True,
+    )
+    modulos_contratados = serializers.SerializerMethodField()
+    warning = serializers.SerializerMethodField()
+    excedente = serializers.SerializerMethodField()
+
+    class Meta(EmpresaContratoSerializer.Meta):
+        fields = (
+            "id", "empresa", "empresa_id", "status", "data_inicio", "data_fim",
+            "limite_usuarios", "usuarios_ativos", "licencas_disponiveis", "excedido",
+            "excedente", "plano_completo", "usuario_master", "usuario_master_id",
+            "permissions_version", "observacoes", "modulos_contratados", "warning",
+            "created_at", "updated_at",
+        )
+        read_only_fields = ("permissions_version", "created_at", "updated_at", "empresa", "empresa_id")
+
+    def get_excedente(self, obj):
+        return max(0, int(obj.usuarios_ativos or 0) - int(obj.limite_usuarios or 0))
+
+    def get_warning(self, obj):
+        excedente = self.get_excedente(obj)
+        if excedente > 0:
+            return f"A empresa ficará com {excedente} usuário(s) acima do limite contratado."
+        return ""
+
+    def get_modulos_contratados(self, obj):
+        return EmpresaModuloSerializer(
+            obj.empresa.modulos_contratados.select_related("modulo").all().order_by("modulo__ordem", "modulo__nome"),
+            many=True,
+        ).data
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        limite = attrs.get("limite_usuarios", getattr(self.instance, "limite_usuarios", 0))
+        if limite is not None and int(limite) < 0:
+            raise serializers.ValidationError({"limite_usuarios": "Limite de usuários não pode ser negativo."})
+        master = attrs.get("usuario_master", getattr(self.instance, "usuario_master", None))
+        empresa = getattr(self.instance, "empresa", None) or attrs.get("empresa")
+        if master and empresa and master.empresa_id != empresa.id:
+            raise serializers.ValidationError({"usuario_master_id": "Master deve pertencer à empresa do contrato."})
+        return attrs
+
+
 class PerfilModuloPermissaoSerializer(serializers.ModelSerializer):
     modulo_chave = serializers.CharField(source="modulo.chave", read_only=True)
     modulo_nome = serializers.CharField(source="modulo.nome", read_only=True)

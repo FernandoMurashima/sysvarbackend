@@ -13,8 +13,8 @@ from rest_framework.authtoken.serializers import AuthTokenSerializer
 from rest_framework.permissions import IsAuthenticated
 
 from auditoria.models import AuditLog
-from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version
-from accounts.services.profiles import visible_profile_names_for_company
+from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version, sync_legacy_license_flags
+from accounts.services.profiles import hidden_profile_names_for_company
 from .permissions import CanManageAccessProfiles, CanManageCompanyUsers
 from .serializers import (
     EmpresaContratoSerializer,
@@ -199,9 +199,32 @@ class EmpresaContratoViewSet(viewsets.ModelViewSet):
         empresa_id = getattr(self.request.user, "empresa_id", None)
         return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
 
-    def perform_update(self, serializer):
+    def get_serializer_class(self):
+        if getattr(self, "action", None) in {"retrieve", "list"}:
+            from .serializers import EmpresaContratoDetalheSerializer
+            return EmpresaContratoDetalheSerializer
+        return super().get_serializer_class()
+
+    def _exigir_superusuario(self):
+        if not self.request.user.is_superuser:
+            raise PermissionDenied("Somente superusuário pode alterar contrato.")
+
+    def perform_destroy(self, instance):
+        self._exigir_superusuario()
+        return super().perform_destroy(instance)
+
+    def perform_create(self, serializer):
+        self._exigir_superusuario()
         obj = serializer.save()
         obj.incrementar_versao()
+        sync_legacy_license_flags(obj.empresa)
+        audit_event("contract_create", self.request, self.request.user, "contrato", obj.pk)
+
+    def perform_update(self, serializer):
+        self._exigir_superusuario()
+        obj = serializer.save()
+        obj.incrementar_versao()
+        sync_legacy_license_flags(obj.empresa)
         audit_event("contract_update", self.request, self.request.user, "contrato", obj.pk)
 
     @action(detail=True, methods=["post"], url_path="transferir-master")
@@ -228,13 +251,16 @@ class EmpresaModuloViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         obj = serializer.save()
-        from accounts.services.effective_access import increment_permissions_version
         increment_permissions_version(obj.empresa)
+        sync_legacy_license_flags(obj.empresa)
+        audit_event("company_module_create", self.request, self.request.user, "empresa_modulo", obj.pk)
 
     def perform_update(self, serializer):
+        old = serializer.instance.contratado if serializer.instance else None
         obj = serializer.save()
-        from accounts.services.effective_access import increment_permissions_version
         increment_permissions_version(obj.empresa)
+        sync_legacy_license_flags(obj.empresa)
+        audit_event("company_module_update", self.request, self.request.user, "empresa_modulo", obj.pk, {"old": old, "new": obj.contratado})
 
 
 class PerfilAcessoViewSet(viewsets.ModelViewSet):
@@ -250,8 +276,8 @@ class PerfilAcessoViewSet(viewsets.ModelViewSet):
         empresa_id = getattr(self.request.user, "empresa_id", None)
         if not empresa_id:
             return qs.none()
-        visible_names = visible_profile_names_for_company(self.request.user.empresa)
-        return qs.filter(empresa_id=empresa_id, nome__in=visible_names)
+        hidden_names = hidden_profile_names_for_company(self.request.user.empresa)
+        return qs.filter(empresa_id=empresa_id).exclude(nome__in=hidden_names)
 
     @action(detail=True, methods=["post"], url_path="duplicar")
     def duplicar(self, request, pk=None):

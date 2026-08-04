@@ -31,7 +31,7 @@ def audit_event(action, request=None, user=None, model="security", object_id="",
 
         req_user = user or getattr(request, "user", None)
         AuditLog.objects.create(
-            action=action,
+            action=str(action)[:32],
             app_label="accounts",
             model=model,
             object_id=str(object_id or ""),
@@ -50,6 +50,67 @@ def increment_permissions_version(empresa):
     except EmpresaContrato.DoesNotExist:
         return
     contrato.incrementar_versao()
+
+
+def sync_legacy_license_flags(empresa):
+    try:
+        contrato = empresa.contrato
+    except EmpresaContrato.DoesNotExist:
+        contrato = None
+    module_map = {
+        "vendas": "usa_vendas",
+        "compras": "usa_compras",
+        "estoque": "usa_estoque",
+        "financeiro": "usa_financeiro",
+        "fiscal": "usa_fiscal",
+        "producao": "usa_producao",
+        "distribuicao": "usa_distribuicao_producao",
+    }
+    updates = {}
+    if contrato:
+        updates["plano_completo"] = bool(contrato.plano_completo)
+        updates["licenca_master"] = bool(contrato.plano_completo)
+    contracted = set(
+        EmpresaModulo.objects.filter(empresa=empresa, contratado=True, modulo__chave__in=module_map)
+        .values_list("modulo__chave", flat=True)
+    )
+    for key, field in module_map.items():
+        updates[field] = key in contracted or bool(contrato and contrato.plano_completo)
+    if updates.get("usa_producao"):
+        updates["usa_ficha_tecnica"] = True
+        updates["usa_faccao"] = True
+        updates["usa_distribuicao_producao"] = True
+    else:
+        updates["usa_ficha_tecnica"] = False
+        updates["usa_faccao"] = False
+    changed = {field: value for field, value in updates.items() if getattr(empresa, field, None) != value}
+    if changed:
+        for field, value in changed.items():
+            setattr(empresa, field, value)
+        empresa.save(update_fields=list(changed.keys()))
+
+
+def sync_empresa_modulos_from_legacy_flags(empresa):
+    module_map = {
+        "vendas": "usa_vendas",
+        "compras": "usa_compras",
+        "estoque": "usa_estoque",
+        "financeiro": "usa_financeiro",
+        "fiscal": "usa_fiscal",
+        "producao": "usa_producao",
+        "distribuicao": "usa_distribuicao_producao",
+    }
+    modules = {m.chave: m for m in ModuloSistema.objects.filter(chave__in=module_map)}
+    for key, field in module_map.items():
+        modulo = modules.get(key)
+        if not modulo:
+            continue
+        EmpresaModulo.objects.update_or_create(
+            empresa=empresa,
+            modulo=modulo,
+            defaults={"contratado": bool(getattr(empresa, field, False) or getattr(empresa, "plano_completo", False))},
+        )
+    increment_permissions_version(empresa)
 
 
 class CompanyModuleService:

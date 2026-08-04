@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from accounts.models import PerfilAcesso, UserModulePermission
 from accounts.services.effective_access import CompanyModuleService
-from accounts.services.profiles import ensure_default_profiles, visible_profile_names_for_company
+from accounts.services.profiles import ensure_default_profiles
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, ModuloSistema
 
 
@@ -86,10 +86,6 @@ class Command(BaseCommand):
                         PerfilAcesso.objects.filter(pk__in=[p.pk for p in defaults[1:]]).update(padrao=False)
                         fixes.append(f"empresa:{empresa.pk}:perfis_padrao_duplicados_corrigidos")
 
-                hidden_profiles = PerfilAcesso.objects.filter(empresa=empresa, ativo=True).exclude(nome__in=visible_profile_names_for_company(empresa))
-                for perfil in hidden_profiles:
-                    issues.append(f"empresa:{empresa.pk}:perfil_de_modulo_nao_contratado_visivel:{perfil.nome}")
-
                 default_profile = defaults[0] if defaults else None
                 for user in empresa.usuarios.filter(is_active=True, is_superuser=False).select_related("perfil_principal"):
                     is_master = contrato.usuario_master_id == user.pk
@@ -109,6 +105,10 @@ class Command(BaseCommand):
                 for perm in UserModulePermission.objects.filter(user__empresa=empresa).exclude(acesso=UserModulePermission.Access.NONE):
                     if perm.modulo not in available:
                         issues.append(f"user:{perm.user_id}:permissao_modulo_nao_contratado:{perm.modulo}")
+                        if corrigir:
+                            perm.acesso = UserModulePermission.Access.NONE
+                            perm.save(update_fields=["acesso"])
+                            fixes.append(f"user:{perm.user_id}:permissao_modulo_nao_contratado_removida:{perm.modulo}")
 
                 for chave, flag in LEGACY_MODULE_FLAGS.items():
                     if getattr(empresa, flag, False):

@@ -46,6 +46,10 @@ def visible_profile_names_for_company(empresa):
     }
 
 
+def hidden_profile_names_for_company(empresa):
+    return set(PROFILE_REQUIRED_MODULE) - visible_profile_names_for_company(empresa)
+
+
 def ensure_default_profiles(empresa):
     from accounts.services.effective_access import CompanyModuleService
 

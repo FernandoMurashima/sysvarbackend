@@ -419,3 +419,67 @@ class SaaSAccessControlTests(TestCase):
         self.assertNotIn("Compras", nomes)
         self.assertNotIn("Estoque", nomes)
         self.assertNotIn("Fiscal", nomes)
+
+    def test_superusuario_altera_contrato_por_empresa_e_incrementa_versao(self):
+        superuser = get_user_model().objects.create_superuser(username="root_contract", password="12345678")
+        contrato = self.empresa.contrato
+        versao = contrato.permissions_version
+        self.client.force_authenticate(superuser)
+
+        response = self.client.patch(
+            f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
+            {"limite_usuarios": 5, "status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        contrato.refresh_from_db()
+        self.assertEqual(contrato.limite_usuarios, 5)
+        self.assertTrue(contrato.plano_completo)
+        self.assertGreater(contrato.permissions_version, versao)
+
+    def test_master_consulta_mas_nao_altera_contrato(self):
+        self.client.force_authenticate(self.master)
+
+        detail = self.client.get(f"/api/cadastros/empresas/{self.empresa.pk}/contrato/")
+        update = self.client.patch(
+            f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
+            {"limite_usuarios": 9},
+            format="json",
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(update.status_code, 403)
+
+    def test_reducao_limite_retorna_excedente_sem_desativar(self):
+        superuser = get_user_model().objects.create_superuser(username="root_reduce", password="12345678")
+        contrato = self.empresa.contrato
+        contrato.limite_usuarios = 5
+        contrato.save(update_fields=["limite_usuarios", "updated_at"])
+        get_user_model().objects.create_user(username="ativo_extra", password="12345678", empresa=self.empresa, type="Regular", perfil_principal=self.perfil_padrao)
+        self.client.force_authenticate(superuser)
+
+        response = self.client.patch(
+            f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
+            {"limite_usuarios": 1},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["excedido"])
+        self.assertEqual(response.data["excedente"], 1)
+        self.assertIn("acima do limite", response.data["warning"])
+        self.assertEqual(self.empresa.usuarios.filter(is_active=True, is_superuser=False).count(), 2)
+
+    def test_contrato_ativo_limite_zero_rejeitado(self):
+        superuser = get_user_model().objects.create_superuser(username="root_zero", password="12345678")
+        self.client.force_authenticate(superuser)
+
+        response = self.client.patch(
+            f"/api/cadastros/empresas/{self.empresa.pk}/contrato/",
+            {"status": EmpresaContrato.STATUS_ATIVO, "limite_usuarios": 0},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("limite_usuarios", response.data)

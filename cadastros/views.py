@@ -6,7 +6,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.db.models import ProtectedError
 from django_filters.rest_framework import DjangoFilterBackend
 from accounts.permissions import HasModuleRole
-from accounts.services.effective_access import MasterTransferService
+from accounts.services.effective_access import MasterTransferService, audit_event, increment_permissions_version, sync_legacy_license_flags
+from accounts.serializers import EmpresaContratoDetalheSerializer
 
 from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
 from .serializers import (
@@ -129,6 +130,62 @@ class EmpresaViewSet(BaseCadastroViewSet):
             raise ValidationError({"usuario_master": "Usuário não encontrado."})
         contrato = MasterTransferService(request.user, empresa, new_master, request).transfer()
         return Response({"empresa": empresa.pk, "usuario_master": contrato.usuario_master_id})
+
+    @action(detail=True, methods=["get", "put", "patch"], url_path="contrato")
+    def contrato(self, request, pk=None):
+        empresa = self.get_object()
+        try:
+            contrato = empresa.contrato
+        except Exception:
+            if not request.user.is_superuser:
+                raise PermissionDenied("Contrato não disponível.")
+            from cadastros.models import EmpresaContrato
+
+            contrato = EmpresaContrato.objects.create(empresa=empresa)
+            audit_event("contract_create", request, request.user, "contrato", contrato.pk, {"empresa": empresa.pk})
+
+        is_master = contrato.usuario_master_id == getattr(request.user, "id", None)
+        if request.method == "GET":
+            if not (request.user.is_superuser or is_master):
+                raise PermissionDenied("Somente superusuário ou master da empresa pode consultar este contrato.")
+            return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)
+
+        if not request.user.is_superuser:
+            raise PermissionDenied("Somente superusuário pode alterar contrato.")
+
+        old = {
+            "status": contrato.status,
+            "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
+            "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
+            "limite_usuarios": contrato.limite_usuarios,
+            "plano_completo": contrato.plano_completo,
+            "usuario_master_id": contrato.usuario_master_id,
+        }
+        serializer = EmpresaContratoDetalheSerializer(
+            contrato,
+            data=request.data,
+            partial=request.method == "PATCH",
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        contrato = serializer.save()
+        contrato.incrementar_versao()
+        sync_legacy_license_flags(empresa)
+        new = {
+            "status": contrato.status,
+            "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
+            "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
+            "limite_usuarios": contrato.limite_usuarios,
+            "plano_completo": contrato.plano_completo,
+            "usuario_master_id": contrato.usuario_master_id,
+        }
+        action_name = "contract_update"
+        if old["limite_usuarios"] != new["limite_usuarios"]:
+            action_name = "contract_limit_update"
+        if old["limite_usuarios"] > new["limite_usuarios"] and contrato.excedido:
+            action_name = "contract_limit_reduced_with_excess"
+        audit_event(action_name, request, request.user, "contrato", contrato.pk, {"old": old, "new": new})
+        return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)
 
 
 class LojaViewSet(BaseCadastroViewSet):
