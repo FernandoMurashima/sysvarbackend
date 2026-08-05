@@ -9,6 +9,7 @@ from .views import (
     UserViewSet,
     TokenLoginView,
     TokenLogoutView,
+    ChangeRequiredPasswordView,
 )
 
 router = DefaultRouter()
@@ -24,4 +25,5 @@ urlpatterns = [
     # NOVO: login/logout por token sob /api/accounts/...
     path("auth/token/", TokenLoginView.as_view(), name="accounts_token_login"),
     path("auth/logout/", TokenLogoutView.as_view(), name="accounts_token_logout"),
+    path("change-required-password/", ChangeRequiredPasswordView.as_view(), name="accounts_change_required_password"),
 ]

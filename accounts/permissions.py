@@ -170,7 +170,8 @@ class CanManageCompanyUsers(BasePermission):
         if user.is_superuser:
             return True
         service = EffectiveAccessService(user)
-        return service.is_company_master() or service.has_module_access("configuracoes", EDIT)
+        required = VIEW if request.method in SAFE_METHODS else EDIT
+        return service.is_company_master() or service.has_module_access("operacional", required)
 
 
 class CanManageAccessProfiles(CanManageCompanyUsers):

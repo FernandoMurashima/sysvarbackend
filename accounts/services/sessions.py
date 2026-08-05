@@ -49,7 +49,7 @@ class ConcurrentSessionService:
         return count
 
     @staticmethod
-    def close_session(sessao, motivo, actor=None, request=None):
+    def close_session(sessao, motivo, actor=None, request=None, audit=True):
         if not sessao.ativa:
             return sessao
         sessao.ativa = False
@@ -58,21 +58,22 @@ class ConcurrentSessionService:
         sessao.save(update_fields=["ativa", "encerrada_em", "motivo_encerramento"])
         SessionToken.objects.filter(session=sessao, revoked_at__isnull=True).update(revoked_at=timezone.now())
         action = AuditAction.USER_LOGOUT if motivo == "LOGOUT" else AuditAction.SESSION_TIMEOUT if motivo == "TIMEOUT" else AuditAction.SESSION_REPLACED if motivo == "REPLACED" else AuditAction.SESSION_CLOSED
-        AuditService.security(
-            action=action,
-            result=AuditResult.SUCCESS,
-            severity=AuditSeverity.INFO,
-            request=request,
-            user=actor or sessao.usuario,
-            session=sessao,
-            empresa=sessao.empresa,
-            loja=sessao.loja,
-            app_label="accounts",
-            model="sessao_usuario",
-            object_id=sessao.pk,
-            metadata={"motivo": motivo},
-            status_code=200 if motivo != "TIMEOUT" else 401,
-        )
+        if audit:
+            AuditService.security(
+                action=action,
+                result=AuditResult.SUCCESS,
+                severity=AuditSeverity.INFO,
+                request=request,
+                user=actor or sessao.usuario,
+                session=sessao,
+                empresa=sessao.empresa,
+                loja=sessao.loja,
+                app_label="accounts",
+                model="sessao_usuario",
+                object_id=sessao.pk,
+                metadata={"motivo": motivo},
+                status_code=200 if motivo != "TIMEOUT" else 401,
+            )
         return sessao
 
     @staticmethod

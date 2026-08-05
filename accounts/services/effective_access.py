@@ -409,7 +409,7 @@ class ProfileDefaultService:
         if self.perfil.empresa_id != getattr(self.actor, "empresa_id", None):
             raise PermissionDenied("Perfil pertence a outra empresa.")
         access = EffectiveAccessService(self.actor)
-        if not access.is_company_master() and not access.has_module_access("configuracoes", EDIT):
+        if not access.is_company_master() and not access.has_module_access("operacional", EDIT):
             raise PermissionDenied("Sem permissão para gerenciar perfis.")
 
     def set_default(self):

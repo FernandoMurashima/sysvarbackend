@@ -288,8 +288,8 @@ class Loja(models.Model):
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
         related_name="lojas",
         db_index=True,
     )

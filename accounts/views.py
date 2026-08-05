@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.http import JsonResponse
 from django.db.models import Count, Q
 from rest_framework import viewsets, permissions, status
@@ -64,6 +65,7 @@ class TokenLoginView(APIView):
         return Response({
             "token": raw_token,
             "session_id": str(sessao.session_id),
+            "deve_trocar_senha": bool(user.deve_trocar_senha),
             "user": UserSerializer(user).data | EffectiveAccessService(user).session_payload(),
         })
 
@@ -168,11 +170,21 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="encerrar-sessoes")
     def encerrar_sessoes(self, request, pk=None):
-        user = self.get_object()
-        sessoes = list(user.sessoes_acesso.filter(ativa=True))
-        for sessao in sessoes:
-            ConcurrentSessionService.close_session(sessao, "ADMIN_USER_SESSIONS_CLOSED", request.user, request)
-        AuditService.required_success(AuditAction.USER_SESSIONS_CLOSED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, metadata={"sessoes_encerradas": len(sessoes)}, status_code=200)
+        with transaction.atomic():
+            user = self.get_queryset().select_for_update().get(pk=pk)
+            self.check_object_permissions(request, user)
+            sessoes = list(user.sessoes_acesso.select_for_update().filter(ativa=True))
+            for sessao in sessoes:
+                ConcurrentSessionService.close_session(sessao, "ADMIN_USER_SESSIONS_CLOSED", request.user, request, audit=False)
+            AuditService.required_success(
+                AuditAction.USER_SESSIONS_CLOSED,
+                category=AuditCategory.USER_MANAGEMENT,
+                request=request,
+                user=request.user,
+                instance=user,
+                metadata={"sessoes_encerradas": len(sessoes), "motivo": "ADMIN_USER_SESSIONS_CLOSED"},
+                status_code=200,
+            )
         return Response({"sessoes_encerradas": len(sessoes)})
 
     @action(detail=True, methods=["post"], url_path="redefinir-senha")
@@ -182,10 +194,11 @@ class UserViewSet(viewsets.ModelViewSet):
         confirmacao = request.data.get("confirmacao") or ""
         if nova != confirmacao:
             raise ValidationError({"confirmacao": "Confirmação da senha não confere."})
-        if len(nova) < 8:
-            raise ValidationError({"nova_senha": "A senha deve ter pelo menos 8 caracteres."})
+        validate_password(nova, user)
         encerrar = request.data.get("encerrar_sessoes", True)
         with transaction.atomic():
+            user = self.get_queryset().select_for_update().get(pk=pk)
+            self.check_object_permissions(request, user)
             user.set_password(nova)
             user.deve_trocar_senha = True
             user.save(update_fields=["password", "deve_trocar_senha"])
@@ -193,8 +206,16 @@ class UserViewSet(viewsets.ModelViewSet):
             if encerrar:
                 sessoes = list(user.sessoes_acesso.select_for_update().filter(ativa=True))
                 for sessao in sessoes:
-                    ConcurrentSessionService.close_session(sessao, "PASSWORD_RESET", request.user, request)
-            AuditService.required_success(AuditAction.USER_PASSWORD_RESET, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, metadata={"sessoes_encerradas": len(sessoes)}, status_code=200)
+                    ConcurrentSessionService.close_session(sessao, "PASSWORD_RESET", request.user, request, audit=False)
+            AuditService.required_success(
+                AuditAction.USER_PASSWORD_RESET,
+                category=AuditCategory.USER_MANAGEMENT,
+                request=request,
+                user=request.user,
+                instance=user,
+                metadata={"sessoes_encerradas": len(sessoes), "motivo": "PASSWORD_RESET"},
+                status_code=200,
+            )
         return Response({"detail": "Senha redefinida.", "sessoes_encerradas": len(sessoes)})
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="ativar")
@@ -236,6 +257,45 @@ class UserMeView(APIView):
         if hasattr(request, "access_session"):
             request.user._current_access_session = request.access_session
         return Response(UserSerializer(request.user).data | EffectiveAccessService(request.user).session_payload())
+
+
+class ChangeRequiredPasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        senha_atual = request.data.get("senha_atual") or ""
+        nova = request.data.get("nova_senha") or ""
+        confirmacao = request.data.get("confirmacao") or ""
+        user = request.user
+        if not user.check_password(senha_atual):
+            raise ValidationError({"senha_atual": "Senha atual inválida."})
+        if nova != confirmacao:
+            raise ValidationError({"confirmacao": "Confirmação da senha não confere."})
+        if senha_atual == nova:
+            raise ValidationError({"nova_senha": "A nova senha deve ser diferente da senha atual."})
+        validate_password(nova, user)
+        current_session = getattr(request, "access_session", None)
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            user.set_password(nova)
+            user.deve_trocar_senha = False
+            user.save(update_fields=["password", "deve_trocar_senha"])
+            sessoes = user.sessoes_acesso.select_for_update().filter(ativa=True)
+            if current_session:
+                sessoes = sessoes.exclude(pk=current_session.pk)
+            sessoes = list(sessoes)
+            for sessao in sessoes:
+                ConcurrentSessionService.close_session(sessao, "PASSWORD_CHANGED", user, request, audit=False)
+            AuditService.required_success(
+                AuditAction.USER_PASSWORD_CHANGED,
+                category=AuditCategory.USER_MANAGEMENT,
+                request=request,
+                user=user,
+                instance=user,
+                metadata={"sessoes_encerradas": len(sessoes), "motivo": "PASSWORD_CHANGED"},
+                status_code=200,
+            )
+        return Response({"detail": "Senha alterada.", "deve_trocar_senha": False, "sessoes_encerradas": len(sessoes)})
 
 
 class SessaoUsuarioViewSet(viewsets.ReadOnlyModelViewSet):

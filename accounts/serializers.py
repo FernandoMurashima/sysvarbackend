@@ -455,12 +455,23 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
             return
         available = CompanyModuleKeys(perfil.empresa)
         received = {item["modulo"].id: item for item in perms}
+        access_by_key = {
+            item["modulo"].chave: item.get("acesso") or UserModulePermission.Access.NONE
+            for item in perms
+        }
         PerfilModuloPermissao.objects.filter(perfil=perfil).exclude(modulo_id__in=received.keys()).delete()
         for modulo_id, item in received.items():
             modulo = item["modulo"]
             acesso = item.get("acesso") or UserModulePermission.Access.NONE
             if modulo.chave not in available and acesso != UserModulePermission.Access.NONE:
                 raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {modulo.chave}"})
+            if acesso != UserModulePermission.Access.NONE:
+                missing = [
+                    dep for dep in (modulo.dependencias or [])
+                    if access_by_key.get(dep, UserModulePermission.Access.NONE) == UserModulePermission.Access.NONE
+                ]
+                if missing:
+                    raise serializers.ValidationError({"permissoes_modulos": f"Módulo {modulo.chave} exige dependências ativas: {', '.join(missing)}"})
             PerfilModuloPermissao.objects.update_or_create(perfil=perfil, modulo=modulo, defaults={"acesso": acesso})
         increment_permissions_version(perfil.empresa)
         request = self.context.get("request")

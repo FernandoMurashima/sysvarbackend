@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -8,8 +9,10 @@ from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
 from cadastros.models import EmpresaContrato, ModuloSistema
-from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
+from accounts.services.sessions import token_hash
+from auditoria.models import AuditAction, AuditLog
 from compras.models import PedidoCompra
 from financeiro.models import Caixa, ContaBancaria, LancamentoContabil, MovimentacaoFinanceira, Pagar, Receber
 from fiscal.models import VendaPdv
@@ -308,6 +311,17 @@ class SaaSAccessControlTests(TestCase):
         self.empresa.contrato.usuario_master = self.master
         self.empresa.contrato.save(update_fields=["usuario_master", "updated_at"])
 
+    def active_session(self, user=None, raw="raw-account-token"):
+        sessao = SessaoUsuario.objects.create(
+            empresa=self.empresa,
+            usuario=user or self.master,
+            token_key_hash=token_hash(raw),
+            dispositivo_id=f"dev-{raw}",
+            ultima_atividade_em=timezone.now(),
+        )
+        SessionToken.objects.create(key_hash=token_hash(raw), session=sessao)
+        return raw, sessao
+
     def test_login_bloqueia_contrato_suspenso(self):
         contrato = self.empresa.contrato
         contrato.status = EmpresaContrato.STATUS_SUSPENSO
@@ -377,6 +391,138 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 0)
 
+    def test_encerrar_sessoes_rollback_preserva_sessoes_e_tokens(self):
+        user = get_user_model().objects.create_user(
+            username="sess_rollback",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        raw, sessao = self.active_session(user, "rollback-token")
+        self.client.force_authenticate(self.master)
+
+        with patch("accounts.views.AuditService.required_success", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                self.client.post(f"/api/accounts/users/{user.pk}/encerrar-sessoes/", {}, format="json")
+
+        sessao.refresh_from_db()
+        self.assertTrue(sessao.ativa)
+        self.assertIsNone(SessionToken.objects.get(key_hash=token_hash(raw)).revoked_at)
+
+    def test_encerrar_sessoes_cria_evento_consolidado_unico(self):
+        user = get_user_model().objects.create_user(
+            username="sess_ok",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        self.active_session(user, "ok-token-1")
+        self.active_session(user, "ok-token-2")
+        self.client.force_authenticate(self.master)
+
+        response = self.client.post(f"/api/accounts/users/{user.pk}/encerrar-sessoes/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sessoes_encerradas"], 2)
+        self.assertEqual(SessaoUsuario.objects.filter(usuario=user, ativa=True).count(), 0)
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.USER_SESSIONS_CLOSED, object_id=str(user.pk)).count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.SESSION_CLOSED, user=user).count(), 0)
+
+    def test_redefinir_senha_rollback_preserva_senha_flag_sessoes_e_token(self):
+        user = get_user_model().objects.create_user(
+            username="pwd_rollback",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        raw, sessao = self.active_session(user, "pwd-rollback-token")
+        self.client.force_authenticate(self.master)
+
+        with patch("accounts.views.AuditService.required_success", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                self.client.post(
+                    f"/api/accounts/users/{user.pk}/redefinir-senha/",
+                    {"nova_senha": "NovaSenha123", "confirmacao": "NovaSenha123", "encerrar_sessoes": True},
+                    format="json",
+                )
+
+        user.refresh_from_db()
+        sessao.refresh_from_db()
+        self.assertTrue(user.check_password("12345678"))
+        self.assertFalse(user.deve_trocar_senha)
+        self.assertTrue(sessao.ativa)
+        self.assertIsNone(SessionToken.objects.get(key_hash=token_hash(raw)).revoked_at)
+
+    def test_troca_obrigatoria_bloqueia_endpoints_e_libera_apos_alterar(self):
+        user = get_user_model().objects.create_user(
+            username="pwd_required",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+            deve_trocar_senha=True,
+        )
+        login = self.client.post("/api/accounts/auth/token/", {"username": user.username, "password": "12345678", "device_id": "pwd-1"}, format="json")
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.data["deve_trocar_senha"])
+        token = login.data["token"]
+
+        blocked = self.client.get("/api/accounts/modulos/", HTTP_AUTHORIZATION=f"Token {token}")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(blocked.data["code"], "PASSWORD_CHANGE_REQUIRED")
+        self.assertEqual(self.client.get("/api/me/", HTTP_AUTHORIZATION=f"Token {token}").status_code, 200)
+
+        invalid = self.client.post(
+            "/api/accounts/change-required-password/",
+            {"senha_atual": "errada", "nova_senha": "NovaSenha123", "confirmacao": "NovaSenha123"},
+            HTTP_AUTHORIZATION=f"Token {token}",
+            format="json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+        same = self.client.post(
+            "/api/accounts/change-required-password/",
+            {"senha_atual": "12345678", "nova_senha": "12345678", "confirmacao": "12345678"},
+            HTTP_AUTHORIZATION=f"Token {token}",
+            format="json",
+        )
+        self.assertEqual(same.status_code, 400)
+        changed = self.client.post(
+            "/api/accounts/change-required-password/",
+            {"senha_atual": "12345678", "nova_senha": "NovaSenha123", "confirmacao": "NovaSenha123"},
+            HTTP_AUTHORIZATION=f"Token {token}",
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200)
+        user.refresh_from_db()
+        self.assertFalse(user.deve_trocar_senha)
+        self.assertEqual(self.client.get("/api/accounts/modulos/", HTTP_AUTHORIZATION=f"Token {token}").status_code, 200)
+
+    def test_troca_obrigatoria_rollback_preserva_senha_e_flag(self):
+        user = get_user_model().objects.create_user(
+            username="pwd_required_rollback",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+            deve_trocar_senha=True,
+        )
+        login = self.client.post("/api/accounts/auth/token/", {"username": user.username, "password": "12345678", "device_id": "pwd-rb"}, format="json")
+        token = login.data["token"]
+        with patch("accounts.views.AuditService.required_success", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                self.client.post(
+                    "/api/accounts/change-required-password/",
+                    {"senha_atual": "12345678", "nova_senha": "NovaSenha123", "confirmacao": "NovaSenha123"},
+                    HTTP_AUTHORIZATION=f"Token {token}",
+                    format="json",
+                )
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("12345678"))
+        self.assertTrue(user.deve_trocar_senha)
+
     def test_perfil_padrao_deve_ser_unico_por_empresa_via_endpoint(self):
         outro = PerfilAcesso.objects.create(empresa=self.empresa, nome="Outro", padrao=False)
         self.client.force_authenticate(self.master)
@@ -386,6 +532,51 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PerfilAcesso.objects.get(pk=outro.pk).padrao)
         self.assertFalse(PerfilAcesso.objects.get(pk=self.perfil_padrao.pk).padrao)
+
+    def test_perfis_usam_operacional_e_validam_dependencias(self):
+        dependente = ModuloSistema.objects.create(
+            chave="relatorio_financeiro_teste",
+            nome="Relatório Financeiro Teste",
+            categoria=ModuloSistema.CATEGORIA_COMERCIAL,
+            basico=False,
+            ativo=True,
+            ordem=900,
+            dependencias=["financeiro"],
+        )
+        self.client.force_authenticate(self.master)
+        response = self.client.post(
+            "/api/accounts/perfis/",
+            {
+                "empresa": self.empresa.pk,
+                "nome": "Perfil Dependente",
+                "permissoes_modulos": [
+                    {"modulo": dependente.pk, "acesso": UserModulePermission.Access.EDIT},
+                    {"modulo": self.operacional.pk, "acesso": UserModulePermission.Access.EDIT},
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("depend", str(response.data).lower())
+
+    def test_perfil_rollback_quando_auditoria_obrigatoria_falha(self):
+        self.client.force_authenticate(self.master)
+        with patch("accounts.serializers.AuditService.required_success", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                self.client.post(
+                    "/api/accounts/perfis/",
+                    {
+                        "empresa": self.empresa.pk,
+                        "nome": "Perfil Rollback",
+                        "permissoes_modulos": [
+                            {"modulo": self.operacional.pk, "acesso": UserModulePermission.Access.EDIT},
+                        ],
+                    },
+                    format="json",
+                )
+
+        self.assertFalse(PerfilAcesso.objects.filter(nome="Perfil Rollback").exists())
 
     def test_crud_comum_nao_inativa_master(self):
         self.client.force_authenticate(self.master)
