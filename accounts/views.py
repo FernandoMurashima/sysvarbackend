@@ -157,26 +157,15 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="sessoes")
     def sessoes(self, request, pk=None):
         user = self.get_object()
-        qs = user.sessoes_acesso.select_related("loja").order_by("-ultima_atividade_em")
-        return Response([{
-            "id": s.id,
-            "session_id": str(s.session_id),
-            "dispositivo_id": s.dispositivo_id,
-            "ip": s.ip,
-            "loja": s.loja_id,
-            "loja_nome": getattr(s.loja, "nome_loja", None),
-            "iniciada_em": s.iniciada_em,
-            "ultima_atividade_em": s.ultima_atividade_em,
-            "ativa": s.ativa,
-            "motivo_encerramento": s.motivo_encerramento,
-        } for s in qs])
+        qs = user.sessoes_acesso.select_related("empresa", "usuario", "usuario__perfil_principal", "loja", "session_token").order_by("-ultima_atividade_em")
+        return Response(SessaoUsuarioSerializer(qs, many=True, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="encerrar-sessoes")
     def encerrar_sessoes(self, request, pk=None):
         with transaction.atomic():
             user = self.get_queryset().select_for_update().get(pk=pk)
             self.check_object_permissions(request, user)
-            sessoes = list(user.sessoes_acesso.select_for_update().filter(ativa=True))
+            sessoes = list(ConcurrentSessionService.valid_sessions_queryset().select_for_update().filter(usuario=user))
             for sessao in sessoes:
                 ConcurrentSessionService.close_session(sessao, "ADMIN_USER_SESSIONS_CLOSED", request.user, request, audit=False)
             AuditService.required_success(
@@ -302,7 +291,7 @@ class ChangeRequiredPasswordView(APIView):
 
 
 class SessaoUsuarioViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = SessaoUsuario.objects.select_related("empresa", "usuario", "loja").all().order_by("-ultima_atividade_em")
+    queryset = SessaoUsuario.objects.select_related("empresa", "usuario", "usuario__perfil_principal", "loja", "session_token").all().order_by("-ultima_atividade_em")
     serializer_class = SessaoUsuarioSerializer
     permission_classes = [permissions.IsAuthenticated]
 

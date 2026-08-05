@@ -531,6 +531,68 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 1)
 
+    def test_superusuario_cria_sessao_e_token_sem_consumir_licenca_da_empresa(self):
+        root = get_user_model().objects.create_superuser(username="takeshi_test", password="12345678")
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+
+        login = self.client.post("/api/accounts/auth/token/", {"username": root.username, "password": "12345678", "device_id": "root-device"}, format="json")
+
+        self.assertEqual(login.status_code, 200)
+        sessao = SessaoUsuario.objects.get(session_id=login.data["session_id"])
+        self.assertIsNone(sessao.empresa_id)
+        self.assertTrue(SessionToken.objects.filter(session=sessao, revoked_at__isnull=True).exists())
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 0)
+        self.assertEqual(self.empresa.contrato.sessoes_ativas, 0)
+
+    def test_admin_sessoes_usuario_lista_detalhes_e_encerramento_individual(self):
+        raw, sessao = self.active_session(self.master, "session-admin-token")
+        sessao.user_agent = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+        sessao.save(update_fields=["user_agent"])
+        self.client.force_authenticate(self.master)
+
+        response = self.client.get(f"/api/accounts/users/{self.master.pk}/sessoes/")
+        close = self.client.post(f"/api/accounts/sessoes/{sessao.pk}/encerrar/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["status"], "ATIVA")
+        self.assertTrue(response.data[0]["token_valido"])
+        self.assertEqual(response.data[0]["navegador"], "Chrome")
+        self.assertEqual(close.status_code, 200)
+        sessao.refresh_from_db()
+        self.assertFalse(sessao.ativa)
+        self.assertIsNotNone(SessionToken.objects.get(key_hash=token_hash(raw)).revoked_at)
+
+    def test_encerrar_todas_sessoes_usa_criterio_central_e_rollback_obrigatorio(self):
+        raw, sessao = self.active_session(self.master, "close-all-valid")
+        raw_revoked, sessao_revogada = self.active_session(self.master, "close-all-revoked")
+        SessionToken.objects.filter(key_hash=token_hash(raw_revoked)).update(revoked_at=timezone.now())
+        self.client.force_authenticate(self.master)
+
+        response = self.client.post(f"/api/accounts/users/{self.master.pk}/encerrar-sessoes/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sessoes_encerradas"], 1)
+        sessao.refresh_from_db()
+        sessao_revogada.refresh_from_db()
+        self.assertFalse(sessao.ativa)
+        self.assertTrue(sessao_revogada.ativa)
+        self.assertIsNotNone(SessionToken.objects.get(key_hash=token_hash(raw)).revoked_at)
+
+    def test_empresa_lista_apenas_sessoes_que_ocupam_licenca(self):
+        self.active_session(self.master, "empresa-valid")
+        raw_revoked, _sessao_revogada = self.active_session(self.master, "empresa-revoked")
+        SessionToken.objects.filter(key_hash=token_hash(raw_revoked)).update(revoked_at=timezone.now())
+        self.client.force_authenticate(self.master)
+
+        response = self.client.get(f"/api/accounts/sessoes/?empresa={self.empresa.pk}&ativa=true")
+        data = response.data.get("results", response.data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(data), ConcurrentSessionService.count_active_sessions(self.empresa))
+        self.assertEqual(len(data), 1)
+
     def test_encerrar_sessoes_rollback_preserva_sessoes_e_tokens(self):
         user = get_user_model().objects.create_user(
             username="sess_rollback",

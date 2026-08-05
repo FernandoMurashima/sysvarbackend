@@ -393,20 +393,98 @@ class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
 class SessaoUsuarioSerializer(serializers.ModelSerializer):
     usuario_username = serializers.CharField(source="usuario.username", read_only=True)
     usuario_nome = serializers.SerializerMethodField()
+    usuario_perfil = serializers.CharField(source="usuario.perfil_principal.nome", read_only=True, allow_null=True)
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True, allow_null=True)
     empresa_nome = serializers.CharField(source="empresa.nome", read_only=True, allow_null=True)
+    status = serializers.SerializerMethodField()
+    navegador = serializers.SerializerMethodField()
+    sistema_operacional = serializers.SerializerMethodField()
+    heartbeat = serializers.DateTimeField(source="ultima_atividade_em", read_only=True)
+    token_valido = serializers.SerializerMethodField()
+    token_revogado = serializers.SerializerMethodField()
+    validade_motivo = serializers.SerializerMethodField()
+    tempo_conectado_segundos = serializers.SerializerMethodField()
+    origem = serializers.SerializerMethodField()
 
     class Meta:
         model = SessaoUsuario
         fields = (
-            "id", "empresa", "empresa_nome", "usuario", "usuario_username", "usuario_nome",
+            "id", "empresa", "empresa_nome", "usuario", "usuario_username", "usuario_nome", "usuario_perfil",
             "loja", "loja_nome", "session_id", "dispositivo_id", "ip", "user_agent",
             "iniciada_em", "ultima_atividade_em", "encerrada_em", "motivo_encerramento", "ativa",
+            "status", "navegador", "sistema_operacional", "heartbeat", "token_valido", "token_revogado",
+            "validade_motivo", "tempo_conectado_segundos", "origem",
         )
         read_only_fields = fields
 
     def get_usuario_nome(self, obj):
         return obj.usuario.get_full_name() or obj.usuario.username
+
+    def _token(self, obj):
+        try:
+            return obj.session_token
+        except Exception:
+            return None
+
+    def get_token_revogado(self, obj):
+        token = self._token(obj)
+        return bool(token and token.revoked_at)
+
+    def get_token_valido(self, obj):
+        from accounts.services.sessions import ConcurrentSessionService
+
+        return ConcurrentSessionService.is_session_valid(obj)
+
+    def get_validade_motivo(self, obj):
+        from accounts.services.sessions import ConcurrentSessionService
+
+        return ConcurrentSessionService.session_validity(obj)[1]
+
+    def get_status(self, obj):
+        valido = self.get_token_valido(obj)
+        motivo = self.get_validade_motivo(obj)
+        if valido:
+            return "ATIVA"
+        if motivo == "TIMEOUT":
+            return "EXPIRADA"
+        if self.get_token_revogado(obj):
+            return "REVOGADA"
+        return "ENCERRADA"
+
+    def get_tempo_conectado_segundos(self, obj):
+        fim = obj.encerrada_em or obj.ultima_atividade_em
+        if not fim or not obj.iniciada_em:
+            return 0
+        return max(0, int((fim - obj.iniciada_em).total_seconds()))
+
+    def get_origem(self, obj):
+        return "Plataforma" if getattr(obj.usuario, "is_superuser", False) else "Empresa"
+
+    def get_navegador(self, obj):
+        ua = (obj.user_agent or "").lower()
+        if "edg/" in ua:
+            return "Edge"
+        if "chrome/" in ua and "chromium" not in ua:
+            return "Chrome"
+        if "firefox/" in ua:
+            return "Firefox"
+        if "safari/" in ua:
+            return "Safari"
+        return "-"
+
+    def get_sistema_operacional(self, obj):
+        ua = (obj.user_agent or "").lower()
+        if "windows" in ua:
+            return "Windows"
+        if "android" in ua:
+            return "Android"
+        if "iphone" in ua or "ipad" in ua:
+            return "iOS"
+        if "mac os" in ua or "macintosh" in ua:
+            return "macOS"
+        if "linux" in ua:
+            return "Linux"
+        return "-"
 
 
 class PerfilModuloPermissaoSerializer(serializers.ModelSerializer):
