@@ -1,8 +1,10 @@
 import json
+from io import StringIO
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -11,7 +13,7 @@ from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, N
 from cadastros.models import EmpresaContrato, ModuloSistema
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
-from accounts.services.sessions import token_hash
+from accounts.services.sessions import ConcurrentSessionService, token_hash
 from auditoria.models import AuditAction, AuditLog
 from compras.models import PedidoCompra
 from financeiro.models import Caixa, ContaBancaria, LancamentoContabil, MovimentacaoFinanceira, Pagar, Receber
@@ -390,6 +392,144 @@ class SaaSAccessControlTests(TestCase):
 
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(SessaoUsuario.objects.filter(empresa=self.empresa, ativa=True).count(), 0)
+
+    def test_dois_acessos_permitidos_atualizam_indicador_central(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 2
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        joao = get_user_model().objects.create_user(
+            username="joao_limite",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+
+        fernando_login = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome"}, format="json")
+        joao_login = self.client.post("/api/accounts/auth/token/", {"username": joao.username, "password": "12345678", "device_id": "edge"}, format="json")
+        indicador = self.client.get(f"/api/cadastros/empresas/{self.empresa.pk}/contrato/", HTTP_AUTHORIZATION=f"Token {fernando_login.data['token']}")
+
+        self.assertEqual(fernando_login.status_code, 200)
+        self.assertEqual(joao_login.status_code, 200)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 2)
+        self.assertEqual(indicador.data["sessoes_ativas"], 2)
+        self.assertEqual(indicador.data["sessoes_disponiveis"], 0)
+
+    def test_terceiro_login_bloqueado_nao_altera_sessoes_tokens_ou_indicador(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 2
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        joao = get_user_model().objects.create_user(username="joao_terceiro", password="12345678", type="Regular", empresa=self.empresa, perfil_principal=self.perfil_padrao)
+        maria = get_user_model().objects.create_user(username="maria_terceiro", password="12345678", type="Regular", empresa=self.empresa, perfil_principal=self.perfil_padrao)
+
+        first = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome"}, format="json")
+        second = self.client.post("/api/accounts/auth/token/", {"username": joao.username, "password": "12345678", "device_id": "edge"}, format="json")
+        valid_tokens_before = SessionToken.objects.filter(session__empresa=self.empresa, revoked_at__isnull=True).count()
+        blocked = self.client.post("/api/accounts/auth/token/", {"username": maria.username, "password": "12345678", "device_id": "firefox"}, format="json")
+        indicador = self.client.get(f"/api/cadastros/empresas/{self.empresa.pk}/contrato/", HTTP_AUTHORIZATION=f"Token {first.data['token']}")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(blocked.data["code"], "CONCURRENT_SESSION_LIMIT_REACHED")
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 2)
+        self.assertEqual(valid_tokens_before, SessionToken.objects.filter(session__empresa=self.empresa, revoked_at__isnull=True).count())
+        self.assertFalse(SessaoUsuario.objects.filter(usuario=maria, ativa=True).exists())
+        self.assertEqual(indicador.data["sessoes_ativas"], 2)
+
+    def test_login_bloqueado_nao_deixa_fantasma_para_usuario_negado(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        joao = get_user_model().objects.create_user(username="joao_bloqueado", password="12345678", type="Regular", empresa=self.empresa, perfil_principal=self.perfil_padrao)
+
+        first = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome"}, format="json")
+        blocked = self.client.post("/api/accounts/auth/token/", {"username": joao.username, "password": "12345678", "device_id": "edge"}, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 1)
+        self.assertFalse(SessaoUsuario.objects.filter(usuario=joao, ativa=True).exists())
+        self.assertFalse(SessionToken.objects.filter(session__usuario=joao, revoked_at__isnull=True).exists())
+
+    def test_logout_endpoint_real_revoga_token_e_libera_vaga_no_indicador(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 2
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        login = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome-logout-real"}, format="json")
+        token = login.data["token"]
+        sessao = SessaoUsuario.objects.get(session_id=login.data["session_id"])
+
+        logout = self.client.post("/api/accounts/auth/logout/", {}, HTTP_AUTHORIZATION=f"Token {token}", format="json")
+        self.client.force_authenticate(self.master)
+        indicador = self.client.get(f"/api/cadastros/empresas/{self.empresa.pk}/contrato/")
+
+        self.assertEqual(logout.status_code, 200)
+        sessao.refresh_from_db()
+        self.assertFalse(sessao.ativa)
+        self.assertIsNotNone(sessao.encerrada_em)
+        self.assertEqual(sessao.motivo_encerramento, "LOGOUT")
+        self.assertIsNotNone(SessionToken.objects.get(session=sessao).revoked_at)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 0)
+        self.assertEqual(indicador.data["sessoes_ativas"], 0)
+        self.assertEqual(indicador.data["sessoes_disponiveis"], 2)
+
+    def test_login_apos_logout_nao_acumula_sessao_fantasma(self):
+        first = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome-relogin"}, format="json")
+        self.client.post("/api/accounts/auth/logout/", {}, HTTP_AUTHORIZATION=f"Token {first.data['token']}", format="json")
+        second = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "chrome-relogin"}, format="json")
+
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 1)
+        self.assertEqual(SessaoUsuario.objects.filter(usuario=self.master, motivo_encerramento="LOGOUT").count(), 1)
+
+    def test_mesmo_usuario_e_dispositivo_substitui_somente_sua_sessao(self):
+        first = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "device-x"}, format="json")
+        second = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "device-x"}, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 1)
+        self.assertEqual(SessaoUsuario.objects.filter(usuario=self.master, dispositivo_id="device-x", motivo_encerramento="REPLACED").count(), 1)
+
+    def test_usuarios_diferentes_no_mesmo_dispositivo_sao_independentes(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 2
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        joao = get_user_model().objects.create_user(username="joao_mesmo_device", password="12345678", type="Regular", empresa=self.empresa, perfil_principal=self.perfil_padrao)
+
+        fernando_login = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "device-compartilhado"}, format="json")
+        joao_login = self.client.post("/api/accounts/auth/token/", {"username": joao.username, "password": "12345678", "device_id": "device-compartilhado"}, format="json")
+
+        self.assertEqual(fernando_login.status_code, 200)
+        self.assertEqual(joao_login.status_code, 200)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 2)
+        self.assertEqual(SessaoUsuario.objects.filter(dispositivo_id="device-compartilhado", ativa=True).count(), 2)
+
+    def test_token_revogado_nao_ocupa_vaga_e_reconciliacao_corrige_estado(self):
+        raw, sessao = self.active_session(self.master, "revoked-token")
+        SessionToken.objects.filter(key_hash=token_hash(raw)).update(revoked_at=timezone.now())
+
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 0)
+        out = StringIO()
+        call_command("reconciliar_sessoes_ativas", "--empresa-id", str(self.empresa.pk), "--apply", stdout=out)
+
+        sessao.refresh_from_db()
+        self.assertFalse(sessao.ativa)
+        self.assertEqual(sessao.motivo_encerramento, "TOKEN_REVOKED")
+        self.assertIn("sessoes_corrigidas=1", out.getvalue())
+
+    def test_indicador_e_login_usam_mesmo_criterio_para_token_revogado(self):
+        contrato = self.empresa.contrato
+        contrato.limite_sessoes_simultaneas = 1
+        contrato.save(update_fields=["limite_sessoes_simultaneas", "updated_at"])
+        raw, _sessao = self.active_session(self.master, "revoked-before-login")
+        SessionToken.objects.filter(key_hash=token_hash(raw)).update(revoked_at=timezone.now())
+
+        login = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "new-valid-device"}, format="json")
+
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(ConcurrentSessionService.count_active_sessions(self.empresa), 1)
 
     def test_encerrar_sessoes_rollback_preserva_sessoes_e_tokens(self):
         user = get_user_model().objects.create_user(

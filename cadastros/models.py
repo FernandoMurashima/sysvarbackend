@@ -221,8 +221,9 @@ class EmpresaContrato(models.Model):
 
     @property
     def sessoes_ativas(self):
-        cutoff = timezone.now() - timezone.timedelta(minutes=getattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 30))
-        return self.empresa.sessoes_usuarios.filter(ativa=True, ultima_atividade_em__gte=cutoff).count()
+        from accounts.services.sessions import ConcurrentSessionService
+
+        return ConcurrentSessionService.count_active_sessions(self.empresa)
 
     @property
     def sessoes_disponiveis(self):

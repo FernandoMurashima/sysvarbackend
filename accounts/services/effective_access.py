@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -195,9 +194,10 @@ class LicenseService:
         self.empresa = empresa
 
     def usage(self):
+        from accounts.services.sessions import ConcurrentSessionService
+
         contrato = self.empresa.contrato
-        cutoff = timezone.now() - timezone.timedelta(minutes=getattr(settings, "SESSION_IDLE_TIMEOUT_MINUTES", 30))
-        used = self.empresa.sessoes_usuarios.filter(ativa=True, ultima_atividade_em__gte=cutoff).count()
+        used = ConcurrentSessionService.count_active_sessions(self.empresa)
         limit = int(contrato.limite_sessoes_simultaneas or 0)
         return {
             "limite_sessoes_simultaneas": limit,

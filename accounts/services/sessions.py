@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.signals import user_login_failed
 from django.db import transaction
+from django.db.models import F, Q
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 
@@ -34,8 +35,82 @@ def timeout_cutoff():
 
 class ConcurrentSessionService:
     @staticmethod
+    def valid_sessions_queryset(empresa=None):
+        today = timezone.localdate()
+        qs = (
+            SessaoUsuario.objects
+            .filter(
+                ativa=True,
+                encerrada_em__isnull=True,
+                ultima_atividade_em__gte=timeout_cutoff(),
+                usuario__is_active=True,
+                session_token__revoked_at__isnull=True,
+                session_token__key_hash=F("token_key_hash"),
+            )
+            .select_related("empresa", "usuario", "loja", "session_token")
+        )
+        if empresa is not None:
+            state = CompanyModuleService(empresa).contract_state()
+            if not state.active:
+                return qs.none()
+            qs = qs.filter(empresa=empresa)
+        else:
+            qs = qs.filter(
+                Q(usuario__is_superuser=True) |
+                Q(
+                    empresa__ativo=True,
+                    empresa__contrato__status=EmpresaContrato.STATUS_ATIVO,
+                    empresa__contrato__data_inicio__lte=today,
+                )
+            ).filter(
+                Q(usuario__is_superuser=True) |
+                Q(empresa__contrato__data_fim__isnull=True) |
+                Q(empresa__contrato__data_fim__gte=today)
+            )
+        return qs
+
+    @staticmethod
+    def active_sessions_queryset(empresa):
+        return ConcurrentSessionService.valid_sessions_queryset(empresa)
+
+    @staticmethod
     def active_sessions_qs(empresa):
-        return SessaoUsuario.objects.filter(empresa=empresa, ativa=True, ultima_atividade_em__gte=timeout_cutoff())
+        return ConcurrentSessionService.active_sessions_queryset(empresa)
+
+    @staticmethod
+    def count_active_sessions(empresa):
+        return ConcurrentSessionService.active_sessions_queryset(empresa).count()
+
+    @staticmethod
+    def session_validity(sessao):
+        if not sessao.ativa:
+            return False, "INACTIVE"
+        if sessao.encerrada_em is not None:
+            return False, "ENDED"
+        if sessao.ultima_atividade_em < timeout_cutoff():
+            return False, "TIMEOUT"
+        user = getattr(sessao, "usuario", None)
+        if not user or not user.is_active:
+            return False, "USER_INACTIVE"
+        if not getattr(user, "is_superuser", False):
+            if not sessao.empresa_id:
+                return False, "NO_COMPANY"
+            state = CompanyModuleService(sessao.empresa).contract_state()
+            if not state.active:
+                return False, state.reason or "CONTRACT_INACTIVE"
+        try:
+            token = sessao.session_token
+        except SessionToken.DoesNotExist:
+            return False, "NO_TOKEN"
+        if token.revoked_at is not None:
+            return False, "TOKEN_REVOKED"
+        if token.key_hash != sessao.token_key_hash:
+            return False, "TOKEN_MISMATCH"
+        return True, "VALID"
+
+    @staticmethod
+    def is_session_valid(sessao):
+        return ConcurrentSessionService.session_validity(sessao)[0]
 
     @staticmethod
     def close_expired(empresa=None):
@@ -50,7 +125,8 @@ class ConcurrentSessionService:
 
     @staticmethod
     def close_session(sessao, motivo, actor=None, request=None, audit=True):
-        if not sessao.ativa:
+        if not sessao.ativa and sessao.encerrada_em is not None:
+            SessionToken.objects.filter(session=sessao, revoked_at__isnull=True).update(revoked_at=timezone.now())
             return sessao
         sessao.ativa = False
         sessao.encerrada_em = timezone.now()
@@ -137,7 +213,7 @@ class ConcurrentSessionService:
             ).first()
             if existing:
                 ConcurrentSessionService.close_session(existing, "REPLACED", user, request)
-            active_count = ConcurrentSessionService.active_sessions_qs(user.empresa).select_for_update().count()
+            active_count = ConcurrentSessionService.count_active_sessions(user.empresa)
             limit = int(contrato.limite_sessoes_simultaneas or 0)
             if active_count >= limit:
                 AuditService.security(

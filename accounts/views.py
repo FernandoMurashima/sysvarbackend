@@ -148,8 +148,11 @@ class UserViewSet(viewsets.ModelViewSet):
             ativos=Count("id", filter=Q(is_active=True)),
             inativos=Count("id", filter=Q(is_active=False)),
             masters=Count("id", filter=Q(id__in=master_ids)),
-            com_sessao_ativa=Count("id", filter=Q(sessoes_acesso__ativa=True), distinct=True),
-        ))
+        ) | {
+            "com_sessao_ativa": qs.filter(
+                id__in=ConcurrentSessionService.valid_sessions_queryset().values("usuario_id")
+            ).distinct().count(),
+        })
 
     @action(detail=True, methods=["get"], url_path="sessoes")
     def sessoes(self, request, pk=None):
@@ -316,13 +319,16 @@ class SessaoUsuarioViewSet(viewsets.ReadOnlyModelViewSet):
         elif empresa:
             qs = qs.filter(empresa_id=empresa)
         if ativa is not None and ativa != "":
-            qs = qs.filter(ativa=str(ativa).lower() in {"1", "true", "sim"})
+            if str(ativa).lower() in {"1", "true", "sim"}:
+                qs = qs.filter(pk__in=ConcurrentSessionService.valid_sessions_queryset().values("pk"))
+            else:
+                qs = qs.exclude(pk__in=ConcurrentSessionService.valid_sessions_queryset().values("pk"))
         return qs
 
     @action(detail=False, methods=["post"], url_path="heartbeat")
     def heartbeat(self, request):
         sessao = getattr(request, "access_session", None)
-        if not sessao:
+        if not sessao or not ConcurrentSessionService.is_session_valid(sessao):
             raise PermissionDenied("Sessão não identificada.")
         ConcurrentSessionService.touch(sessao, force=True)
         permissions_version = None

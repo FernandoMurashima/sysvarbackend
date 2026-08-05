@@ -217,7 +217,7 @@ class EmpresaViewSet(BaseCadastroViewSet):
             if contrato.status == EmpresaContrato.STATUS_SUSPENSO:
                 raise ValidationError({"status": "Contrato já está suspenso."})
             before = {"status": contrato.status}
-            sessoes = list(empresa.sessoes_usuarios.select_for_update().filter(ativa=True))
+            sessoes = list(ConcurrentSessionService.active_sessions_queryset(empresa).select_for_update())
             for sessao in sessoes:
                 ConcurrentSessionService.close_session(sessao, "CONTRACT_SUSPENDED", request.user, request)
             contrato.status = EmpresaContrato.STATUS_SUSPENSO
@@ -337,7 +337,7 @@ class LojaViewSet(BaseCadastroViewSet):
 
     def _impedimentos_inativacao(self, loja):
         impedimentos = []
-        if loja.sessoes_usuarios.filter(ativa=True).exists():
+        if ConcurrentSessionService.valid_sessions_queryset().filter(loja=loja).exists():
             impedimentos.append("Existem sessões ativas no estabelecimento.")
         if loja.usuarios.filter(is_active=True).exists():
             impedimentos.append("Existem usuários com esta loja principal.")
@@ -426,7 +426,7 @@ class LojaViewSet(BaseCadastroViewSet):
                 "loja_principal": user.loja_id == loja.id,
                 "loja_permitida": user.lojas.filter(pk=loja.pk).exists(),
                 "ativo": user.is_active,
-                "sessao_ativa": user.sessoes_acesso.filter(loja=loja, ativa=True).exists(),
+                "sessao_ativa": ConcurrentSessionService.valid_sessions_queryset().filter(loja=loja, usuario=user).exists(),
             })
         return Response(data)
 
