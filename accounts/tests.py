@@ -581,9 +581,22 @@ class SaaSAccessControlTests(TestCase):
         self.assertIsNotNone(SessionToken.objects.get(key_hash=token_hash(raw)).revoked_at)
 
     def test_empresa_lista_apenas_sessoes_que_ocupam_licenca(self):
-        self.active_session(self.master, "empresa-valid")
+        _, sessao_valida = self.active_session(self.master, "empresa-valid")
+        sessao_valida.user_agent = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+        sessao_valida.save(update_fields=["user_agent"])
         raw_revoked, _sessao_revogada = self.active_session(self.master, "empresa-revoked")
+        _raw_expired, sessao_expirada = self.active_session(self.master, "empresa-expired")
+        superuser = get_user_model().objects.create_superuser(username="takeshi_test", password="12345678")
+        SessaoUsuario.objects.create(
+            empresa=None,
+            usuario=superuser,
+            token_key_hash=token_hash("empresa-superuser"),
+            dispositivo_id="dev-superuser",
+            ultima_atividade_em=timezone.now(),
+        )
         SessionToken.objects.filter(key_hash=token_hash(raw_revoked)).update(revoked_at=timezone.now())
+        sessao_expirada.ultima_atividade_em = timezone.now() - timezone.timedelta(minutes=120)
+        sessao_expirada.save(update_fields=["ultima_atividade_em"])
         self.client.force_authenticate(self.master)
 
         response = self.client.get(f"/api/accounts/sessoes/?empresa={self.empresa.pk}&ativa=true")
@@ -592,6 +605,14 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(data), ConcurrentSessionService.count_active_sessions(self.empresa))
         self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], sessao_valida.pk)
+        self.assertEqual(data[0]["usuario_username"], self.master.username)
+        self.assertEqual(data[0]["status"], "ATIVA")
+        self.assertEqual(data[0]["navegador"], "Chrome")
+        self.assertEqual(data[0]["sistema_operacional"], "Windows")
+        self.assertTrue(data[0]["token_valido"])
+        self.assertFalse(data[0]["token_revogado"])
+        self.assertIn("tempo_conectado_segundos", data[0])
 
     def test_encerrar_sessoes_rollback_preserva_sessoes_e_tokens(self):
         user = get_user_model().objects.create_user(
