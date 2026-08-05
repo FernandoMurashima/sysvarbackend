@@ -60,6 +60,7 @@ class UserModulePermission(models.Model):
         FINANCEIRO = "financeiro", "Financeiro"
         RELATORIOS = "relatorios", "Relatórios"
         CONFIGURACOES = "configuracoes", "Configurações"
+        AUDITORIA = "auditoria", "Auditoria"
 
     class Access(models.TextChoices):
         NONE = "NONE", "Sem acesso"

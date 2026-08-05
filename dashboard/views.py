@@ -9,7 +9,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasEffectiveModuleAccess
 
-from auditoria.models import AuditLog
+from auditoria.models import AuditAction, AuditCategory, AuditResult, AuditSeverity
+from auditoria.services import AuditService
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
 from financeiro.models import Caixa, ContaBancaria, MovimentacaoFinanceira, PagarItem, ReceberItem
 from fiscal.models.venda_pdv import (
@@ -471,19 +472,18 @@ class DashboardExecutivoView(APIView):
         }
 
     def _audit(self, request, action, allowed):
-        try:
-            AuditLog.objects.create(
-                user=request.user if request.user.is_authenticated else None,
-                action=action,
-                app_label="dashboard",
-                model="DashboardExecutivo",
-                object_id=str(getattr(request.user, "pk", "")),
-                changes={"allowed": allowed, "params": dict(request.query_params)},
-                ip=request.META.get("REMOTE_ADDR"),
-                user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
-            )
-        except Exception:
-            pass
+        AuditService.record(
+            action=AuditAction.AUDIT_ACCESS_DENIED if not allowed else AuditAction.OBJECT_UPDATED,
+            category=AuditCategory.REPORT,
+            result=AuditResult.DENIED if not allowed else AuditResult.SUCCESS,
+            severity=AuditSeverity.WARNING if not allowed else AuditSeverity.INFO,
+            request=request,
+            user=request.user if request.user.is_authenticated else None,
+            app_label="dashboard",
+            model=self.__class__.__name__,
+            object_id=str(getattr(request.user, "pk", "")),
+            metadata={"legacy_action": action, "allowed": allowed, "params": dict(request.query_params)},
+        )
 
 
 class DashboardProdutosView(DashboardExecutivoView):

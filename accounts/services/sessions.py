@@ -3,12 +3,15 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.signals import user_login_failed
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 
 from accounts.models import SessaoUsuario, SessionToken
 from accounts.services.effective_access import CompanyModuleService, EffectiveAccessService, audit_event
+from auditoria.models import AuditAction, AuditCategory, AuditResult, AuditSeverity
+from auditoria.services import AuditService
 from cadastros.models import EmpresaContrato
 
 
@@ -52,13 +55,28 @@ class ConcurrentSessionService:
         sessao.motivo_encerramento = motivo
         sessao.save(update_fields=["ativa", "encerrada_em", "motivo_encerramento"])
         SessionToken.objects.filter(session=sessao, revoked_at__isnull=True).update(revoked_at=timezone.now())
-        audit_event("session_closed", request, actor or sessao.usuario, "sessao_usuario", sessao.pk, {"motivo": motivo})
+        action = AuditAction.USER_LOGOUT if motivo == "LOGOUT" else AuditAction.SESSION_TIMEOUT if motivo == "TIMEOUT" else AuditAction.SESSION_REPLACED if motivo == "REPLACED" else AuditAction.SESSION_CLOSED
+        AuditService.security(
+            action=action,
+            result=AuditResult.SUCCESS,
+            severity=AuditSeverity.INFO,
+            request=request,
+            user=actor or sessao.usuario,
+            session=sessao,
+            empresa=sessao.empresa,
+            loja=sessao.loja,
+            app_label="accounts",
+            model="sessao_usuario",
+            object_id=sessao.pk,
+            metadata={"motivo": motivo},
+        )
         return sessao
 
     @staticmethod
     def login(request, username, password, dispositivo_id, loja=None):
         user = authenticate(request=request, username=username, password=password)
         if not user:
+            user_login_failed.send(sender=ConcurrentSessionService, credentials={"username": username}, request=request)
             raise AuthenticationFailed("Usuário ou senha inválidos.")
         if user.is_superuser:
             raw = new_token()
@@ -74,6 +92,18 @@ class ConcurrentSessionService:
                 ultima_atividade_em=now,
             )
             SessionToken.objects.create(key_hash=token_hash(raw), session=sessao)
+            transaction.on_commit(lambda: AuditService.security(
+                action=AuditAction.USER_LOGIN,
+                result=AuditResult.SUCCESS,
+                severity=AuditSeverity.INFO,
+                request=request,
+                user=user,
+                session=sessao,
+                app_label="accounts",
+                model="sessao_usuario",
+                object_id=sessao.pk,
+                metadata={"superuser": True},
+            ))
             return raw, sessao, user
         if not user.is_active:
             raise AuthenticationFailed("Usuário inativo.")
@@ -101,7 +131,18 @@ class ConcurrentSessionService:
             active_count = ConcurrentSessionService.active_sessions_qs(user.empresa).select_for_update().count()
             limit = int(contrato.limite_sessoes_simultaneas or 0)
             if active_count >= limit:
-                audit_event("session_limit_block", request, user, "empresa", user.empresa_id, {"limite": limit, "ativas": active_count})
+                AuditService.security(
+                    action=AuditAction.SESSION_LIMIT_REACHED,
+                    result=AuditResult.DENIED,
+                    severity=AuditSeverity.WARNING,
+                    request=request,
+                    user=user,
+                    empresa=user.empresa,
+                    app_label="accounts",
+                    model="empresa",
+                    object_id=user.empresa_id,
+                    metadata={"limite": limit, "sessoes_ativas": active_count, "username": username},
+                )
                 exc = PermissionDenied("O limite de acessos simultâneos da empresa foi atingido.")
                 exc.detail = {
                     "detail": "O limite de acessos simultâneos da empresa foi atingido.",
@@ -122,7 +163,19 @@ class ConcurrentSessionService:
                 ultima_atividade_em=timezone.now(),
             )
             SessionToken.objects.create(key_hash=token_hash(raw), session=sessao)
-            audit_event("session_login", request, user, "sessao_usuario", sessao.pk)
+            transaction.on_commit(lambda: AuditService.security(
+                action=AuditAction.USER_LOGIN,
+                result=AuditResult.SUCCESS,
+                severity=AuditSeverity.INFO,
+                request=request,
+                user=user,
+                session=sessao,
+                empresa=user.empresa,
+                loja=loja,
+                app_label="accounts",
+                model="sessao_usuario",
+                object_id=sessao.pk,
+            ))
             return raw, sessao, user
 
     @staticmethod

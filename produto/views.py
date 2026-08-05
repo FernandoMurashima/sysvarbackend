@@ -7,10 +7,8 @@ from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-try:
-    from auditoria.models import AuditLog
-except Exception:  # auditoria opcionalmente ausente em dev
-    AuditLog = None
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService
 
 from .permissions import CanToggleProductFlags
 from accounts.permissions import HasEmpresaModulo, HasModuleRole
@@ -35,25 +33,16 @@ from .serializers import (
 
 
 def _audit(model_name: str, obj_id: str, changes: dict, request, action: str):
-    """Registra log simples na tabela de auditoria (se disponível)."""
-    if not AuditLog:
-        return
-    try:
-        ip = request.META.get("REMOTE_ADDR")
-        ua = request.META.get("HTTP_USER_AGENT", "")[:400]
-        AuditLog.objects.create(
-            action=action,
-            app_label="produto",
-            model=model_name,
-            object_id=str(obj_id),
-            changes=changes,
-            user=getattr(request, "user", None),
-            ip=ip,
-            user_agent=ua,
-        )
-    except Exception:
-        # Não derruba a requisição se auditoria falhar
-        pass
+    AuditService.success(
+        AuditAction.OBJECT_UPDATED,
+        category=AuditCategory.PRODUCT,
+        request=request,
+        user=getattr(request, "user", None),
+        app_label="produto",
+        model=model_name,
+        object_id=obj_id,
+        metadata={"legacy_action": action, "changes": changes},
+    )
 
 
 def _money(value):

@@ -10,7 +10,9 @@ from rest_framework.views import APIView
 
 from rest_framework.permissions import IsAuthenticated
 
-from auditoria.models import AuditLog
+from django.db import transaction
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService
 from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, ProfileDefaultService, audit_event, increment_permissions_version, sync_legacy_license_flags
 from accounts.services.profiles import hidden_profile_names_for_company
 from accounts.services.sessions import ConcurrentSessionService
@@ -44,7 +46,7 @@ class RegisterView(APIView):
         serializer = UserSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        audit_event("legacy_register_user", request, request.user, "user", user.pk, {"username": user.username})
+        transaction.on_commit(lambda: AuditService.success(AuditAction.USER_CREATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, metadata={"username": user.username}))
         return Response({"message": "Usuário criado com sucesso.", "user": UserSerializer(user, context={"request": request}).data}, status=201)
 
 # ---- Login (público) → token ----
@@ -120,7 +122,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(user, data={"is_active": True}, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        audit_event("user_activate", request, request.user, "user", user.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.USER_ACTIVATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, before={"is_active": False}, after={"is_active": True}))
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="inativar")
@@ -134,7 +136,7 @@ class UserViewSet(viewsets.ModelViewSet):
             ConcurrentSessionService.close_session(sessao, "USER_INACTIVE", request.user, request)
         if user.empresa_id:
             increment_permissions_version(user.empresa)
-        audit_event("user_deactivate", request, request.user, "user", user.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.USER_INACTIVATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, before={"is_active": True}, after={"is_active": False}))
         return Response(self.get_serializer(user).data)
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="desativar")
@@ -199,7 +201,7 @@ class SessaoUsuarioViewSet(viewsets.ReadOnlyModelViewSet):
             sessao.empresa_id == getattr(user, "empresa_id", None) and EffectiveAccessService(user).is_company_master()
         )
         if not allowed:
-            audit_event("session_close_denied", request, user, "sessao_usuario", sessao.pk)
+            AuditService.denied(AuditAction.SESSION_CLOSE_DENIED, category=AuditCategory.SECURITY, request=request, user=user, session=sessao, app_label="accounts", model="sessao_usuario", object_id=sessao.pk)
             raise PermissionDenied("Sem permissão para encerrar esta sessão.")
         ConcurrentSessionService.close_session(sessao, "ADMIN_TERMINATED" if sessao.usuario_id != user.id else "SELF_TERMINATED", user, request)
         return Response(self.get_serializer(sessao).data)
@@ -243,14 +245,17 @@ class EmpresaContratoViewSet(viewsets.ModelViewSet):
         obj = serializer.save()
         obj.incrementar_versao()
         sync_legacy_license_flags(obj.empresa)
-        audit_event("contract_create", self.request, self.request.user, "contrato", obj.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_CREATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}, audit_required=True))
 
     def perform_update(self, serializer):
         self._exigir_superusuario()
+        before = {"status": serializer.instance.status, "limite_sessoes_simultaneas": serializer.instance.limite_sessoes_simultaneas, "plano_completo": serializer.instance.plano_completo} if serializer.instance else {}
         obj = serializer.save()
         obj.incrementar_versao()
         sync_legacy_license_flags(obj.empresa)
-        audit_event("contract_update", self.request, self.request.user, "contrato", obj.pk)
+        after = {"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}
+        action = AuditAction.CONTRACT_LIMIT_CHANGED if before.get("limite_sessoes_simultaneas") != after.get("limite_sessoes_simultaneas") else AuditAction.CONTRACT_STATUS_CHANGED if before.get("status") != after.get("status") else AuditAction.CONTRACT_UPDATED
+        transaction.on_commit(lambda: AuditService.success(action, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before=before, after=after, audit_required=True))
 
     @action(detail=True, methods=["post"], url_path="transferir-master")
     def transferir_master(self, request, pk=None):
@@ -278,14 +283,14 @@ class EmpresaModuloViewSet(viewsets.ModelViewSet):
         obj = serializer.save()
         increment_permissions_version(obj.empresa)
         sync_legacy_license_flags(obj.empresa)
-        audit_event("company_module_create", self.request, self.request.user, "empresa_modulo", obj.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"modulo": obj.modulo.chave, "contratado": obj.contratado}))
 
     def perform_update(self, serializer):
         old = serializer.instance.contratado if serializer.instance else None
         obj = serializer.save()
         increment_permissions_version(obj.empresa)
         sync_legacy_license_flags(obj.empresa)
-        audit_event("company_module_update", self.request, self.request.user, "empresa_modulo", obj.pk, {"old": old, "new": obj.contratado})
+        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before={"contratado": old}, after={"contratado": obj.contratado, "modulo": obj.modulo.chave}))
 
 
 class PerfilAcessoViewSet(viewsets.ModelViewSet):
@@ -330,7 +335,7 @@ class PerfilAcessoViewSet(viewsets.ModelViewSet):
         perfil.ativo = True
         perfil.save(update_fields=["ativo", "updated_at"])
         increment_permissions_version(perfil.empresa)
-        audit_event("profile_activate", request, request.user, "perfil_acesso", perfil.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_UPDATED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=perfil, before={"ativo": False}, after={"ativo": True}))
         return Response(self.get_serializer(perfil).data)
 
     @action(detail=True, methods=["post"], url_path="inativar")
@@ -343,10 +348,10 @@ class PerfilAcessoViewSet(viewsets.ModelViewSet):
         perfil.ativo = False
         perfil.save(update_fields=["ativo", "updated_at"])
         increment_permissions_version(perfil.empresa)
-        audit_event("profile_deactivate", request, request.user, "perfil_acesso", perfil.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_INACTIVATED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=perfil, before={"ativo": True}, after={"ativo": False}))
         return Response(self.get_serializer(perfil).data)
 
     def perform_destroy(self, instance):
         instance.delete()
         increment_permissions_version(instance.empresa)
-        audit_event("profile_delete", self.request, self.request.user, "perfil_acesso", instance.pk)
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_INACTIVATED, category=AuditCategory.ACCESS, request=self.request, user=self.request.user, app_label="accounts", model="perfil_acesso", object_id=instance.pk, before={"ativo": True}, after={"ativo": False}))

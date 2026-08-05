@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
 from accounts.services.effective_access import EffectiveAccessService, LicenseService, increment_permissions_version
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService
 from .models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission, UserFieldPermission
 
 User = get_user_model()
@@ -211,6 +213,8 @@ class UserSerializer(serializers.ModelSerializer):
             self._salvar_permissoes(user, permissoes_modulos, permissoes_campos)
             if user.empresa_id:
                 increment_permissions_version(user.empresa)
+            request = self.context.get("request")
+            transaction.on_commit(lambda: AuditService.success(AuditAction.USER_CREATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=getattr(request, "user", None), instance=user, after={"username": user.username, "is_active": user.is_active, "type": user.type}))
         return user
 
     def update(self, instance, validated_data):
@@ -236,6 +240,8 @@ class UserSerializer(serializers.ModelSerializer):
             self._salvar_permissoes(instance, permissoes_modulos, permissoes_campos)
             if instance.empresa_id:
                 increment_permissions_version(instance.empresa)
+            request = self.context.get("request")
+            transaction.on_commit(lambda: AuditService.success(AuditAction.USER_UPDATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=getattr(request, "user", None), instance=instance, metadata={"campos": list(validated_data.keys())}))
         return instance
 
     def _salvar_permissoes(self, user, permissoes_modulos, permissoes_campos):
@@ -251,6 +257,8 @@ class UserSerializer(serializers.ModelSerializer):
                     modulo=modulo,
                     defaults={"acesso": acesso},
                 )
+            request = self.context.get("request")
+            transaction.on_commit(lambda: AuditService.success(AuditAction.PERMISSION_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=user, metadata={"tipo": "user_override", "permissoes": recebidos}))
         if permissoes_campos is not None:
             recebidos = {item["campo"]: bool(item.get("pode_ver")) for item in permissoes_campos}
             UserFieldPermission.objects.filter(user=user).exclude(campo__in=recebidos.keys()).delete()
@@ -449,6 +457,8 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
         perms = validated_data.pop("permissoes_modulos", None)
         perfil = PerfilAcesso.objects.create(**validated_data)
         self._save_perms(perfil, perms)
+        request = self.context.get("request")
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_CREATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=perfil, after={"nome": perfil.nome, "ativo": perfil.ativo, "padrao": perfil.padrao}))
         return perfil
 
     def update(self, instance, validated_data):
@@ -458,6 +468,8 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
         instance.save()
         self._save_perms(instance, perms)
         increment_permissions_version(instance.empresa)
+        request = self.context.get("request")
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=instance, metadata={"campos": list(validated_data.keys())}))
         return instance
 
 

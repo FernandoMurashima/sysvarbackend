@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     # Apps do projeto
     'cadastros.apps.CadastrosConfig',
     'accounts.apps.AccountsConfig',
-    'auditoria',
+    'auditoria.apps.AuditoriaConfig',
     'produto',
     'financeiro',
     'compras',
@@ -64,12 +64,10 @@ MIDDLEWARE = [
 
     'django.contrib.sessions.middleware.SessionMiddleware',
 
-    # Guarda o request em thread-local para auditoria
-    'auditoria.middleware.RequestMiddleware',
-
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'auditoria.middleware.AuditContextMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

@@ -27,22 +27,34 @@ class ContractState:
 
 
 def audit_event(action, request=None, user=None, model="security", object_id="", changes=None):
-    try:
-        from auditoria.models import AuditLog
+    from auditoria.models import AuditAction, AuditCategory, AuditResult, AuditSeverity
+    from auditoria.services import AuditService
 
-        req_user = user or getattr(request, "user", None)
-        AuditLog.objects.create(
-            action=str(action)[:32],
-            app_label="accounts",
-            model=model,
-            object_id=str(object_id or ""),
-            changes=changes or {},
-            user=req_user if getattr(req_user, "is_authenticated", False) else None,
-            ip=(getattr(request, "META", {}) or {}).get("REMOTE_ADDR", "")[:45] if request else "",
-            user_agent=(getattr(request, "META", {}) or {}).get("HTTP_USER_AGENT", "")[:400] if request else "",
-        )
-    except Exception:
-        pass
+    action_name = AuditAction.LEGACY_MAP.get(str(action), str(action).upper())
+    category = AuditCategory.SECURITY
+    result = AuditResult.SUCCESS
+    severity = AuditSeverity.INFO
+    if "denied" in str(action) or "block" in str(action):
+        result = AuditResult.DENIED
+        severity = AuditSeverity.WARNING
+    if "contract" in str(action):
+        category = AuditCategory.CONTRACT
+    elif "profile" in str(action) or "permission" in str(action) or "master" in str(action):
+        category = AuditCategory.ACCESS
+    elif "user" in str(action):
+        category = AuditCategory.USER_MANAGEMENT
+    AuditService.record(
+        action=action_name,
+        category=category,
+        result=result,
+        severity=severity,
+        request=request,
+        user=user,
+        app_label="accounts",
+        model=model,
+        object_id=object_id,
+        metadata=changes or {},
+    )
 
 
 def increment_permissions_version(empresa):
@@ -229,7 +241,7 @@ class EffectiveAccessService:
         if not user or user.is_superuser or not getattr(user, "empresa_id", None):
             return False
         try:
-            contrato = user.empresa.contrato
+            contrato = EmpresaContrato.objects.only("usuario_master_id").get(empresa_id=user.empresa_id)
         except EmpresaContrato.DoesNotExist:
             return False
         return contrato.usuario_master_id == user.id and user.is_active
@@ -362,7 +374,7 @@ class MasterTransferService:
         with transaction.atomic():
             contrato = EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
             if not (self.actor.is_superuser or contrato.usuario_master_id == self.actor.id):
-                audit_event("master_transfer_denied", self.request, self.actor, "empresa", self.empresa.pk)
+                audit_event("master_transfer_denied", self.request, self.actor, "empresa", self.empresa.pk, {"novo_master": self.new_master.pk})
                 raise PermissionDenied("Somente superusuário ou master atual pode transferir o master.")
             if self.new_master.empresa_id != self.empresa.id or not self.new_master.is_active or self.new_master.is_superuser:
                 raise ValidationError({"usuario_master": "Novo master inválido para esta empresa."})
@@ -370,7 +382,7 @@ class MasterTransferService:
             contrato.usuario_master = self.new_master
             contrato.incrementar_versao(save=False)
             contrato.save(update_fields=["usuario_master", "permissions_version", "updated_at"])
-            audit_event("master_transfer", self.request, self.actor, "empresa", self.empresa.pk, {"old": old, "new": self.new_master.pk})
+            transaction.on_commit(lambda: audit_event("master_transfer", self.request, self.actor, "empresa", self.empresa.pk, {"old": old, "new": self.new_master.pk}))
             return contrato
 
 
@@ -404,5 +416,5 @@ class ProfileDefaultService:
                 perfil.padrao = True
                 perfil.save(update_fields=["padrao", "updated_at"])
             increment_permissions_version(perfil.empresa)
-            audit_event("profile_set_default", self.request, self.actor, "perfil_acesso", perfil.pk)
+            transaction.on_commit(lambda: audit_event("profile_set_default", self.request, self.actor, "perfil_acesso", perfil.pk))
             return perfil

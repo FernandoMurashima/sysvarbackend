@@ -15,6 +15,7 @@ APP_MODULE_MAP = {
     "financeiro": "financeiro",
     "relatorios": "relatorios",
     "distribuicao": "distribuicao",
+    "auditoria": "auditoria",
 }
 
 EMPRESA_FIELD_MODULE_MAP = {

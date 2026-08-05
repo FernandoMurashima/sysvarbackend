@@ -8,10 +8,8 @@ from accounts.permissions import HasModuleRole
 from compras.models import PedidoCompraEntrega
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, ProdutoDetalhe
 
-try:
-    from auditoria.models import AuditLog
-except Exception:
-    AuditLog = None
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService
 
 FIN_OK = True
 try:
@@ -37,21 +35,16 @@ def _q3(valor) -> Decimal:
 
 
 def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "custom"):
-    if not AuditLog:
-        return
-    try:
-        AuditLog.objects.create(
-            action=(action or "custom")[:20],
-            app_label="fiscal",
-            model=model_name,
-            object_id=str(obj_id),
-            changes=changes,
-            user=getattr(request, "user", None),
-            ip=(request.META.get("REMOTE_ADDR") or "")[:45],
-            user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:400],
-        )
-    except Exception:
-        pass
+    AuditService.success(
+        AuditAction.OBJECT_UPDATED,
+        category=AuditCategory.FISCAL,
+        request=request,
+        user=getattr(request, "user", None),
+        app_label="fiscal",
+        model=model_name,
+        object_id=obj_id,
+        metadata={"legacy_action": action, "changes": changes},
+    )
 
 
 def _documento_nota(nota: NotaFiscalEntrada) -> str:

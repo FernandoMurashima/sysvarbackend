@@ -8,10 +8,8 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
 
-try:
-    from auditoria.models import AuditLog
-except Exception:
-    AuditLog = None
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService
 
 from .models import (
     PedidoCompra,
@@ -47,32 +45,20 @@ from cadastros.models import Nat_Lancamento
 
 # ----------------- Auditoria robusta -----------------
 def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "custom"):
-    if not AuditLog:
-        return
-    try:
-        safe_action = (action or "custom")[:20]           # campo curto e seguro
-        ip = (request.META.get("REMOTE_ADDR") or "")[:45] # ipv4/ipv6
-        ua = (request.META.get("HTTP_USER_AGENT") or "")[:400]
-
-        payload = dict(
-            action=safe_action,
-            app_label="compras",
-            model=model_name,
-            object_id=str(obj_id),
-            changes=changes,
-            user=getattr(request, "user", None),
-            ip=ip,
-            user_agent=ua,
-        )
-
-        conn = transaction.get_connection()
-        if conn.in_atomic_block:
-            transaction.on_commit(lambda: AuditLog.objects.create(**payload))
-        else:
-            AuditLog.objects.create(**payload)
-    except Exception:
-        # auditoria nunca quebra o fluxo
-        pass
+    payload = {
+        "action": AuditAction.OBJECT_UPDATED,
+        "category": AuditCategory.PURCHASE,
+        "request": request,
+        "user": getattr(request, "user", None),
+        "app_label": "compras",
+        "model": model_name,
+        "object_id": obj_id,
+        "metadata": {"legacy_action": action, "changes": changes},
+    }
+    if transaction.get_connection().in_atomic_block:
+        transaction.on_commit(lambda: AuditService.success(**payload))
+    else:
+        AuditService.success(**payload)
 
 
 class BaseViewSet(viewsets.ModelViewSet):
