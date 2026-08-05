@@ -82,6 +82,7 @@ class AuditAction:
     PERMISSION_DENIED = "PERMISSION_DENIED"
     AUDIT_EXPORT = "AUDIT_EXPORT"
     AUDIT_ACCESS_DENIED = "AUDIT_ACCESS_DENIED"
+    LEGACY_EVENT = "LEGACY_EVENT"
     OBJECT_CREATED = "OBJECT_CREATED"
     OBJECT_UPDATED = "OBJECT_UPDATED"
     OBJECT_DELETED = "OBJECT_DELETED"
@@ -120,7 +121,7 @@ class AuditAction:
         CONTRACT_CREATED, CONTRACT_UPDATED, CONTRACT_STATUS_CHANGED, CONTRACT_LIMIT_CHANGED,
         MASTER_TRANSFERRED, MASTER_TRANSFER_DENIED, PROFILE_CREATED, PROFILE_UPDATED,
         PROFILE_INACTIVATED, PROFILE_DEFAULT_CHANGED, PERMISSION_UPDATED, PERMISSION_DENIED,
-        AUDIT_EXPORT, AUDIT_ACCESS_DENIED, OBJECT_CREATED, OBJECT_UPDATED, OBJECT_DELETED,
+        AUDIT_EXPORT, AUDIT_ACCESS_DENIED, LEGACY_EVENT, OBJECT_CREATED, OBJECT_UPDATED, OBJECT_DELETED,
         AUDIT_INTERNAL_FAILURE,
     }
 
@@ -135,6 +136,9 @@ class AuditLogQuerySet(models.QuerySet):
     def hard_delete_for_retention(self):
         return super().delete()
 
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Logs de auditoria são imutáveis.")
+
 
 class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):
     def create(self, **kwargs):
@@ -145,6 +149,23 @@ class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):
     def internal_create(self, **kwargs):
         kwargs["_audit_internal"] = True
         return self.create(**kwargs)
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, update_conflicts=False, update_fields=None, unique_fields=None):
+        raise ValidationError("Use AuditService para criar logs de auditoria.")
+
+    def internal_bulk_create(self, objs, **kwargs):
+        for obj in objs:
+            obj._audit_internal_bulk = True
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Logs de auditoria são imutáveis.")
+
+    def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
+        raise ValidationError("Use AuditService para criar logs de auditoria.")
+
+    def get_or_create(self, defaults=None, **kwargs):
+        raise ValidationError("Use AuditService para criar logs de auditoria.")
 
 
 class AuditLog(models.Model):

@@ -114,14 +114,20 @@ class UserViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Você só pode excluir usuários da sua empresa.")
         if EffectiveAccessService(instance).is_company_master():
             raise PermissionDenied("Transfira o master antes de excluir este usuário.")
-        instance.delete()
+        before = {"username": instance.username, "empresa": instance.empresa_id, "is_active": instance.is_active}
+        with transaction.atomic():
+            instance_id = instance.pk
+            instance.delete()
+            # Obrigatório: exclusão administrativa remove acesso da plataforma.
+            AuditService.required_success(AuditAction.USER_DELETED, category=AuditCategory.USER_MANAGEMENT, request=self.request, user=user, app_label="accounts", model="user", object_id=instance_id, before=before, after={"deleted": True}, status_code=200)
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="ativar")
     def ativar(self, request, pk=None):
         user = self.get_object()
-        serializer = self.get_serializer(user, data={"is_active": True}, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        if user.empresa_id:
+            increment_permissions_version(user.empresa)
         transaction.on_commit(lambda: AuditService.success(AuditAction.USER_ACTIVATED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, before={"is_active": False}, after={"is_active": True}))
         return Response(self.get_serializer(user).data)
 
@@ -242,20 +248,24 @@ class EmpresaContratoViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._exigir_superusuario()
-        obj = serializer.save()
-        obj.incrementar_versao()
-        sync_legacy_license_flags(obj.empresa)
-        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_CREATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}, audit_required=True))
+        with transaction.atomic():
+            obj = serializer.save()
+            obj.incrementar_versao()
+            sync_legacy_license_flags(obj.empresa)
+            # Obrigatório: criação de contrato define limites e módulos efetivos do cliente.
+            AuditService.required_success(AuditAction.CONTRACT_CREATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}, status_code=201)
 
     def perform_update(self, serializer):
         self._exigir_superusuario()
         before = {"status": serializer.instance.status, "limite_sessoes_simultaneas": serializer.instance.limite_sessoes_simultaneas, "plano_completo": serializer.instance.plano_completo} if serializer.instance else {}
-        obj = serializer.save()
-        obj.incrementar_versao()
-        sync_legacy_license_flags(obj.empresa)
-        after = {"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}
-        action = AuditAction.CONTRACT_LIMIT_CHANGED if before.get("limite_sessoes_simultaneas") != after.get("limite_sessoes_simultaneas") else AuditAction.CONTRACT_STATUS_CHANGED if before.get("status") != after.get("status") else AuditAction.CONTRACT_UPDATED
-        transaction.on_commit(lambda: AuditService.success(action, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before=before, after=after, audit_required=True))
+        with transaction.atomic():
+            obj = serializer.save()
+            obj.incrementar_versao()
+            sync_legacy_license_flags(obj.empresa)
+            after = {"status": obj.status, "limite_sessoes_simultaneas": obj.limite_sessoes_simultaneas, "plano_completo": obj.plano_completo}
+            action = AuditAction.CONTRACT_LIMIT_CHANGED if before.get("limite_sessoes_simultaneas") != after.get("limite_sessoes_simultaneas") else AuditAction.CONTRACT_STATUS_CHANGED if before.get("status") != after.get("status") else AuditAction.CONTRACT_UPDATED
+            # Obrigatório: alteração de contrato pode liberar ou bloquear acesso do cliente.
+            AuditService.required_success(action, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before=before, after=after, status_code=200)
 
     @action(detail=True, methods=["post"], url_path="transferir-master")
     def transferir_master(self, request, pk=None):
@@ -280,17 +290,21 @@ class EmpresaModuloViewSet(viewsets.ModelViewSet):
         return qs.filter(empresa_id=empresa_id) if empresa_id else qs.none()
 
     def perform_create(self, serializer):
-        obj = serializer.save()
-        increment_permissions_version(obj.empresa)
-        sync_legacy_license_flags(obj.empresa)
-        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"modulo": obj.modulo.chave, "contratado": obj.contratado}))
+        with transaction.atomic():
+            obj = serializer.save()
+            increment_permissions_version(obj.empresa)
+            sync_legacy_license_flags(obj.empresa)
+            # Obrigatório: módulos contratados determinam permissões efetivas do cliente.
+            AuditService.required_success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, after={"modulo": obj.modulo.chave, "contratado": obj.contratado}, status_code=201)
 
     def perform_update(self, serializer):
         old = serializer.instance.contratado if serializer.instance else None
-        obj = serializer.save()
-        increment_permissions_version(obj.empresa)
-        sync_legacy_license_flags(obj.empresa)
-        transaction.on_commit(lambda: AuditService.success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before={"contratado": old}, after={"contratado": obj.contratado, "modulo": obj.modulo.chave}))
+        with transaction.atomic():
+            obj = serializer.save()
+            increment_permissions_version(obj.empresa)
+            sync_legacy_license_flags(obj.empresa)
+            # Obrigatório: alteração de módulo contratado muda acesso disponível.
+            AuditService.required_success(AuditAction.CONTRACT_UPDATED, category=AuditCategory.CONTRACT, request=self.request, user=self.request.user, instance=obj, before={"contratado": old}, after={"contratado": obj.contratado, "modulo": obj.modulo.chave}, status_code=200)
 
 
 class PerfilAcessoViewSet(viewsets.ModelViewSet):
@@ -352,6 +366,7 @@ class PerfilAcessoViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(perfil).data)
 
     def perform_destroy(self, instance):
+        before = {"nome": instance.nome, "empresa": instance.empresa_id, "ativo": instance.ativo}
         instance.delete()
         increment_permissions_version(instance.empresa)
-        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_INACTIVATED, category=AuditCategory.ACCESS, request=self.request, user=self.request.user, app_label="accounts", model="perfil_acesso", object_id=instance.pk, before={"ativo": True}, after={"ativo": False}))
+        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_INACTIVATED, category=AuditCategory.ACCESS, request=self.request, user=self.request.user, app_label="accounts", model="perfil_acesso", object_id=instance.pk, before=before, after={"deleted": True}))

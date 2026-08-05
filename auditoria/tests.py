@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.test import TestCase, override_settings
@@ -8,6 +9,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditAction, AuditCategory, AuditLog, AuditResult, AuditSeverity
 from auditoria.sanitizer import REDACTED, sanitize_audit_data
 from auditoria.services import AuditService
+from accounts.services.effective_access import audit_event
 from cadastros.models import Empresa, EmpresaContrato, Loja, ModuloSistema
 
 
@@ -32,8 +34,12 @@ class AuditBaseTest(TestCase):
         EmpresaContrato.objects.update_or_create(empresa=self.empresa_b, defaults={"status": EmpresaContrato.STATUS_ATIVO, "usuario_master": self.master_b, "plano_completo": True, "limite_sessoes_simultaneas": 5})
         self.profile_a = PerfilAcesso.objects.create(empresa=self.empresa_a, nome="Auditor", ativo=True)
         PerfilModuloPermissao.objects.create(perfil=self.profile_a, modulo=self.modulo, acesso=UserModulePermission.Access.VIEW)
+        self.profile_edit = PerfilAcesso.objects.create(empresa=self.empresa_a, nome="Auditor Edit", ativo=True)
+        PerfilModuloPermissao.objects.create(perfil=self.profile_edit, modulo=self.modulo, acesso=UserModulePermission.Access.EDIT)
         self.user_a = User.objects.create_user(username="usera", password="x", empresa=self.empresa_a, loja=self.loja_a1, perfil_principal=self.profile_a)
         self.user_a.lojas.set([self.loja_a1])
+        self.user_edit = User.objects.create_user(username="editora", password="x", empresa=self.empresa_a, loja=self.loja_a1, perfil_principal=self.profile_edit)
+        self.user_edit.lojas.set([self.loja_a1, self.loja_a2])
         self.no_perm = User.objects.create_user(username="noperm", password="x", empresa=self.empresa_a, loja=self.loja_a1)
 
     def record(self, empresa=None, loja=None, user=None, **kwargs):
@@ -59,6 +65,15 @@ class AuditServiceTests(AuditBaseTest):
         self.assertEqual(log.loja_nome_snapshot, "Loja A1")
         self.assertEqual(log.username_snapshot, "usera")
         self.assertEqual(log.changed_fields, ["nome"])
+
+    def test_snapshot_usa_campos_reais(self):
+        self.empresa_a.nome_fantasia = "Fantasia A"
+        self.empresa_a.save(update_fields=["nome_fantasia"])
+        self.loja_a1.apelido_loja = "Apelido A1"
+        self.loja_a1.save(update_fields=["apelido_loja"])
+        log = self.record(empresa=self.empresa_a, loja=self.loja_a1)
+        self.assertEqual(log.empresa_nome_snapshot, "Fantasia A")
+        self.assertEqual(log.loja_nome_snapshot, "Loja A1")
 
     def test_sanitizacao_simples_e_aninhada(self):
         data = sanitize_audit_data({"senha": "abc", "items": [{"access_token": "tok", "email": "teste@example.com"}]})
@@ -93,10 +108,62 @@ class AuditServiceTests(AuditBaseTest):
             AuditLog.objects.filter(pk=log.pk).update(action=AuditAction.USER_LOGIN)
         with self.assertRaises(ValidationError):
             AuditLog.objects.create(action=AuditAction.USER_LOGIN, app_label="x", model="y")
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.bulk_create([AuditLog(action=AuditAction.USER_LOGIN, app_label="x", model="y")])
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.bulk_update([log], ["action"])
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.update_or_create(app_label="x", model="y", defaults={"action": AuditAction.USER_LOGIN})
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.get_or_create(app_label="x", model="y", defaults={"action": AuditAction.USER_LOGIN})
+        self.assertIsNotNone(AuditService.success(AuditAction.USER_LOGIN, category=AuditCategory.SECURITY, user=self.user_a, app_label="accounts", model="session"))
 
     def test_audit_required_bloqueia_operacao(self):
         with self.assertRaises(ValidationError):
             AuditService.record(action=AuditAction.USER_LOGIN, category="INVALID", audit_required=True)
+
+    def test_catalogo_de_acoes_e_wrapper_legado(self):
+        self.assertIsNotNone(self.record(action=AuditAction.OBJECT_UPDATED))
+        self.assertEqual(AuditService.success("create", category=AuditCategory.CADASTRO, empresa=self.empresa_a, app_label="x", model="y").action, AuditAction.OBJECT_CREATED)
+        with self.assertRaises(ValidationError):
+            AuditService.record(action="ACAO_SOLTA", category=AuditCategory.SYSTEM, audit_required=True)
+        audit_event("acao_antiga_sem_catalogo", user=self.user_a, changes={"x": "y"})
+        log = AuditLog.objects.filter(action=AuditAction.LEGACY_EVENT).latest("id")
+        self.assertEqual(log.metadata["legacy_action"], "acao_antiga_sem_catalogo")
+
+    def test_required_rollback_e_on_commit_falho(self):
+        try:
+            with transaction.atomic():
+                Empresa.objects.create(nome="Rollback Ltda", documento="33333333000113")
+                AuditService.record(action="INVALIDA", category=AuditCategory.SYSTEM, audit_required=True)
+        except ValidationError:
+            pass
+        self.assertFalse(Empresa.objects.filter(nome="Rollback Ltda").exists())
+        before = AuditService.failure_count
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                empresa = Empresa.objects.create(nome="Commit Ltda", documento="44444444000104")
+                AuditService.on_commit(action="INVALIDA", category=AuditCategory.SYSTEM, empresa=empresa, app_label="x", model="y")
+        self.assertTrue(Empresa.objects.filter(nome="Commit Ltda").exists())
+        self.assertGreater(AuditService.failure_count, before)
+
+    def test_migration_historica_preenche_contexto_sem_inventar(self):
+        from importlib import import_module
+
+        migration = import_module("auditoria.migrations.0005_backfill_historical_context")
+        log = AuditLog.objects.internal_create(action=AuditAction.OBJECT_UPDATED, app_label="cadastros", model="empresa", object_id=self.empresa_a.pk, user=self.user_a)
+        orphan = AuditLog.objects.internal_create(action=AuditAction.OBJECT_UPDATED, app_label="x", model="y", object_id="999")
+        filled = AuditLog.objects.internal_create(action=AuditAction.OBJECT_UPDATED, app_label="cadastros", model="empresa", object_id=self.empresa_a.pk, empresa=self.empresa_b, empresa_id_snapshot=str(self.empresa_b.pk), empresa_nome_snapshot="Preenchida")
+        migration.backfill_historical_context(apps, None)
+        log.refresh_from_db()
+        orphan.refresh_from_db()
+        filled.refresh_from_db()
+        self.assertEqual(log.empresa_id, self.empresa_a.pk)
+        self.assertEqual(log.empresa_id_snapshot, str(self.empresa_a.pk))
+        self.assertEqual(log.username_snapshot, "usera")
+        self.assertIsNone(orphan.empresa_id)
+        self.assertEqual(filled.empresa_id_snapshot, str(self.empresa_b.pk))
+        self.assertEqual(filled.empresa_nome_snapshot, "Preenchida")
 
 
 class AuditApiTests(AuditBaseTest):
@@ -127,6 +194,14 @@ class AuditApiTests(AuditBaseTest):
         ids = {row["object_id"] for row in res.data["results"]}
         self.assertEqual(ids, {"A1"})
 
+    def test_usuario_view_acessa_e_edit_exporta(self):
+        self.client.force_authenticate(self.user_a)
+        self.assertEqual(self.client.get("/api/auditoria/logs/").status_code, 200)
+        self.assertEqual(self.client.get("/api/auditoria/logs/exportar/").status_code, 403)
+        self.client.force_authenticate(self.user_edit)
+        self.assertEqual(self.client.get("/api/auditoria/logs/").status_code, 200)
+        self.assertEqual(self.client.get("/api/auditoria/logs/exportar/").status_code, 200)
+
     def test_sem_permissao_recebe_403_e_registra_negado(self):
         self.client.force_authenticate(self.no_perm)
         res = self.client.get("/api/auditoria/logs/")
@@ -136,10 +211,19 @@ class AuditApiTests(AuditBaseTest):
     def test_filtro_empresa_nao_faz_bypass(self):
         self.client.force_authenticate(self.master_a)
         res = self.client.get(f"/api/auditoria/logs/?empresa={self.empresa_b.pk}")
-        self.assertEqual(res.status_code, 200)
-        ids = {row["object_id"] for row in res.data["results"]}
-        self.assertTrue({"A1", "A2"}.issubset(ids))
-        self.assertNotIn("B1", ids)
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.AUDIT_ACCESS_DENIED, result=AuditResult.DENIED).count(), 1)
+
+    def test_filtro_loja_nao_permitida_retorna_403_sem_recursao(self):
+        self.client.force_authenticate(self.user_a)
+        res = self.client.get(f"/api/auditoria/logs/?loja={self.loja_a2.pk}")
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.AUDIT_ACCESS_DENIED, result=AuditResult.DENIED, status_code=403).count(), 1)
+
+    def test_master_consulta_lojas_da_empresa_mas_nao_outra_empresa(self):
+        self.client.force_authenticate(self.master_a)
+        self.assertEqual(self.client.get(f"/api/auditoria/logs/?loja={self.loja_a2.pk}").status_code, 200)
+        self.assertEqual(self.client.get(f"/api/auditoria/logs/?loja={self.loja_b1.pk}").status_code, 403)
 
     def test_endpoint_sem_escrita(self):
         self.client.force_authenticate(self.superuser)
@@ -162,4 +246,9 @@ class AuditApiTests(AuditBaseTest):
         content = res.content.decode("utf-8")
         self.assertIn("A1", content)
         self.assertNotIn("B1", content)
-        self.assertTrue(AuditLog.objects.filter(action=AuditAction.AUDIT_EXPORT).exists())
+        log = AuditLog.objects.get(action=AuditAction.AUDIT_EXPORT)
+        self.assertEqual(log.status_code, 200)
+        self.assertEqual(log.metadata["format"], "CSV")
+        self.assertEqual(log.metadata["exported_count"], 2)
+        self.assertEqual(log.metadata["limit"], 5000)
+        self.assertFalse(log.metadata["limit_reached"])

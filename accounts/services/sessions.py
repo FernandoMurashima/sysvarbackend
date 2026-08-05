@@ -69,6 +69,7 @@ class ConcurrentSessionService:
             model="sessao_usuario",
             object_id=sessao.pk,
             metadata={"motivo": motivo},
+            status_code=200 if motivo != "TIMEOUT" else 401,
         )
         return sessao
 
@@ -103,6 +104,7 @@ class ConcurrentSessionService:
                 model="sessao_usuario",
                 object_id=sessao.pk,
                 metadata={"superuser": True},
+                status_code=200,
             ))
             return raw, sessao, user
         if not user.is_active:
@@ -142,6 +144,7 @@ class ConcurrentSessionService:
                     model="empresa",
                     object_id=user.empresa_id,
                     metadata={"limite": limit, "sessoes_ativas": active_count, "username": username},
+                    status_code=403,
                 )
                 exc = PermissionDenied("O limite de acessos simultâneos da empresa foi atingido.")
                 exc.detail = {
@@ -175,6 +178,7 @@ class ConcurrentSessionService:
                 app_label="accounts",
                 model="sessao_usuario",
                 object_id=sessao.pk,
+                status_code=200,
             ))
             return raw, sessao, user
 

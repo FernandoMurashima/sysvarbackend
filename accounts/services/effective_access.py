@@ -30,7 +30,12 @@ def audit_event(action, request=None, user=None, model="security", object_id="",
     from auditoria.models import AuditAction, AuditCategory, AuditResult, AuditSeverity
     from auditoria.services import AuditService
 
-    action_name = AuditAction.LEGACY_MAP.get(str(action), str(action).upper())
+    raw_action = str(action)
+    action_name = AuditAction.LEGACY_MAP.get(raw_action)
+    metadata = dict(changes or {})
+    if not action_name:
+        action_name = AuditAction.LEGACY_EVENT
+        metadata["legacy_action"] = raw_action[:64]
     category = AuditCategory.SECURITY
     result = AuditResult.SUCCESS
     severity = AuditSeverity.INFO
@@ -53,7 +58,7 @@ def audit_event(action, request=None, user=None, model="security", object_id="",
         app_label="accounts",
         model=model,
         object_id=object_id,
-        metadata=changes or {},
+        metadata=metadata,
     )
 
 
@@ -371,10 +376,13 @@ class MasterTransferService:
         self.request = request
 
     def transfer(self):
+        from auditoria.models import AuditAction, AuditCategory
+        from auditoria.services import AuditService
+
         with transaction.atomic():
             contrato = EmpresaContrato.objects.select_for_update().get(empresa=self.empresa)
             if not (self.actor.is_superuser or contrato.usuario_master_id == self.actor.id):
-                audit_event("master_transfer_denied", self.request, self.actor, "empresa", self.empresa.pk, {"novo_master": self.new_master.pk})
+                AuditService.denied(AuditAction.MASTER_TRANSFER_DENIED, category=AuditCategory.ACCESS, request=self.request, user=self.actor, empresa=self.empresa, app_label="accounts", model="empresa", object_id=self.empresa.pk, metadata={"novo_master": self.new_master.pk}, status_code=403)
                 raise PermissionDenied("Somente superusuário ou master atual pode transferir o master.")
             if self.new_master.empresa_id != self.empresa.id or not self.new_master.is_active or self.new_master.is_superuser:
                 raise ValidationError({"usuario_master": "Novo master inválido para esta empresa."})
@@ -382,7 +390,8 @@ class MasterTransferService:
             contrato.usuario_master = self.new_master
             contrato.incrementar_versao(save=False)
             contrato.save(update_fields=["usuario_master", "permissions_version", "updated_at"])
-            transaction.on_commit(lambda: audit_event("master_transfer", self.request, self.actor, "empresa", self.empresa.pk, {"old": old, "new": self.new_master.pk}))
+            # Obrigatório: troca o responsável legal de acesso e precisa ficar na mesma transação.
+            AuditService.required_success(AuditAction.MASTER_TRANSFERRED, category=AuditCategory.ACCESS, request=self.request, user=self.actor, empresa=self.empresa, app_label="accounts", model="empresa", object_id=self.empresa.pk, before={"usuario_master": old}, after={"usuario_master": self.new_master.pk})
             return contrato
 
 
@@ -402,6 +411,9 @@ class ProfileDefaultService:
             raise PermissionDenied("Sem permissão para gerenciar perfis.")
 
     def set_default(self):
+        from auditoria.models import AuditAction, AuditCategory
+        from auditoria.services import AuditService
+
         self.assert_can_manage()
         with transaction.atomic():
             perfil = PerfilAcesso.objects.select_for_update().select_related("empresa").get(pk=self.perfil.pk)
@@ -416,5 +428,6 @@ class ProfileDefaultService:
                 perfil.padrao = True
                 perfil.save(update_fields=["padrao", "updated_at"])
             increment_permissions_version(perfil.empresa)
-            transaction.on_commit(lambda: audit_event("profile_set_default", self.request, self.actor, "perfil_acesso", perfil.pk))
+            # Obrigatório: perfil padrão altera permissões efetivas de novos usuários.
+            AuditService.required_success(AuditAction.PROFILE_DEFAULT_CHANGED, category=AuditCategory.ACCESS, request=self.request, user=self.actor, instance=perfil, metadata={"empresa": perfil.empresa_id})
             return perfil

@@ -173,6 +173,7 @@ def audit_user_logged_in(sender, request, user, **kwargs):
         metadata={"auth": "django_signal"},
         request=request,
         user=user,
+        status_code=200,
     )
 
 @receiver(user_logged_out)
@@ -186,6 +187,7 @@ def audit_user_logged_out(sender, request, user, **kwargs):
         metadata={"auth": "django_signal"},
         user=user if user and getattr(user, "is_authenticated", False) else None,
         request=request,
+        status_code=200,
     )
 
 @receiver(user_login_failed)
@@ -199,6 +201,7 @@ def audit_user_login_failed(sender, credentials, request, **kwargs):
         object_id=str(credentials.get("username") or ""),
         metadata={"username": credentials.get("username"), "auth": "django_signal"},
         request=request,
+        status_code=401,
     )
 
 

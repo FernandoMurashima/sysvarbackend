@@ -5,6 +5,7 @@ from django.db import connection, transaction
 from django.forms.models import model_to_dict
 
 from .context import get_audit_context, parse_uuid
+from .display import empresa_display_name, loja_display_name, user_display_name
 from .models import AuditAction, AuditCategory, AuditLog, AuditOrigin, AuditResult, AuditSeverity
 from .sanitizer import sanitize_audit_data, truncate_text
 
@@ -32,7 +33,24 @@ class AuditService:
 
     @classmethod
     def on_commit(cls, **kwargs):
-        transaction.on_commit(lambda: cls.record(**kwargs))
+        transaction.on_commit(lambda: cls._record_on_commit(kwargs))
+
+    @classmethod
+    def required(cls, **kwargs):
+        kwargs["audit_required"] = True
+        return cls.record(**kwargs)
+
+    @classmethod
+    def required_success(cls, action, **kwargs):
+        return cls.required(action=action, result=AuditResult.SUCCESS, severity=kwargs.pop("severity", AuditSeverity.INFO), **kwargs)
+
+    @classmethod
+    def _record_on_commit(cls, kwargs):
+        try:
+            return cls.record(**kwargs)
+        except Exception:
+            logger.exception("Falha em callback on_commit de auditoria.")
+            return None
 
     @classmethod
     def record(
@@ -91,14 +109,14 @@ class AuditService:
                 "correlation_id": parse_uuid(correlation_id) or getattr(ctx, "correlation_id", None),
                 "empresa": empresa if getattr(empresa, "pk", None) else None,
                 "empresa_id_snapshot": truncate_text(getattr(empresa, "pk", None), 64),
-                "empresa_nome_snapshot": truncate_text(getattr(empresa, "nome_fantasia", None) or getattr(empresa, "nome", None), 160),
+                "empresa_nome_snapshot": truncate_text(empresa_display_name(empresa), 160),
                 "loja": loja if getattr(loja, "pk", None) else None,
                 "loja_id_snapshot": truncate_text(getattr(loja, "pk", None), 64),
-                "loja_nome_snapshot": truncate_text(getattr(loja, "nome_loja", None) or getattr(loja, "apelido_loja", None), 120),
+                "loja_nome_snapshot": truncate_text(loja_display_name(loja), 120),
                 "user": user if getattr(user, "is_authenticated", False) else None,
                 "user_id_snapshot": truncate_text(getattr(user, "pk", None), 64),
                 "username_snapshot": truncate_text(getattr(user, "username", None), 150),
-                "user_nome_snapshot": truncate_text(cls._user_name(user), 180),
+                "user_nome_snapshot": truncate_text(user_display_name(user), 180),
                 "session_id": getattr(session, "session_id", None) or getattr(ctx, "session_id", None),
                 "device_id": truncate_text(getattr(session, "dispositivo_id", None) or getattr(ctx, "device_id", None), 128),
                 "action": truncate_text(action, 64),
@@ -127,6 +145,8 @@ class AuditService:
         except Exception as exc:
             cls.failure_count += 1
             logger.exception("Falha ao registrar auditoria: %s", exc)
+            if isinstance(exc, ValidationError) and "Ação de auditoria inválida" in str(exc):
+                raise
             if audit_required:
                 raise ValidationError("Falha segura ao registrar auditoria obrigatória.") from exc
             return None
@@ -135,7 +155,9 @@ class AuditService:
     def _normalize_action(action):
         action = str(action or AuditAction.AUDIT_INTERNAL_FAILURE).strip()
         action = AuditAction.LEGACY_MAP.get(action, action.upper())
-        return action if action in AuditAction.VALID else action[:64]
+        if action not in AuditAction.VALID:
+            raise ValidationError(f"Ação de auditoria inválida: {action[:64]}")
+        return action
 
     @staticmethod
     def _choice(value, enum):
@@ -148,12 +170,6 @@ class AuditService:
     def _resolve_user(user, request, ctx):
         user = user or getattr(request, "user", None) or getattr(ctx, "user", None)
         return user if getattr(user, "is_authenticated", False) else None
-
-    @staticmethod
-    def _user_name(user):
-        if not user:
-            return None
-        return (user.get_full_name() or getattr(user, "username", "")).strip()
 
     @staticmethod
     def _object_context(instance, app_label, model, object_id, object_repr):

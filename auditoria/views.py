@@ -9,7 +9,9 @@ from rest_framework.response import Response
 from django_filters import rest_framework as df
 
 from accounts.services.effective_access import EDIT, EffectiveAccessService
+from cadastros.models import Loja
 from .models import AuditAction, AuditCategory, AuditLog, AuditResult, AuditSeverity
+from .sanitizer import sanitize_audit_data
 from .serializers import AuditLogDetailSerializer, AuditLogSerializer
 from .services import AuditService
 
@@ -75,16 +77,24 @@ class CanViewAuditLogs:
         service = EffectiveAccessService(user)
         allowed = service.is_company_master() or service.has_module_access("auditoria")
         if not allowed:
-            AuditService.denied(
-                AuditAction.AUDIT_ACCESS_DENIED,
-                category=AuditCategory.SECURITY,
-                request=request,
-                user=user,
-                app_label="auditoria",
-                model="auditlog",
-                metadata={"endpoint": request.path},
-            )
+            audit_access_denied_once(request, user, {"endpoint": request.path})
         return allowed
+
+
+def audit_access_denied_once(request, user, metadata):
+    if getattr(request, "_audit_access_denied_recorded", False):
+        return
+    request._audit_access_denied_recorded = True
+    AuditService.denied(
+        AuditAction.AUDIT_ACCESS_DENIED,
+        category=AuditCategory.SECURITY,
+        request=request,
+        user=user,
+        app_label="auditoria",
+        model="auditlog",
+        metadata=metadata,
+        status_code=403,
+    )
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -117,31 +127,22 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         if not empresa_id:
             return qs.none()
         if requested_empresa and str(requested_empresa) != str(empresa_id):
-            AuditService.denied(
-                AuditAction.AUDIT_ACCESS_DENIED,
-                category=AuditCategory.SECURITY,
-                request=self.request,
-                user=user,
-                app_label="auditoria",
-                model="auditlog",
-                metadata={"requested_empresa": requested_empresa},
-            )
+            audit_access_denied_once(self.request, user, {"requested_empresa": requested_empresa})
+            raise PermissionDenied("Sem permissão para consultar auditoria de outra empresa.")
         qs = qs.filter(empresa_id=empresa_id)
         if service.is_company_master():
+            if requested_loja:
+                loja = Loja.objects.filter(pk=requested_loja).only("id", "empresa_id").first()
+                if not loja or loja.empresa_id != empresa_id:
+                    audit_access_denied_once(self.request, user, {"requested_loja": requested_loja})
+                    raise PermissionDenied("Sem permissão para consultar auditoria desta loja.")
             return qs
         allowed_store_ids = service.allowed_store_ids()
         if allowed_store_ids is not None:
             qs = qs.filter(Q(loja_id__isnull=True) | Q(loja_id__in=allowed_store_ids))
             if requested_loja and int(requested_loja) not in allowed_store_ids:
-                AuditService.denied(
-                    AuditAction.AUDIT_ACCESS_DENIED,
-                    category=AuditCategory.SECURITY,
-                    request=self.request,
-                    user=user,
-                    app_label="auditoria",
-                    model="auditlog",
-                    metadata={"requested_loja": requested_loja},
-                )
+                audit_access_denied_once(self.request, user, {"requested_loja": requested_loja})
+                raise PermissionDenied("Sem permissão para consultar auditoria desta loja.")
         return qs
 
     @action(detail=False, methods=["get"], url_path="indicadores")
@@ -160,19 +161,40 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         user = request.user
         service = EffectiveAccessService(user)
         if not (user.is_superuser or service.is_company_master() or service.has_module_access("auditoria", EDIT)):
-            AuditService.denied(AuditAction.AUDIT_ACCESS_DENIED, category=AuditCategory.SECURITY, request=request, user=user, app_label="auditoria", model="auditlog", metadata={"export": True})
+            audit_access_denied_once(request, user, {"export": True})
             raise PermissionDenied("Sem permissão para exportar auditoria.")
         limit = 5000
-        qs = self.filter_queryset(self.get_queryset())[:limit]
+        filtered_qs = self.filter_queryset(self.get_queryset())
+        items = list(filtered_qs[: limit + 1])
+        limit_reached = len(items) > limit
+        exported = items[:limit]
         response = HttpResponse(content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = 'attachment; filename="auditoria.csv"'
         writer = csv.writer(response)
         writer.writerow(["data", "empresa", "loja", "usuario", "categoria", "acao", "resultado", "severidade", "entidade", "objeto", "ip", "request_id"])
-        for item in qs:
+        for item in exported:
             writer.writerow([
                 item.created_at.isoformat(), item.empresa_nome_snapshot, item.loja_nome_snapshot,
                 item.username_snapshot, item.category, item.action, item.result, item.severity,
                 f"{item.app_label}.{item.model}", item.object_repr or item.object_id, item.ip, item.request_id,
             ])
-        AuditService.success(AuditAction.AUDIT_EXPORT, category=AuditCategory.SECURITY, request=request, user=user, app_label="auditoria", model="auditlog", metadata={"limit": limit})
+        filters_payload = {key: value for key, value in request.query_params.items() if key not in {"page", "page_size", "ordering"} and value not in {"", None}}
+        AuditService.success(
+            AuditAction.AUDIT_EXPORT,
+            category=AuditCategory.SECURITY,
+            request=request,
+            user=user,
+            app_label="auditoria",
+            model="auditlog",
+            metadata=sanitize_audit_data({
+                "format": "CSV",
+                "filters": filters_payload,
+                "exported_count": len(exported),
+                "limit": limit,
+                "limit_reached": limit_reached,
+                "empresa_contexto": getattr(user, "empresa_id", None),
+                "loja_contexto": request.query_params.get("loja"),
+            }),
+            status_code=200,
+        )
         return response

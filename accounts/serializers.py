@@ -258,7 +258,8 @@ class UserSerializer(serializers.ModelSerializer):
                     defaults={"acesso": acesso},
                 )
             request = self.context.get("request")
-            transaction.on_commit(lambda: AuditService.success(AuditAction.PERMISSION_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=user, metadata={"tipo": "user_override", "permissoes": recebidos}))
+            # Obrigatório: override de módulo muda a autorização efetiva do usuário.
+            AuditService.required_success(AuditAction.PERMISSION_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=user, metadata={"tipo": "user_override", "permissoes": recebidos})
         if permissoes_campos is not None:
             recebidos = {item["campo"]: bool(item.get("pode_ver")) for item in permissoes_campos}
             UserFieldPermission.objects.filter(user=user).exclude(campo__in=recebidos.keys()).delete()
@@ -452,24 +453,29 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {modulo.chave}"})
             PerfilModuloPermissao.objects.update_or_create(perfil=perfil, modulo=modulo, defaults={"acesso": acesso})
         increment_permissions_version(perfil.empresa)
+        request = self.context.get("request")
+        # Obrigatório: permissões de perfil compõem a autorização efetiva dos usuários.
+        AuditService.required_success(AuditAction.PERMISSION_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=perfil, metadata={"tipo": "perfil", "permissoes": {item["modulo"].id: item.get("acesso") for item in perms}})
 
     def create(self, validated_data):
         perms = validated_data.pop("permissoes_modulos", None)
-        perfil = PerfilAcesso.objects.create(**validated_data)
-        self._save_perms(perfil, perms)
-        request = self.context.get("request")
-        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_CREATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=perfil, after={"nome": perfil.nome, "ativo": perfil.ativo, "padrao": perfil.padrao}))
+        with transaction.atomic():
+            perfil = PerfilAcesso.objects.create(**validated_data)
+            self._save_perms(perfil, perms)
+            request = self.context.get("request")
+            transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_CREATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=perfil, after={"nome": perfil.nome, "ativo": perfil.ativo, "padrao": perfil.padrao}))
         return perfil
 
     def update(self, instance, validated_data):
         perms = validated_data.pop("permissoes_modulos", None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        self._save_perms(instance, perms)
-        increment_permissions_version(instance.empresa)
-        request = self.context.get("request")
-        transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=instance, metadata={"campos": list(validated_data.keys())}))
+        with transaction.atomic():
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            self._save_perms(instance, perms)
+            increment_permissions_version(instance.empresa)
+            request = self.context.get("request")
+            transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=instance, metadata={"campos": list(validated_data.keys())}))
         return instance
 
 
