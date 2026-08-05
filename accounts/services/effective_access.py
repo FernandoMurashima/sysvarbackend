@@ -151,6 +151,8 @@ class CompanyModuleService:
             return ContractState(False, "Empresa sem contrato.")
         today = timezone.localdate()
         if contrato.status != EmpresaContrato.STATUS_ATIVO:
+            if contrato.status == EmpresaContrato.STATUS_SUSPENSO:
+                return ContractState(False, "CONTRACT_SUSPENDED")
             return ContractState(False, f"Contrato {contrato.get_status_display().lower()}.")
         if contrato.data_inicio and contrato.data_inicio > today:
             return ContractState(False, "Contrato ainda não iniciado.")

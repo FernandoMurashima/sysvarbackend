@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.http import JsonResponse
-from django.db.models import Count
+from django.db.models import Count, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import action, api_view, permission_classes
@@ -100,11 +100,23 @@ class UserViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
         if user.is_superuser:
-            return qs
-        empresa_id = getattr(user, "empresa_id", None)
-        if empresa_id:
-            return qs.filter(empresa_id=empresa_id)
-        return qs.none()
+            scoped = qs
+        else:
+            empresa_id = getattr(user, "empresa_id", None)
+            if empresa_id:
+                scoped = qs.filter(empresa_id=empresa_id)
+            else:
+                return qs.none()
+        params = self.request.query_params
+        if params.get("type"):
+            scoped = scoped.filter(type=params["type"])
+        if params.get("ativo") in {"true", "false"}:
+            scoped = scoped.filter(is_active=params["ativo"] == "true")
+        if params.get("perfil"):
+            scoped = scoped.filter(perfil_principal_id=params["perfil"])
+        if params.get("loja"):
+            scoped = scoped.filter(Q(loja_id=params["loja"]) | Q(lojas__Idloja=params["loja"])).distinct()
+        return scoped
 
     def perform_destroy(self, instance):
         user = self.request.user
@@ -120,6 +132,70 @@ class UserViewSet(viewsets.ModelViewSet):
             instance.delete()
             # Obrigatório: exclusão administrativa remove acesso da plataforma.
             AuditService.required_success(AuditAction.USER_DELETED, category=AuditCategory.USER_MANAGEMENT, request=self.request, user=user, app_label="accounts", model="user", object_id=instance_id, before=before, after={"deleted": True}, status_code=200)
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.get_queryset()
+        master_ids = []
+        if request.user.is_superuser:
+            master_ids = list(EmpresaContrato.objects.exclude(usuario_master_id__isnull=True).values_list("usuario_master_id", flat=True))
+        elif getattr(request.user, "empresa_id", None):
+            master_ids = list(EmpresaContrato.objects.filter(empresa_id=request.user.empresa_id).exclude(usuario_master_id__isnull=True).values_list("usuario_master_id", flat=True))
+        return Response(qs.aggregate(
+            total=Count("id"),
+            ativos=Count("id", filter=Q(is_active=True)),
+            inativos=Count("id", filter=Q(is_active=False)),
+            masters=Count("id", filter=Q(id__in=master_ids)),
+            com_sessao_ativa=Count("id", filter=Q(sessoes_acesso__ativa=True), distinct=True),
+        ))
+
+    @action(detail=True, methods=["get"], url_path="sessoes")
+    def sessoes(self, request, pk=None):
+        user = self.get_object()
+        qs = user.sessoes_acesso.select_related("loja").order_by("-ultima_atividade_em")
+        return Response([{
+            "id": s.id,
+            "session_id": str(s.session_id),
+            "dispositivo_id": s.dispositivo_id,
+            "ip": s.ip,
+            "loja": s.loja_id,
+            "loja_nome": getattr(s.loja, "nome_loja", None),
+            "iniciada_em": s.iniciada_em,
+            "ultima_atividade_em": s.ultima_atividade_em,
+            "ativa": s.ativa,
+            "motivo_encerramento": s.motivo_encerramento,
+        } for s in qs])
+
+    @action(detail=True, methods=["post"], url_path="encerrar-sessoes")
+    def encerrar_sessoes(self, request, pk=None):
+        user = self.get_object()
+        sessoes = list(user.sessoes_acesso.filter(ativa=True))
+        for sessao in sessoes:
+            ConcurrentSessionService.close_session(sessao, "ADMIN_USER_SESSIONS_CLOSED", request.user, request)
+        AuditService.required_success(AuditAction.USER_SESSIONS_CLOSED, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, metadata={"sessoes_encerradas": len(sessoes)}, status_code=200)
+        return Response({"sessoes_encerradas": len(sessoes)})
+
+    @action(detail=True, methods=["post"], url_path="redefinir-senha")
+    def redefinir_senha(self, request, pk=None):
+        user = self.get_object()
+        nova = request.data.get("nova_senha") or ""
+        confirmacao = request.data.get("confirmacao") or ""
+        if nova != confirmacao:
+            raise ValidationError({"confirmacao": "Confirmação da senha não confere."})
+        if len(nova) < 8:
+            raise ValidationError({"nova_senha": "A senha deve ter pelo menos 8 caracteres."})
+        encerrar = request.data.get("encerrar_sessoes", True)
+        with transaction.atomic():
+            user.set_password(nova)
+            user.deve_trocar_senha = True
+            user.save(update_fields=["password", "deve_trocar_senha"])
+            sessoes = []
+            if encerrar:
+                sessoes = list(user.sessoes_acesso.select_for_update().filter(ativa=True))
+                for sessao in sessoes:
+                    ConcurrentSessionService.close_session(sessao, "PASSWORD_RESET", request.user, request)
+            AuditService.required_success(AuditAction.USER_PASSWORD_RESET, category=AuditCategory.USER_MANAGEMENT, request=request, user=request.user, instance=user, metadata={"sessoes_encerradas": len(sessoes)}, status_code=200)
+        return Response({"detail": "Senha redefinida.", "sessoes_encerradas": len(sessoes)})
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="ativar")
     def ativar(self, request, pk=None):

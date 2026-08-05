@@ -16,6 +16,8 @@ from cadastros.models import EmpresaContrato
 
 
 LIMIT_CODE = "CONCURRENT_SESSION_LIMIT_REACHED"
+CONTRACT_SUSPENDED_CODE = "CONTRACT_SUSPENDED"
+CONTRACT_SUSPENDED_MESSAGE = "O acesso da empresa está temporariamente suspenso. Entre em contato com o suporte."
 
 
 def token_hash(raw: str) -> str:
@@ -115,6 +117,10 @@ class ConcurrentSessionService:
             raise ValidationError({"device_id": "Identificador do dispositivo é obrigatório."})
         state = CompanyModuleService(user.empresa).contract_state()
         if not state.active:
+            if state.reason == CONTRACT_SUSPENDED_CODE:
+                exc = AuthenticationFailed(CONTRACT_SUSPENDED_MESSAGE)
+                exc.detail = {"detail": CONTRACT_SUSPENDED_MESSAGE, "code": CONTRACT_SUSPENDED_CODE}
+                raise exc
             raise AuthenticationFailed(state.reason or "Contrato indisponível.")
         if not EffectiveAccessService(user).is_company_master() and not getattr(user, "perfil_principal_id", None):
             raise AuthenticationFailed("Usuário sem perfil de acesso.")
@@ -212,6 +218,10 @@ class ConcurrentSessionService:
         if not user.is_superuser:
             state = CompanyModuleService(user.empresa).contract_state()
             if not state.active:
+                if state.reason == CONTRACT_SUSPENDED_CODE:
+                    exc = AuthenticationFailed(CONTRACT_SUSPENDED_MESSAGE)
+                    exc.detail = {"detail": CONTRACT_SUSPENDED_MESSAGE, "code": CONTRACT_SUSPENDED_CODE}
+                    raise exc
                 raise AuthenticationFailed(state.reason or "Contrato indisponível.")
         ConcurrentSessionService.touch(sessao)
         return user, token, sessao

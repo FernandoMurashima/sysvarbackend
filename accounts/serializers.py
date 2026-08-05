@@ -39,6 +39,8 @@ class EmpresaMiniSerializer(serializers.ModelSerializer):
 
 
 class UserModulePermissionSerializer(serializers.ModelSerializer):
+    acesso = serializers.ChoiceField(choices=[("HERDAR", "Herdar"), *UserModulePermission.Access.choices])
+
     class Meta:
         model = UserModulePermission
         fields = ("modulo", "acesso")
@@ -107,14 +109,18 @@ class UserSerializer(serializers.ModelSerializer):
             "perfil_principal", "perfil_principal_id",
             "permissoes_modulos", "permissoes_campos",
             "permissoes_efetivas_detalhadas",
-            "is_active", "is_staff", "is_superuser", "date_joined",
+            "is_active", "is_staff", "is_superuser", "deve_trocar_senha", "date_joined",
             "password",
         )
-        read_only_fields = ("id", "is_staff", "is_superuser", "date_joined")
+        read_only_fields = ("id", "is_staff", "is_superuser", "deve_trocar_senha", "date_joined")
 
     def validate(self, attrs):
         request = self.context.get("request")
         request_user = getattr(request, "user", None)
+        forbidden = {"is_staff", "is_superuser", "groups", "user_permissions", "token", "session_id", "session_token", "deve_trocar_senha"}
+        sent_forbidden = sorted(forbidden & set(getattr(self, "initial_data", {}) or {}))
+        if sent_forbidden and request_user and request_user.is_authenticated and not request_user.is_superuser:
+            raise serializers.ValidationError({field: "Campo protegido." for field in sent_forbidden})
         tipo = attrs.get("type", getattr(self.instance, "type", User.Type.REGULAR))
         empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         loja = attrs.get("loja", getattr(self.instance, "loja", None))
@@ -247,7 +253,7 @@ class UserSerializer(serializers.ModelSerializer):
     def _salvar_permissoes(self, user, permissoes_modulos, permissoes_campos):
         available = EffectiveAccessService(user).available_modules() if user.empresa_id else set()
         if permissoes_modulos is not None:
-            recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos}
+            recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos if item.get("acesso") != "HERDAR"}
             if not user.is_superuser:
                 recebidos = {modulo: acesso for modulo, acesso in recebidos.items() if modulo in available}
             UserModulePermission.objects.filter(user=user).exclude(modulo__in=recebidos.keys()).delete()
@@ -292,9 +298,11 @@ class EmpresaContratoSerializer(serializers.ModelSerializer):
             "id", "empresa", "status", "data_inicio", "data_fim", "limite_usuarios",
             "limite_sessoes_simultaneas", "sessoes_ativas", "sessoes_disponiveis", "limite_excedido",
             "plano_completo", "usuario_master", "observacoes", "permissions_version",
+            "motivo_suspensao", "observacao_suspensao", "suspenso_em", "suspenso_por",
+            "reativado_em", "reativado_por",
             "usuarios_ativos", "licencas_disponiveis", "excedido", "created_at", "updated_at",
         )
-        read_only_fields = ("permissions_version", "created_at", "updated_at")
+        read_only_fields = ("permissions_version", "motivo_suspensao", "observacao_suspensao", "suspenso_em", "suspenso_por", "reativado_em", "reativado_por", "created_at", "updated_at")
 
     def validate(self, attrs):
         data_inicio = attrs.get("data_inicio", getattr(self.instance, "data_inicio", None))
@@ -349,9 +357,11 @@ class EmpresaContratoDetalheSerializer(EmpresaContratoSerializer):
             "limite_sessoes_simultaneas", "sessoes_ativas", "sessoes_disponiveis", "limite_excedido",
             "excedente", "plano_completo", "usuario_master", "usuario_master_id",
             "permissions_version", "observacoes", "modulos_contratados", "warning",
+            "motivo_suspensao", "observacao_suspensao", "suspenso_em", "suspenso_por",
+            "reativado_em", "reativado_por",
             "created_at", "updated_at",
         )
-        read_only_fields = ("permissions_version", "created_at", "updated_at", "empresa", "empresa_id")
+        read_only_fields = ("permissions_version", "motivo_suspensao", "observacao_suspensao", "suspenso_em", "suspenso_por", "reativado_em", "reativado_por", "created_at", "updated_at", "empresa", "empresa_id")
 
     def get_excedente(self, obj):
         return max(0, int(obj.sessoes_ativas or 0) - int(obj.limite_sessoes_simultaneas or 0))

@@ -141,6 +141,20 @@ class EmpresaContrato(models.Model):
         (STATUS_VENCIDO, "Vencido"),
         (STATUS_CANCELADO, "Cancelado"),
     ]
+    MOTIVO_INADIMPLENCIA = "INADIMPLENCIA"
+    MOTIVO_SOLICITACAO_CLIENTE = "SOLICITACAO_CLIENTE"
+    MOTIVO_RISCO_SEGURANCA = "RISCO_SEGURANCA"
+    MOTIVO_ENCERRAMENTO_CONTRATO = "ENCERRAMENTO_CONTRATO"
+    MOTIVO_BLOQUEIO_ADMINISTRATIVO = "BLOQUEIO_ADMINISTRATIVO"
+    MOTIVO_OUTRO = "OUTRO"
+    MOTIVO_SUSPENSAO_CHOICES = [
+        (MOTIVO_INADIMPLENCIA, "Inadimplência"),
+        (MOTIVO_SOLICITACAO_CLIENTE, "Solicitação do cliente"),
+        (MOTIVO_RISCO_SEGURANCA, "Risco de segurança"),
+        (MOTIVO_ENCERRAMENTO_CONTRATO, "Encerramento de contrato"),
+        (MOTIVO_BLOQUEIO_ADMINISTRATIVO, "Bloqueio administrativo"),
+        (MOTIVO_OUTRO, "Outro"),
+    ]
 
     empresa = models.OneToOneField(Empresa, on_delete=models.PROTECT, related_name="contrato")
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDENTE, db_index=True)
@@ -156,6 +170,12 @@ class EmpresaContrato(models.Model):
         blank=True,
         related_name="empresas_master",
     )
+    motivo_suspensao = models.CharField(max_length=40, choices=MOTIVO_SUSPENSAO_CHOICES, null=True, blank=True, db_index=True)
+    observacao_suspensao = models.TextField(blank=True, default="")
+    suspenso_em = models.DateTimeField(null=True, blank=True)
+    suspenso_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="contratos_suspensos")
+    reativado_em = models.DateTimeField(null=True, blank=True)
+    reativado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="contratos_reativados")
     observacoes = models.TextField(blank=True, default="")
     permissions_version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -175,6 +195,8 @@ class EmpresaContrato(models.Model):
             raise ValidationError({"limite_sessoes_simultaneas": "Contrato ativo exige pelo menos uma sessão simultânea."})
         if self.data_fim and self.data_inicio and self.data_fim < self.data_inicio:
             raise ValidationError({"data_fim": "A data final não pode ser anterior à data inicial."})
+        if self.status == self.STATUS_SUSPENSO and not self.motivo_suspensao:
+            raise ValidationError({"motivo_suspensao": "Informe o motivo da suspensão."})
         if self.usuario_master_id:
             if self.usuario_master.is_superuser:
                 raise ValidationError({"usuario_master": "Superusuário interno não pode ser master de cliente."})
@@ -338,6 +360,30 @@ class Loja(models.Model):
 
     def __str__(self):
         return self.nome_loja
+
+    def clean(self):
+        super().clean()
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Estabelecimento deve pertencer a uma empresa."})
+        if self.tipo_unidade not in {self.TIPO_LOJA, self.TIPO_MATRIZ, self.TIPO_FABRICA}:
+            raise ValidationError({"tipo_unidade": "Tipo de unidade inválido."})
+        self.Matriz = "SIM" if self.tipo_unidade == self.TIPO_MATRIZ else "NAO"
+        if self.DataAbertura and self.DataEnceramento and self.DataEnceramento < self.DataAbertura:
+            raise ValidationError({"DataEnceramento": "Data de encerramento não pode ser anterior à abertura."})
+        if self.DataEnceramento and self.ativo:
+            raise ValidationError({"ativo": "Estabelecimento encerrado não pode permanecer ativo."})
+        for field in ("serie_nfce", "proximo_numero_nfce", "serie_nfe", "proximo_numero_nfe"):
+            if int(getattr(self, field, 0) or 0) <= 0:
+                raise ValidationError({field: "Informe valor maior que zero."})
+        if self.estado and len(self.estado.strip()) != 2:
+            raise ValidationError({"estado": "Informe a UF com duas letras."})
+        if self.estado:
+            self.estado = self.estado.strip().upper()
+
+    def save(self, *args, **kwargs):
+        self.Matriz = "SIM" if self.tipo_unidade == self.TIPO_MATRIZ else "NAO"
+        self.full_clean(exclude=["cnpj"])
+        return super().save(*args, **kwargs)
 
 
 class Cliente(models.Model):

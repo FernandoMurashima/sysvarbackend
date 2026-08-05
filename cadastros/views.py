@@ -3,13 +3,18 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from django.db.models import ProtectedError
+from django.db import transaction
+from django.db.models import Count, ProtectedError, Q
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from accounts.permissions import HasModuleRole
-from accounts.services.effective_access import MasterTransferService, audit_event, increment_permissions_version, sync_legacy_license_flags
+from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, audit_event, increment_permissions_version, sync_legacy_license_flags
+from accounts.services.sessions import ConcurrentSessionService
 from accounts.serializers import EmpresaContratoDetalheSerializer
+from auditoria.models import AuditAction, AuditCategory
+from auditoria.services import AuditService, instance_snapshot
 
-from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
+from .models import Empresa, EmpresaContrato, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
 from .serializers import (
     EmpresaSerializer,
     LojaSerializer,
@@ -187,6 +192,85 @@ class EmpresaViewSet(BaseCadastroViewSet):
         audit_event(action_name, request, request.user, "contrato", contrato.pk, {"old": old, "new": new})
         return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)
 
+    def _confirmacao_valida(self, empresa, valor):
+        esperado = {str(empresa.pk), empresa.nome, empresa.nome_fantasia, empresa.documento}
+        esperado = {str(v).strip().lower() for v in esperado if v}
+        return str(valor or "").strip().lower() in esperado
+
+    @action(detail=True, methods=["post"], url_path="suspender")
+    def suspender(self, request, pk=None):
+        empresa = self.get_object()
+        if not request.user.is_superuser:
+            AuditService.denied(AuditAction.CONTRACT_SUSPENSION_DENIED, category=AuditCategory.CONTRACT, request=request, user=request.user, empresa=empresa, app_label="cadastros", model="empresa", object_id=empresa.pk, status_code=403)
+            raise PermissionDenied("Somente superusuário pode suspender empresa.")
+        motivo = request.data.get("motivo")
+        observacao = (request.data.get("observacao") or "").strip()
+        if motivo not in dict(EmpresaContrato.MOTIVO_SUSPENSAO_CHOICES):
+            raise ValidationError({"motivo": "Motivo de suspensão inválido."})
+        if not self._confirmacao_valida(empresa, request.data.get("confirmacao")):
+            AuditService.denied(AuditAction.CONTRACT_SUSPENSION_DENIED, category=AuditCategory.CONTRACT, request=request, user=request.user, empresa=empresa, app_label="cadastros", model="empresa", object_id=empresa.pk, metadata={"motivo": motivo}, status_code=400)
+            raise ValidationError({"confirmacao": "Confirmação inválida."})
+        with transaction.atomic():
+            contrato = EmpresaContrato.objects.select_for_update().select_related("empresa").get(empresa=empresa)
+            if contrato.status == EmpresaContrato.STATUS_CANCELADO:
+                raise ValidationError({"status": "Contrato cancelado não pode ser suspenso."})
+            if contrato.status == EmpresaContrato.STATUS_SUSPENSO:
+                raise ValidationError({"status": "Contrato já está suspenso."})
+            before = {"status": contrato.status}
+            sessoes = list(empresa.sessoes_usuarios.select_for_update().filter(ativa=True))
+            for sessao in sessoes:
+                ConcurrentSessionService.close_session(sessao, "CONTRACT_SUSPENDED", request.user, request)
+            contrato.status = EmpresaContrato.STATUS_SUSPENSO
+            contrato.motivo_suspensao = motivo
+            contrato.observacao_suspensao = observacao
+            contrato.suspenso_em = timezone.now()
+            contrato.suspenso_por = request.user
+            contrato.incrementar_versao(save=False)
+            contrato.__skip_audit_signal__ = True
+            contrato.save(update_fields=["status", "motivo_suspensao", "observacao_suspensao", "suspenso_em", "suspenso_por", "permissions_version", "updated_at"])
+            AuditService.required_success(
+                AuditAction.CONTRACT_SUSPENDED,
+                category=AuditCategory.CONTRACT,
+                request=request,
+                user=request.user,
+                instance=contrato,
+                before=before,
+                after={"status": contrato.status, "motivo": motivo},
+                metadata={"motivo": motivo, "observacao": observacao, "sessoes_encerradas": len(sessoes)},
+                status_code=200,
+            )
+        return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="reativar")
+    def reativar(self, request, pk=None):
+        empresa = self.get_object()
+        if not request.user.is_superuser:
+            AuditService.denied(AuditAction.CONTRACT_REACTIVATION_DENIED, category=AuditCategory.CONTRACT, request=request, user=request.user, empresa=empresa, app_label="cadastros", model="empresa", object_id=empresa.pk, status_code=403)
+            raise PermissionDenied("Somente superusuário pode reativar empresa.")
+        with transaction.atomic():
+            contrato = EmpresaContrato.objects.select_for_update().select_related("empresa").get(empresa=empresa)
+            if contrato.status != EmpresaContrato.STATUS_SUSPENSO:
+                raise ValidationError({"status": "Somente contrato suspenso pode ser reativado."})
+            before = {"status": contrato.status, "motivo": contrato.motivo_suspensao}
+            contrato.status = EmpresaContrato.STATUS_ATIVO
+            contrato.reativado_em = timezone.now()
+            contrato.reativado_por = request.user
+            contrato.incrementar_versao(save=False)
+            contrato.__skip_audit_signal__ = True
+            contrato.save(update_fields=["status", "reativado_em", "reativado_por", "permissions_version", "updated_at"])
+            AuditService.required_success(
+                AuditAction.CONTRACT_REACTIVATED,
+                category=AuditCategory.CONTRACT,
+                request=request,
+                user=request.user,
+                instance=contrato,
+                before=before,
+                after={"status": contrato.status},
+                metadata={"motivo_anterior": before["motivo"]},
+                status_code=200,
+            )
+        return Response(EmpresaContratoDetalheSerializer(contrato, context={"request": request}).data)
+
 
 class LojaViewSet(BaseCadastroViewSet):
     required_module = "operacional"
@@ -197,6 +281,40 @@ class LojaViewSet(BaseCadastroViewSet):
     search_fields = ["nome_loja", "apelido_loja", "cnpj", "cidade", "email", "telefone1", "telefone2"]
     ordering_fields = ["nome_loja", "cidade", "estado", "data_cadastro"]
     ordering = ["nome_loja"]
+    filterset_fields = ["ativo", "empresa", "estado", "cidade", "cnpj", "tipo_unidade", "emite_nfce", "emite_nfe"]
+    action_required_access = {"usuarios": "VIEW", "indicadores": "VIEW", "ativar": "EDIT", "inativar": "EDIT", "encerrar": "EDIT", "reabrir": "EDIT"}
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_superuser:
+            loja = serializer.save()
+        else:
+            if not getattr(user, "empresa_id", None):
+                raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+            empresa = serializer.validated_data.get("empresa")
+            if empresa and empresa.id != user.empresa_id:
+                raise ValidationError({"empresa": "Você só pode cadastrar estabelecimento na sua empresa."})
+            loja = serializer.save(empresa=user.empresa)
+        AuditService.required_success(AuditAction.STORE_CREATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=loja, after=instance_snapshot(loja), status_code=201)
+
+    def perform_update(self, serializer):
+        before = instance_snapshot(serializer.instance)
+        user = self.request.user
+        if not user.is_superuser and serializer.instance.empresa_id != getattr(user, "empresa_id", None):
+            raise PermissionDenied("Estabelecimento pertence a outra empresa.")
+        loja = serializer.save()
+        fiscal_fields = {"regime_tributario", "ambiente_fiscal", "inscricao_estadual", "emite_nfce", "emite_nfe"}
+        number_fields = {"serie_nfce", "proximo_numero_nfce", "serie_nfe", "proximo_numero_nfe"}
+        policy_fields = {"EstoqueNegativo"}
+        changed = set((before or {}).keys()) & set(serializer.validated_data.keys())
+        action_name = AuditAction.STORE_UPDATED
+        if changed & number_fields:
+            action_name = AuditAction.STORE_NUMBERING_UPDATED
+        elif changed & fiscal_fields:
+            action_name = AuditAction.STORE_FISCAL_CONFIG_UPDATED
+        elif changed & policy_fields:
+            action_name = AuditAction.STORE_NEGATIVE_STOCK_POLICY_UPDATED
+        AuditService.required_success(action_name, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=loja, before=before, after=instance_snapshot(loja), changed_fields=sorted(serializer.validated_data.keys()), status_code=200)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -204,7 +322,7 @@ class LojaViewSet(BaseCadastroViewSet):
         if user.is_superuser:
             empresa = self.request.query_params.get("empresa")
             return qs.filter(empresa_id=empresa) if empresa else qs
-        if getattr(user, "type", None) in {"Caixa", "Vendedor"}:
+        if not EffectiveAccessService(user).is_company_master():
             lojas_ids = list(user.lojas.values_list("id", flat=True))
             if getattr(user, "loja_id", None) and user.loja_id not in lojas_ids:
                 lojas_ids.append(user.loja_id)
@@ -216,6 +334,101 @@ class LojaViewSet(BaseCadastroViewSet):
         if loja_id:
             return qs.filter(pk=loja_id)
         return qs.none()
+
+    def _impedimentos_inativacao(self, loja):
+        impedimentos = []
+        if loja.sessoes_usuarios.filter(ativa=True).exists():
+            impedimentos.append("Existem sessões ativas no estabelecimento.")
+        if loja.usuarios.filter(is_active=True).exists():
+            impedimentos.append("Existem usuários com esta loja principal.")
+        if loja.usuarios_permitidos.filter(is_active=True).exists():
+            impedimentos.append("Existem usuários com esta loja entre as lojas permitidas.")
+        return impedimentos
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        return Response(qs.aggregate(
+            total=Count("id"),
+            ativos=Count("id", filter=Q(ativo=True)),
+            inativos=Count("id", filter=Q(ativo=False)),
+            lojas=Count("id", filter=Q(tipo_unidade=Loja.TIPO_LOJA)),
+            matrizes=Count("id", filter=Q(tipo_unidade=Loja.TIPO_MATRIZ)),
+            fabricas=Count("id", filter=Q(tipo_unidade=Loja.TIPO_FABRICA)),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        loja = self.get_object()
+        before = instance_snapshot(loja)
+        loja.ativo = True
+        loja.DataEnceramento = None
+        loja.__skip_audit_signal__ = True
+        loja.save(update_fields=["ativo", "DataEnceramento", "Matriz"])
+        AuditService.required_success(AuditAction.STORE_ACTIVATED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=loja, before=before, after=instance_snapshot(loja), status_code=200)
+        return Response(self.get_serializer(loja).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        loja = self.get_object()
+        impedimentos = self._impedimentos_inativacao(loja)
+        if impedimentos:
+            AuditService.denied(AuditAction.STORE_OPERATION_DENIED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=loja, metadata={"operacao": "inativar", "impedimentos": impedimentos}, status_code=400)
+            return Response({"code": "STORE_DEACTIVATION_BLOCKED", "impedimentos": impedimentos}, status=400)
+        before = instance_snapshot(loja)
+        loja.ativo = False
+        loja.__skip_audit_signal__ = True
+        loja.save(update_fields=["ativo", "Matriz"])
+        AuditService.required_success(AuditAction.STORE_DEACTIVATED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=loja, before=before, after=instance_snapshot(loja), status_code=200)
+        return Response(self.get_serializer(loja).data)
+
+    @action(detail=True, methods=["post"], url_path="encerrar")
+    def encerrar(self, request, pk=None):
+        loja = self.get_object()
+        data = request.data.get("data") or request.data.get("data_encerramento")
+        motivo = (request.data.get("motivo") or "").strip()
+        if not data:
+            raise ValidationError({"data": "Informe a data de encerramento."})
+        if not motivo:
+            raise ValidationError({"motivo": "Informe o motivo do encerramento."})
+        before = instance_snapshot(loja)
+        loja.DataEnceramento = data
+        loja.ativo = False
+        loja.__skip_audit_signal__ = True
+        loja.save(update_fields=["DataEnceramento", "ativo", "Matriz"])
+        AuditService.required_success(AuditAction.STORE_CLOSED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=loja, before=before, after=instance_snapshot(loja), metadata={"motivo": motivo}, status_code=200)
+        return Response(self.get_serializer(loja).data)
+
+    @action(detail=True, methods=["post"], url_path="reabrir")
+    def reabrir(self, request, pk=None):
+        loja = self.get_object()
+        before = instance_snapshot(loja)
+        loja.DataEnceramento = None
+        loja.ativo = True
+        loja.__skip_audit_signal__ = True
+        loja.save(update_fields=["DataEnceramento", "ativo", "Matriz"])
+        AuditService.required_success(AuditAction.STORE_REOPENED, category=AuditCategory.ACCESS, request=request, user=request.user, instance=loja, before=before, after=instance_snapshot(loja), status_code=200)
+        return Response(self.get_serializer(loja).data)
+
+    @action(detail=True, methods=["get"], url_path="usuarios")
+    def usuarios(self, request, pk=None):
+        loja = self.get_object()
+        qs = User.objects.filter(Q(loja=loja) | Q(lojas=loja)).select_related("perfil_principal").distinct()
+        if not request.user.is_superuser:
+            qs = qs.filter(empresa_id=request.user.empresa_id)
+        data = []
+        for user in qs:
+            data.append({
+                "id": user.id,
+                "username": user.username,
+                "nome": user.get_full_name() or user.username,
+                "perfil": getattr(user.perfil_principal, "nome", None),
+                "loja_principal": user.loja_id == loja.id,
+                "loja_permitida": user.lojas.filter(pk=loja.pk).exists(),
+                "ativo": user.is_active,
+                "sessao_ativa": user.sessoes_acesso.filter(loja=loja, ativa=True).exists(),
+            })
+        return Response(data)
 
 
 class ClienteViewSet(BaseCadastroViewSet):

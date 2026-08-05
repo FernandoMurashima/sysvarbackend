@@ -128,6 +128,43 @@ class LojaSerializer(serializers.ModelSerializer):
         cep_validator(value)
         return _norm_digits(value)
 
+    def validate_estado(self, value):
+        value = (value or "").strip().upper()
+        if value and len(value) != 2:
+            raise serializers.ValidationError("Informe a UF com duas letras.")
+        return value or None
+
+    def validate(self, attrs):
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not empresa and user and getattr(user, "empresa_id", None):
+            empresa = user.empresa
+            attrs["empresa"] = empresa
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Estabelecimento deve pertencer a uma empresa."})
+        tipo = attrs.get("tipo_unidade", getattr(self.instance, "tipo_unidade", Loja.TIPO_LOJA))
+        attrs["Matriz"] = "SIM" if tipo == Loja.TIPO_MATRIZ else "NAO"
+        abertura = attrs.get("DataAbertura", getattr(self.instance, "DataAbertura", None))
+        encerramento = attrs.get("DataEnceramento", getattr(self.instance, "DataEnceramento", None))
+        ativo = attrs.get("ativo", getattr(self.instance, "ativo", True))
+        if abertura and encerramento and encerramento < abertura:
+            raise serializers.ValidationError({"DataEnceramento": "Data de encerramento não pode ser anterior à abertura."})
+        if encerramento and ativo:
+            raise serializers.ValidationError({"ativo": "Estabelecimento encerrado não pode permanecer ativo."})
+        for field in ("serie_nfce", "proximo_numero_nfce", "serie_nfe", "proximo_numero_nfe"):
+            value = attrs.get(field, getattr(self.instance, field, 1))
+            if int(value or 0) <= 0:
+                raise serializers.ValidationError({field: "Informe valor maior que zero."})
+        cnpj = attrs.get("cnpj", getattr(self.instance, "cnpj", None))
+        if cnpj and empresa:
+            qs = Loja.objects.filter(empresa=empresa, cnpj=cnpj)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"cnpj": "Já existe estabelecimento com este CNPJ nesta empresa."})
+        return attrs
+
 # ---------------------------
 # Cliente
 # ---------------------------

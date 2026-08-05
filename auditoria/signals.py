@@ -82,6 +82,8 @@ def audit_postsave(sender, instance, created, **kwargs):
     cfg = AuditRegistry.config_for(sender)
     if not cfg:
         return
+    if getattr(instance, "__skip_audit_signal__", False):
+        return
     verb = "create" if created else "update"
     if verb not in cfg["actions"]:
         return
@@ -221,7 +223,7 @@ def register_default_audit_models():
         logger.exception("Não foi possível registrar models auditados.")
         return
     AuditRegistry.register(Empresa, category=AuditCategory.CADASTRO, ignored_fields={"documento"})
-    AuditRegistry.register(Loja, category=AuditCategory.CADASTRO, empresa_getter=_empresa, ignored_fields={"cnpj"})
+    AuditRegistry.register(Loja, category=AuditCategory.CADASTRO, empresa_getter=_empresa, ignored_fields={"cnpj"}, actions=())
     AuditRegistry.register(PerfilAcesso, category=AuditCategory.ACCESS, empresa_getter=_empresa)
     AuditRegistry.register(PerfilModuloPermissao, category=AuditCategory.ACCESS, empresa_getter=lambda o: o.perfil.empresa)
     AuditRegistry.register(EmpresaContrato, category=AuditCategory.CONTRACT, empresa_getter=_empresa)

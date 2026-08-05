@@ -316,7 +316,8 @@ class SaaSAccessControlTests(TestCase):
         response = self.client.post("/api/accounts/auth/token/", {"username": "master_saas", "password": "12345678", "device_id": "dev-suspenso"})
 
         self.assertEqual(response.status_code, 401)
-        self.assertIn("Contrato suspenso", str(response.data))
+        self.assertEqual(response.data["code"], "CONTRACT_SUSPENDED")
+        self.assertIn("temporariamente suspenso", str(response.data))
 
     def test_usuario_ativo_nao_consume_licenca_ate_fazer_login(self):
         contrato = self.empresa.contrato

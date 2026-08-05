@@ -35,6 +35,7 @@ class User(AbstractUser):
         blank=True,
         related_name='usuarios',
     )
+    deve_trocar_senha = models.BooleanField(default=False, db_index=True)
 
     def __str__(self):
         return f"{self.username} ({self.type})"
