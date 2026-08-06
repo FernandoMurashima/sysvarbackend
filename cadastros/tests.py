@@ -330,3 +330,200 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
 
         with self.assertRaises(CommandError):
             call_command("diagnosticar_clientes_padrao", "--empresa-id", str(self.empresa.pk), "--apply", stdout=StringIO())
+
+    def _cliente(self, nome="Cliente Ciclo", documento="52998224725", **kwargs):
+        defaults = {
+            "empresa": self.empresa,
+            "nome_cliente": nome,
+            "tipo_pessoa": Cliente.TIPO_PESSOA_FISICA,
+            "documento": documento,
+        }
+        defaults.update(kwargs)
+        return Cliente.objects.create(**defaults)
+
+    def test_api_comum_bloqueia_mass_assignment_de_status_e_bloqueio_no_create(self):
+        self.client.force_authenticate(self.user_edit)
+
+        res_ativo = self.client.post(
+            "/api/cadastros/clientes/",
+            {"nome_cliente": "Status Direto", "tipo_pessoa": "PF", "documento": "52998224725", "ativo": False},
+            format="json",
+        )
+        res_bloqueio = self.client.post(
+            "/api/cadastros/clientes/",
+            {"nome_cliente": "Bloqueio Direto", "tipo_pessoa": "PF", "documento": "39053344705", "bloqueio": True, "motivo_bloqueio": "manual"},
+            format="json",
+        )
+
+        self.assertEqual(res_ativo.status_code, 400)
+        self.assertIn("ativo", res_ativo.data)
+        self.assertEqual(res_bloqueio.status_code, 400)
+        self.assertIn("bloqueio", res_bloqueio.data)
+        self.assertFalse(Cliente.objects.filter(nome_cliente__in=["Status Direto", "Bloqueio Direto"]).exists())
+
+    def test_api_comum_bloqueia_mass_assignment_de_ciclo_no_patch_e_put(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        res_patch = self.client.patch(f"/api/cadastros/clientes/{cliente.pk}/", {"ativo": False}, format="json")
+        res_put = self.client.put(
+            f"/api/cadastros/clientes/{cliente.pk}/",
+            {
+                "nome_cliente": "Cliente Ciclo",
+                "tipo_pessoa": "PF",
+                "documento": "52998224725",
+                "bloqueio": True,
+                "motivo_bloqueio": "manual",
+            },
+            format="json",
+        )
+
+        self.assertEqual(res_patch.status_code, 400)
+        self.assertEqual(res_put.status_code, 400)
+        cliente.refresh_from_db()
+        self.assertTrue(cliente.ativo)
+        self.assertFalse(cliente.bloqueio)
+
+    def test_api_comum_bloqueia_campos_de_bloqueio_read_only_no_payload(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.patch(
+            f"/api/cadastros/clientes/{cliente.pk}/",
+            {"bloqueado_em": timezone.now().isoformat(), "bloqueado_por": self.user_edit.pk, "observacao_bloqueio": "manual"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("bloqueado_em", res.data)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.bloqueado_em)
+        self.assertIsNone(cliente.bloqueado_por)
+
+    def test_acoes_oficiais_alteram_ciclo_e_registram_auditoria(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        res_inativar = self.client.post(f"/api/cadastros/clientes/{cliente.pk}/inativar/")
+        res_ativar = self.client.post(f"/api/cadastros/clientes/{cliente.pk}/ativar/")
+        res_bloquear = self.client.post(
+            f"/api/cadastros/clientes/{cliente.pk}/bloquear/",
+            {"motivo": "inadimplencia", "observacao": "parcela 2"},
+            format="json",
+        )
+        res_desbloquear = self.client.post(f"/api/cadastros/clientes/{cliente.pk}/desbloquear/")
+
+        self.assertEqual(res_inativar.status_code, 200)
+        self.assertFalse(res_inativar.data["ativo"])
+        self.assertEqual(res_ativar.status_code, 200)
+        self.assertTrue(res_ativar.data["ativo"])
+        self.assertEqual(res_bloquear.status_code, 200)
+        self.assertTrue(res_bloquear.data["bloqueio"])
+        self.assertEqual(res_bloquear.data["motivo_bloqueio"], "inadimplencia")
+        self.assertEqual(res_bloquear.data["observacao_bloqueio"], "parcela 2")
+        self.assertEqual(res_bloquear.data["bloqueado_por"], self.user_edit.pk)
+        self.assertEqual(res_bloquear.data["bloqueado_por_nome"], self.user_edit.username)
+        self.assertEqual(res_desbloquear.status_code, 200)
+        self.assertFalse(res_desbloquear.data["bloqueio"])
+        self.assertIsNone(res_desbloquear.data["motivo_bloqueio"])
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DEACTIVATED, object_id=str(cliente.pk)).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_ACTIVATED, object_id=str(cliente.pk)).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_BLOCKED, object_id=str(cliente.pk), metadata__motivo="inadimplencia").exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_UNBLOCKED, object_id=str(cliente.pk), metadata__observacao="parcela 2").exists())
+
+    def test_bloquear_exige_motivo_e_preserva_cliente(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post(f"/api/cadastros/clientes/{cliente.pk}/bloquear/", {"observacao": "sem motivo"}, format="json")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("motivo", res.data)
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.bloqueio)
+
+    def test_cliente_padrao_nao_pode_ser_bloqueado(self):
+        padrao = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Consumidor Final",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento=Cliente.DOCUMENTO_CONSUMIDOR_FINAL,
+            cliente_padrao=True,
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post(f"/api/cadastros/clientes/{padrao.pk}/bloquear/", {"motivo": "manual"}, format="json")
+
+        self.assertEqual(res.status_code, 400)
+        padrao.refresh_from_db()
+        self.assertFalse(padrao.bloqueio)
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_OPERATION_DENIED, object_id=str(padrao.pk)).exists())
+
+    def test_historico_retorna_auditlog_paginado_mais_recente_sem_dados_sensiveis(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+        self.client.post(f"/api/cadastros/clientes/{cliente.pk}/inativar/")
+        self.client.post(f"/api/cadastros/clientes/{cliente.pk}/ativar/")
+        self.client.post(f"/api/cadastros/clientes/{cliente.pk}/bloquear/", {"motivo": "inadimplencia", "observacao": "parcela"}, format="json")
+
+        self.client.force_authenticate(self.user_view)
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/historico/?page=1&page_size=2")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 3)
+        self.assertEqual(len(res.data["results"]), 2)
+        primeiro = res.data["results"][0]
+        self.assertEqual(primeiro["acao"], AuditAction.CLIENT_BLOCKED)
+        self.assertEqual(primeiro["motivo"], "inadimplencia")
+        self.assertEqual(primeiro["observacao"], "parcela")
+        self.assertIn("campos_alterados", primeiro)
+        self.assertNotIn("before_data", primeiro)
+        self.assertNotIn("after_data", primeiro)
+        self.assertNotIn("documento", primeiro)
+
+    def test_historico_respeita_escopo_multiempresa(self):
+        cliente = self._cliente()
+        outro = Cliente.objects.create(
+            empresa=self.outra,
+            nome_cliente="Outra Carteira",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="39053344705",
+        )
+        AuditLog.objects.internal_create(
+            empresa=self.outra,
+            action=AuditAction.CLIENT_BLOCKED,
+            category="CADASTRO",
+            app_label="cadastros",
+            model="cliente",
+            object_id=str(outro.pk),
+        )
+        self.client.force_authenticate(self.user_view)
+
+        res_cliente = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/historico/")
+        res_outro = self.client.get(f"/api/cadastros/clientes/{outro.pk}/historico/")
+
+        self.assertEqual(res_cliente.status_code, 200)
+        self.assertEqual(res_cliente.data["count"], 0)
+        self.assertEqual(res_outro.status_code, 404)
+
+    def test_permissoes_view_acessa_historico_mas_nao_altera_ciclo(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_view)
+
+        res_hist = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/historico/")
+        res_action = self.client.post(f"/api/cadastros/clientes/{cliente.pk}/bloquear/", {"motivo": "sem permissao"}, format="json")
+
+        self.assertEqual(res_hist.status_code, 200)
+        self.assertEqual(res_action.status_code, 403)
+
+    def test_falha_de_auditoria_obrigatoria_gera_rollback_em_acao_de_ciclo(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        with patch("cadastros.views.AuditService.required_success", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                self.client.post(f"/api/cadastros/clientes/{cliente.pk}/bloquear/", {"motivo": "inadimplencia"}, format="json")
+
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.bloqueio)
+        self.assertIsNone(cliente.motivo_bloqueio)

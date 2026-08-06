@@ -173,10 +173,19 @@ class LojaSerializer(serializers.ModelSerializer):
 class ClienteSerializer(serializers.ModelSerializer):
     empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), required=False)
     empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+    bloqueado_por_nome = serializers.CharField(source="bloqueado_por.username", read_only=True)
     ultima_compra = serializers.DateTimeField(read_only=True)
     total_comprado = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     quantidade_compras = serializers.IntegerField(read_only=True)
     ticket_medio = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    LIFECYCLE_FIELDS = {
+        "ativo",
+        "bloqueio",
+        "motivo_bloqueio",
+        "observacao_bloqueio",
+        "bloqueado_em",
+        "bloqueado_por",
+    }
 
     class Meta:
         model = Cliente
@@ -252,6 +261,16 @@ class ClienteSerializer(serializers.ModelSerializer):
                 "cliente_padrao": "Cliente padrão deve ser criado pelo serviço oficial."
             })
 
+        lifecycle_requested = self.LIFECYCLE_FIELDS & set(getattr(self, "initial_data", {}) or {})
+        if lifecycle_requested and not self.context.get("allow_lifecycle_fields"):
+            errors = {}
+            for field in sorted(lifecycle_requested):
+                if field == "ativo":
+                    errors[field] = "O status do cliente deve ser alterado pela ação Ativar ou Inativar."
+                else:
+                    errors[field] = "O bloqueio do cliente deve ser alterado pela ação Bloquear ou Desbloquear."
+            raise serializers.ValidationError(errors)
+
         if self.instance and self.instance.cliente_padrao:
             protegidos = {"empresa", "cliente_padrao", "documento", "cpf", "tipo_pessoa", "ativo", "bloqueio"}
             alterados = protegidos & set(attrs.keys())
@@ -297,10 +316,6 @@ class ClienteSerializer(serializers.ModelSerializer):
         aniversario = attrs.get("aniversario", getattr(self.instance, "aniversario", None))
         if aniversario and aniversario > timezone.localdate():
             raise serializers.ValidationError({"aniversario": "Aniversário não pode ser futuro."})
-        bloqueio = attrs.get("bloqueio", getattr(self.instance, "bloqueio", False))
-        motivo = (attrs.get("motivo_bloqueio", getattr(self.instance, "motivo_bloqueio", "")) or "").strip()
-        if bloqueio and not motivo:
-            raise serializers.ValidationError({"motivo_bloqueio": "Informe o motivo do bloqueio."})
         if attrs.get("email"):
             attrs["email"] = _norm_email(attrs["email"])
         for field in ("telefone1", "telefone2", "cep"):

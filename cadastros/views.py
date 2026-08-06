@@ -12,7 +12,7 @@ from accounts.permissions import HasModuleRole
 from accounts.services.effective_access import EffectiveAccessService, MasterTransferService, audit_event, increment_permissions_version, sync_legacy_license_flags
 from accounts.services.sessions import ConcurrentSessionService
 from accounts.serializers import EmpresaContratoDetalheSerializer
-from auditoria.models import AuditAction, AuditCategory
+from auditoria.models import AuditAction, AuditCategory, AuditLog
 from auditoria.services import AuditService, instance_snapshot
 
 from .models import Empresa, EmpresaContrato, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
@@ -446,6 +446,7 @@ class ClienteViewSet(BaseCadastroViewSet):
     ordering = ["nome_cliente"]
     action_required_access = {
         "indicadores": "VIEW",
+        "historico": "VIEW",
         "ativar": "EDIT",
         "inativar": "EDIT",
         "bloquear": "EDIT",
@@ -514,14 +515,8 @@ class ClienteViewSet(BaseCadastroViewSet):
         try:
             with transaction.atomic():
                 cliente = self._save_cliente(serializer)
-                if before and before.get("bloqueio") != cliente.bloqueio:
-                    action_name = AuditAction.CLIENT_BLOCKED if cliente.bloqueio else AuditAction.CLIENT_UNBLOCKED
-                elif before and before.get("ativo") != cliente.ativo:
-                    action_name = AuditAction.CLIENT_ACTIVATED if cliente.ativo else AuditAction.CLIENT_DEACTIVATED
-                else:
-                    action_name = AuditAction.CLIENT_UPDATED
                 AuditService.required_success(
-                    action_name,
+                    AuditAction.CLIENT_UPDATED,
                     category=AuditCategory.CADASTRO,
                     request=self.request,
                     user=self.request.user,
@@ -543,12 +538,6 @@ class ClienteViewSet(BaseCadastroViewSet):
 
     def _save_cliente(self, serializer):
         user = self.request.user
-        if serializer.validated_data.get("bloqueio") and not serializer.validated_data.get("bloqueado_em"):
-            serializer.validated_data["bloqueado_em"] = timezone.now()
-            serializer.validated_data["bloqueado_por"] = user if user.is_authenticated else None
-        if serializer.validated_data.get("bloqueio") is False:
-            serializer.validated_data["bloqueado_em"] = None
-            serializer.validated_data["bloqueado_por"] = None
         if self.request.user.is_superuser:
             if not serializer.validated_data.get("empresa") and not getattr(serializer.instance, "empresa_id", None):
                 raise ValidationError({"empresa": "Informe a empresa do cliente."})
@@ -577,55 +566,112 @@ class ClienteViewSet(BaseCadastroViewSet):
             "clientes_sem_compras": qs.filter(quantidade_compras=0, cliente_padrao=False).count(),
         })
 
+    @action(detail=True, methods=["get"], url_path="historico")
+    def historico(self, request, pk=None):
+        cliente = self.get_object()
+        qs = AuditLog.objects.filter(
+            empresa_id=cliente.empresa_id,
+            app_label="cadastros",
+            model="cliente",
+            object_id=str(cliente.pk),
+        ).select_related("user").order_by("-created_at", "-id")
+        page = self.paginate_queryset(qs)
+        logs = page if page is not None else qs
+        data = [self._historico_item(log) for log in logs]
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
+    def _historico_item(self, log):
+        before = log.before_data or {}
+        after = log.after_data or {}
+        metadata = log.metadata or {}
+        return {
+            "id": log.id,
+            "created_at": log.created_at,
+            "acao": log.action,
+            "acao_descricao": self._historico_descricao(log.action),
+            "usuario": log.user_nome_snapshot or log.username_snapshot or None,
+            "origem": log.origin,
+            "resultado": log.result,
+            "campos_alterados": log.changed_fields or [],
+            "motivo": metadata.get("motivo") or after.get("motivo_bloqueio") or before.get("motivo_bloqueio"),
+            "observacao": metadata.get("observacao") or after.get("observacao_bloqueio") or before.get("observacao_bloqueio"),
+        }
+
+    def _historico_descricao(self, action_name):
+        return {
+            AuditAction.CLIENT_CREATED: "Cliente criado",
+            AuditAction.CLIENT_UPDATED: "Cliente atualizado",
+            AuditAction.CLIENT_ACTIVATED: "Cliente ativado",
+            AuditAction.CLIENT_DEACTIVATED: "Cliente inativado",
+            AuditAction.CLIENT_BLOCKED: "Cliente bloqueado",
+            AuditAction.CLIENT_UNBLOCKED: "Cliente desbloqueado",
+            AuditAction.CLIENT_DELETED: "Cliente excluído",
+        }.get(action_name, action_name)
+
     @action(detail=True, methods=["post"], url_path="ativar")
     def ativar(self, request, pk=None):
-        cliente = self.get_object()
-        before = instance_snapshot(cliente)
-        cliente.ativo = True
-        cliente.save(update_fields=["ativo", "cpf", "documento"])
-        AuditService.required_success(AuditAction.CLIENT_ACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        scoped = self.get_object()
+        with transaction.atomic():
+            cliente = Cliente.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(cliente)
+            cliente.ativo = True
+            cliente.save(update_fields=["ativo", "cpf", "documento"])
+            AuditService.required_success(AuditAction.CLIENT_ACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), changed_fields=["ativo"], status_code=200)
         return Response(self.get_serializer(cliente).data)
 
     @action(detail=True, methods=["post"], url_path="inativar")
     def inativar(self, request, pk=None):
-        cliente = self.get_object()
+        scoped = self.get_object()
+        cliente = scoped
         if cliente.cliente_padrao:
             return self._deny_cliente_padrao(cliente, request, "inativar")
-        before = instance_snapshot(cliente)
-        cliente.ativo = False
-        cliente.save(update_fields=["ativo", "cpf", "documento"])
-        AuditService.required_success(AuditAction.CLIENT_DEACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        with transaction.atomic():
+            cliente = Cliente.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(cliente)
+            cliente.ativo = False
+            cliente.save(update_fields=["ativo", "cpf", "documento"])
+            AuditService.required_success(AuditAction.CLIENT_DEACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), changed_fields=["ativo"], status_code=200)
         return Response(self.get_serializer(cliente).data)
 
     @action(detail=True, methods=["post"], url_path="bloquear")
     def bloquear(self, request, pk=None):
-        cliente = self.get_object()
+        scoped = self.get_object()
+        cliente = scoped
         if cliente.cliente_padrao:
             return self._deny_cliente_padrao(cliente, request, "bloquear")
         motivo = (request.data.get("motivo") or request.data.get("motivo_bloqueio") or "").strip()
         if not motivo:
             raise ValidationError({"motivo": "Informe o motivo do bloqueio."})
-        before = instance_snapshot(cliente)
-        cliente.bloqueio = True
-        cliente.motivo_bloqueio = motivo[:80]
-        cliente.observacao_bloqueio = (request.data.get("observacao") or request.data.get("observacao_bloqueio") or "").strip() or None
-        cliente.bloqueado_em = timezone.now()
-        cliente.bloqueado_por = request.user if request.user.is_authenticated else None
-        cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
-        AuditService.required_success(AuditAction.CLIENT_BLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), metadata={"motivo": motivo}, status_code=200)
+        observacao = (request.data.get("observacao") or request.data.get("observacao_bloqueio") or "").strip() or None
+        with transaction.atomic():
+            cliente = Cliente.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(cliente)
+            cliente.bloqueio = True
+            cliente.motivo_bloqueio = motivo[:80]
+            cliente.observacao_bloqueio = observacao
+            cliente.bloqueado_em = timezone.now()
+            cliente.bloqueado_por = request.user if request.user.is_authenticated else None
+            cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
+            AuditService.required_success(AuditAction.CLIENT_BLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), changed_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por"], metadata={"motivo": motivo[:80], "observacao": observacao}, status_code=200)
         return Response(self.get_serializer(cliente).data)
 
     @action(detail=True, methods=["post"], url_path="desbloquear")
     def desbloquear(self, request, pk=None):
-        cliente = self.get_object()
-        before = instance_snapshot(cliente)
-        cliente.bloqueio = False
-        cliente.motivo_bloqueio = None
-        cliente.observacao_bloqueio = None
-        cliente.bloqueado_em = None
-        cliente.bloqueado_por = None
-        cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
-        AuditService.required_success(AuditAction.CLIENT_UNBLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        scoped = self.get_object()
+        with transaction.atomic():
+            cliente = Cliente.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(cliente)
+            motivo_anterior = cliente.motivo_bloqueio
+            observacao_anterior = cliente.observacao_bloqueio
+            cliente.bloqueio = False
+            cliente.motivo_bloqueio = None
+            cliente.observacao_bloqueio = None
+            cliente.bloqueado_em = None
+            cliente.bloqueado_por = None
+            cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
+            AuditService.required_success(AuditAction.CLIENT_UNBLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), changed_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por"], metadata={"motivo": motivo_anterior, "observacao": observacao_anterior}, status_code=200)
         return Response(self.get_serializer(cliente).data)
 
     def perform_destroy(self, instance):
