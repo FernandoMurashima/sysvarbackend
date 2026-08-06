@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
-from cadastros.models import Empresa, EmpresaContrato, Loja, ModuloSistema
+from cadastros.models import Cliente, Empresa, EmpresaContrato, Loja, ModuloSistema
 
 
 User = get_user_model()
@@ -20,6 +20,10 @@ class OperacionalBaseTest(TestCase):
             chave="operacional",
             defaults={"nome": "Operacional", "categoria": "BASICO", "basico": True, "ativo": True, "ordem": 1},
         )[0]
+        self.cadastros = ModuloSistema.objects.update_or_create(
+            chave="cadastros",
+            defaults={"nome": "Cadastros", "categoria": "BASICO", "basico": True, "ativo": True, "ordem": 2},
+        )[0]
         self.empresa = Empresa.objects.create(nome="Empresa Operacional", nome_fantasia="Operacional", documento="11222333000181", plano_completo=True)
         self.outra = Empresa.objects.create(nome="Outra Empresa", documento="22333444000102", plano_completo=True)
         self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 1", apelido_loja="L1", cnpj="11222333000181")
@@ -28,8 +32,10 @@ class OperacionalBaseTest(TestCase):
         self.master = User.objects.create_user(username="master", password="senha12345", empresa=self.empresa, loja=self.loja)
         self.view_profile = PerfilAcesso.objects.create(empresa=self.empresa, nome="View")
         PerfilModuloPermissao.objects.create(perfil=self.view_profile, modulo=self.operacional, acesso=UserModulePermission.Access.VIEW)
+        PerfilModuloPermissao.objects.create(perfil=self.view_profile, modulo=self.cadastros, acesso=UserModulePermission.Access.VIEW)
         self.edit_profile = PerfilAcesso.objects.create(empresa=self.empresa, nome="Edit")
         PerfilModuloPermissao.objects.create(perfil=self.edit_profile, modulo=self.operacional, acesso=UserModulePermission.Access.EDIT)
+        PerfilModuloPermissao.objects.create(perfil=self.edit_profile, modulo=self.cadastros, acesso=UserModulePermission.Access.EDIT)
         self.user_view = User.objects.create_user(username="view", password="senha12345", empresa=self.empresa, loja=self.loja, perfil_principal=self.view_profile)
         self.user_view.lojas.set([self.loja])
         self.user_edit = User.objects.create_user(username="edit", password="senha12345", empresa=self.empresa, loja=self.loja, perfil_principal=self.edit_profile)
@@ -149,3 +155,89 @@ class LojaOperacionalTests(OperacionalBaseTest):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(AuditLog.objects.filter(action=AuditAction.STORE_CLOSED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditAction.STORE_REOPENED).exists())
+
+
+class ClienteMultiempresaTests(OperacionalBaseTest):
+    def test_modelo_normaliza_documento_e_cpf_por_tipo_de_pessoa(self):
+        cliente = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Maria Cliente",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="529.982.247-25",
+        )
+
+        self.assertEqual(cliente.documento, "52998224725")
+        self.assertEqual(cliente.cpf, "52998224725")
+
+        empresa_cliente = Cliente.objects.create(
+            empresa=self.outra,
+            nome_cliente="Empresa Cliente",
+            tipo_pessoa=Cliente.TIPO_PESSOA_JURIDICA,
+            documento="11.222.333/0001-81",
+        )
+
+        self.assertEqual(empresa_cliente.documento, "11222333000181")
+        self.assertEqual(empresa_cliente.cpf, "11222333000181")
+
+    def test_api_bloqueia_documento_duplicado_na_mesma_empresa(self):
+        Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Cliente Existente",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="52998224725",
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post(
+            "/api/cadastros/clientes/",
+            {
+                "nome_cliente": "Duplicado",
+                "tipo_pessoa": Cliente.TIPO_PESSOA_FISICA,
+                "documento": "52998224725",
+            },
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("documento", res.data)
+
+    def test_cliente_padrao_nao_pode_ser_inativado_ou_excluido(self):
+        padrao = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Consumidor Final",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento=Cliente.DOCUMENTO_CONSUMIDOR_FINAL,
+            cliente_padrao=True,
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res_inativar = self.client.post(f"/api/cadastros/clientes/{padrao.pk}/inativar/")
+        res_delete = self.client.delete(f"/api/cadastros/clientes/{padrao.pk}/")
+
+        self.assertEqual(res_inativar.status_code, 400)
+        self.assertEqual(res_delete.status_code, 400)
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED).exists())
+
+    def test_indicadores_refletem_carteira_de_clientes(self):
+        Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Ativo PF",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="52998224725",
+        )
+        Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Bloqueado PJ",
+            tipo_pessoa=Cliente.TIPO_PESSOA_JURIDICA,
+            documento="11222333000181",
+            bloqueio=True,
+            motivo_bloqueio="inadimplencia",
+        )
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get("/api/cadastros/clientes/indicadores/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["total"], 2)
+        self.assertEqual(res.data["ativos"], 2)
+        self.assertEqual(res.data["bloqueados"], 1)

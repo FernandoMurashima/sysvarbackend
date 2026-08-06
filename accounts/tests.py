@@ -67,11 +67,12 @@ class MultiEmpresaIsolationTests(TestCase):
             estado="SP",
             email=f"loja{sufixo.lower()}@teste.local",
         )
+        cpf_cliente = "52998224725" if sufixo == "A" else "39053344705"
         cliente = Cliente.objects.create(
             empresa=empresa,
             nome_cliente=f"Cliente Isolamento {sufixo}",
             apelido=f"CLI{sufixo}",
-            cpf=f"0000000000{sufixo == 'B' and 2 or 1}",
+            cpf=cpf_cliente,
             cidade="Sao Paulo",
         )
         fornecedor = Fornecedor.objects.create(

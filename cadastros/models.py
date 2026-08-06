@@ -9,6 +9,9 @@ from cadastros.validators import (
     email_simple_validator,
     telefone_br_validator,
     cep_validator,
+    only_digits,
+    check_cpf,
+    check_cnpj,
 )
 
 
@@ -388,17 +391,33 @@ class Loja(models.Model):
 
 
 class Cliente(models.Model):
+    TIPO_PESSOA_FISICA = "PF"
+    TIPO_PESSOA_JURIDICA = "PJ"
+    TIPO_PESSOA_CHOICES = [
+        (TIPO_PESSOA_FISICA, "Pessoa física"),
+        (TIPO_PESSOA_JURIDICA, "Pessoa jurídica"),
+    ]
+    DOCUMENTO_CONSUMIDOR_FINAL = "00000000000"
+
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
         related_name="clientes",
         db_index=True,
     )
+    tipo_pessoa = models.CharField(
+        max_length=2,
+        choices=TIPO_PESSOA_CHOICES,
+        default=TIPO_PESSOA_FISICA,
+        db_index=True,
+    )
+    documento = models.CharField(max_length=14, null=True, blank=True, db_index=True)
+    cliente_padrao = models.BooleanField(default=False, db_index=True)
     nome_cliente = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=18, null=True, blank=True, db_index=True)
-    cpf = models.CharField(max_length=15, null=True, blank=True, validators=[cpf_validator], db_index=True)
+    cpf = models.CharField(max_length=15, null=True, blank=True, db_index=True)
     logradouro = models.CharField(max_length=50, null=True, blank=True)
     endereco = models.CharField(max_length=50, null=True, blank=True)
     numero = models.CharField(max_length=10, null=True, blank=True)
@@ -412,15 +431,41 @@ class Cliente(models.Model):
     email = models.CharField(max_length=50, null=True, blank=True, validators=[email_simple_validator])
     categoria = models.CharField(max_length=15, null=True, blank=True, db_index=True)
     bloqueio = models.BooleanField(default=False, db_index=True)
+    motivo_bloqueio = models.CharField(max_length=80, null=True, blank=True)
+    observacao_bloqueio = models.TextField(null=True, blank=True)
+    bloqueado_em = models.DateTimeField(null=True, blank=True)
+    bloqueado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clientes_bloqueados",
+    )
     aniversario = models.DateField(null=True, blank=True, db_index=True)
     mala_direta = models.BooleanField(default=False, db_index=True)
+    aceita_email = models.BooleanField(default=False, db_index=True)
+    aceita_whatsapp = models.BooleanField(default=False, db_index=True)
+    aceita_sms = models.BooleanField(default=False, db_index=True)
+    consentimento_em = models.DateTimeField(null=True, blank=True)
+    origem_consentimento = models.CharField(max_length=80, null=True, blank=True)
+    consentimento_observacao = models.TextField(null=True, blank=True)
     conta_contabil = models.CharField(max_length=50, null=True, blank=True)
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "documento"], name="uq_empresa_cliente_documento"),
+        ]
         indexes = [
             models.Index(fields=["cpf"]),
+            models.Index(fields=["empresa", "documento"], name="idx_cliente_empresa_doc"),
+            models.Index(fields=["empresa", "nome_cliente"], name="idx_cliente_empresa_nome"),
+            models.Index(fields=["empresa", "ativo"], name="idx_cliente_empresa_ativo"),
+            models.Index(fields=["empresa", "bloqueio"], name="idx_cliente_empresa_bloq"),
+            models.Index(fields=["empresa", "tipo_pessoa"], name="idx_cliente_empresa_tipo"),
+            models.Index(fields=["empresa", "cliente_padrao"], name="idx_cliente_empresa_padrao"),
+            models.Index(fields=["empresa", "cidade", "estado"], name="idx_cliente_empresa_cid_uf"),
             models.Index(fields=["cidade", "estado"]),
             models.Index(fields=["categoria"]),
             models.Index(fields=["bloqueio"]),
@@ -431,6 +476,77 @@ class Cliente(models.Model):
 
     def __str__(self):
         return self.nome_cliente
+
+    def clean(self):
+        super().clean()
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Cliente deve pertencer a uma empresa."})
+        self.tipo_pessoa = self.tipo_pessoa or self.TIPO_PESSOA_FISICA
+        if self.nome_cliente is not None:
+            self.nome_cliente = self.nome_cliente.strip()
+        if not self.nome_cliente:
+            raise ValidationError({"nome_cliente": "Informe o nome do cliente."})
+        self._normalizar_campos()
+        if self.aniversario and self.aniversario > timezone.localdate():
+            raise ValidationError({"aniversario": "Aniversário não pode ser futuro."})
+        if self.estado and len(self.estado) != 2:
+            raise ValidationError({"estado": "Informe a UF com duas letras."})
+        if self.cliente_padrao:
+            if self.tipo_pessoa != self.TIPO_PESSOA_FISICA:
+                raise ValidationError({"tipo_pessoa": "Cliente padrão deve ser pessoa física."})
+            if self.documento != self.DOCUMENTO_CONSUMIDOR_FINAL:
+                raise ValidationError({"documento": "Cliente padrão deve usar o documento 00000000000."})
+            if not self.ativo:
+                raise ValidationError({"ativo": "Cliente padrão não pode ser inativado."})
+            if self.bloqueio:
+                raise ValidationError({"bloqueio": "Cliente padrão não pode ser bloqueado."})
+            self.aceita_email = False
+            self.aceita_whatsapp = False
+            self.aceita_sms = False
+            return
+        if self.documento == self.DOCUMENTO_CONSUMIDOR_FINAL:
+            raise ValidationError({"documento": "Documento 00000000000 é reservado ao cliente padrão."})
+        if self.bloqueio and not self.motivo_bloqueio:
+            raise ValidationError({"motivo_bloqueio": "Informe o motivo do bloqueio."})
+        if self.documento:
+            if self.tipo_pessoa == self.TIPO_PESSOA_FISICA and not check_cpf(self.documento):
+                raise ValidationError({"documento": "CPF inválido."})
+            if self.tipo_pessoa == self.TIPO_PESSOA_JURIDICA and not check_cnpj(self.documento):
+                raise ValidationError({"documento": "CNPJ inválido."})
+
+    def save(self, *args, **kwargs):
+        self._normalizar_campos()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def _normalizar_campos(self):
+        strip_fields = [
+            "apelido",
+            "logradouro",
+            "endereco",
+            "numero",
+            "complemento",
+            "bairro",
+            "cidade",
+            "categoria",
+            "conta_contabil",
+            "motivo_bloqueio",
+            "observacao_bloqueio",
+            "origem_consentimento",
+            "consentimento_observacao",
+        ]
+        for field in strip_fields:
+            value = getattr(self, field, None)
+            if isinstance(value, str):
+                setattr(self, field, value.strip() or None)
+        self.email = (self.email or "").strip().lower() or None
+        self.telefone1 = only_digits(self.telefone1 or "") or None
+        self.telefone2 = only_digits(self.telefone2 or "") or None
+        self.cep = only_digits(self.cep or "") or None
+        self.estado = (self.estado or "").strip().upper() or None
+        doc = only_digits(self.documento or self.cpf or "")
+        self.documento = doc or None
+        self.cpf = self.documento
 
 
 class Fornecedor(models.Model):

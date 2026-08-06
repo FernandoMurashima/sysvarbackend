@@ -3,8 +3,9 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
-from django.db.models import Count, ProtectedError, Q
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, DecimalField, Max, ProtectedError, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from accounts.permissions import HasModuleRole
@@ -24,6 +25,7 @@ from .serializers import (
     NatLancamentoSerializer,
     PlanoContabilSerializer,
 )
+from .services import ClientePadraoService
 
 User = get_user_model()
 
@@ -432,13 +434,236 @@ class LojaViewSet(BaseCadastroViewSet):
 
 
 class ClienteViewSet(BaseCadastroViewSet):
-    queryset = Cliente.objects.all()
+    queryset = Cliente.objects.select_related("empresa", "bloqueado_por").all()
     serializer_class = ClienteSerializer
 
-    filterset_fields = ["ativo", "empresa", "estado", "cidade", "categoria", "bloqueio", "mala_direta"]
-    search_fields = ["nome_cliente", "apelido", "cpf", "email", "cidade", "telefone1", "telefone2"]
-    ordering_fields = ["nome_cliente", "cidade", "estado", "data_cadastro"]
+    filterset_fields = [
+        "ativo", "empresa", "estado", "cidade", "categoria", "bloqueio",
+        "mala_direta", "tipo_pessoa", "cliente_padrao", "documento", "email",
+    ]
+    search_fields = ["nome_cliente", "apelido", "documento", "cpf", "email", "cidade", "telefone1", "telefone2"]
+    ordering_fields = ["nome_cliente", "cidade", "estado", "data_cadastro", "ultima_compra", "total_comprado", "quantidade_compras", "ticket_medio"]
     ordering = ["nome_cliente"]
+    action_required_access = {
+        "indicadores": "VIEW",
+        "ativar": "EDIT",
+        "inativar": "EDIT",
+        "bloquear": "EDIT",
+        "desbloquear": "EDIT",
+    }
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        qs = self._with_indicadores_compra(qs)
+        com_compras = self.request.query_params.get("com_compras")
+        sem_compras = self.request.query_params.get("sem_compras")
+        if str(com_compras).lower() == "true":
+            qs = qs.filter(quantidade_compras__gt=0)
+        if str(sem_compras).lower() == "true":
+            qs = qs.filter(quantidade_compras=0)
+        return qs
+
+    def _with_indicadores_compra(self, qs):
+        try:
+            from fiscal.models import VendaPdv
+            return qs.annotate(
+                ultima_compra=Max("vendas_pdv__data_venda", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
+                total_comprado=Coalesce(
+                    Sum("vendas_pdv__total", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
+                    Value(0),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                ),
+                quantidade_compras=Count("vendas_pdv", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA), distinct=True),
+                ticket_medio=Coalesce(
+                    Avg("vendas_pdv__total", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
+                    Value(0),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                ),
+            )
+        except Exception:
+            return qs.annotate(
+                total_comprado=Value(0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+                quantidade_compras=Value(0),
+                ticket_medio=Value(0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+            )
+
+    def perform_create(self, serializer):
+        try:
+            with transaction.atomic():
+                cliente = self._save_cliente(serializer)
+                AuditService.required_success(
+                    AuditAction.CLIENT_CREATED,
+                    category=AuditCategory.CADASTRO,
+                    request=self.request,
+                    user=self.request.user,
+                    instance=cliente,
+                    after=instance_snapshot(cliente),
+                    status_code=201,
+                )
+        except IntegrityError:
+            raise ValidationError({"documento": "Já existe um cliente com este documento nesta empresa."})
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        before = instance_snapshot(instance)
+        if instance.cliente_padrao:
+            atual_empresa = instance.empresa_id
+            atual_doc = instance.documento
+            atual_tipo = instance.tipo_pessoa
+            atual_padrao = instance.cliente_padrao
+        try:
+            with transaction.atomic():
+                cliente = self._save_cliente(serializer)
+                if before and before.get("bloqueio") != cliente.bloqueio:
+                    action_name = AuditAction.CLIENT_BLOCKED if cliente.bloqueio else AuditAction.CLIENT_UNBLOCKED
+                elif before and before.get("ativo") != cliente.ativo:
+                    action_name = AuditAction.CLIENT_ACTIVATED if cliente.ativo else AuditAction.CLIENT_DEACTIVATED
+                else:
+                    action_name = AuditAction.CLIENT_UPDATED
+                AuditService.required_success(
+                    action_name,
+                    category=AuditCategory.CADASTRO,
+                    request=self.request,
+                    user=self.request.user,
+                    instance=cliente,
+                    before=before,
+                    after=instance_snapshot(cliente),
+                    changed_fields=sorted(serializer.validated_data.keys()),
+                    status_code=200,
+                )
+        except IntegrityError:
+            raise ValidationError({"documento": "Já existe um cliente com este documento nesta empresa."})
+        if instance.cliente_padrao and (
+            instance.empresa_id != atual_empresa
+            or instance.documento != atual_doc
+            or instance.tipo_pessoa != atual_tipo
+            or instance.cliente_padrao != atual_padrao
+        ):
+            raise ValidationError({"cliente_padrao": "Cliente padrão possui dados protegidos."})
+
+    def _save_cliente(self, serializer):
+        user = self.request.user
+        if serializer.validated_data.get("bloqueio") and not serializer.validated_data.get("bloqueado_em"):
+            serializer.validated_data["bloqueado_em"] = timezone.now()
+            serializer.validated_data["bloqueado_por"] = user if user.is_authenticated else None
+        if serializer.validated_data.get("bloqueio") is False:
+            serializer.validated_data["bloqueado_em"] = None
+            serializer.validated_data["bloqueado_por"] = None
+        if self.request.user.is_superuser:
+            if not serializer.validated_data.get("empresa") and not getattr(serializer.instance, "empresa_id", None):
+                raise ValidationError({"empresa": "Informe a empresa do cliente."})
+            return serializer.save()
+        if not getattr(user, "empresa_id", None):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa = serializer.validated_data.get("empresa")
+        if empresa and empresa.id != user.empresa_id:
+            raise ValidationError({"empresa": "Você só pode cadastrar clientes na empresa vinculada ao seu usuário."})
+        return serializer.save(empresa=user.empresa)
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        return Response({
+            "total": qs.count(),
+            "ativos": qs.filter(ativo=True).count(),
+            "inativos": qs.filter(ativo=False).count(),
+            "bloqueados": qs.filter(bloqueio=True).count(),
+            "pessoas_fisicas": qs.filter(tipo_pessoa=Cliente.TIPO_PESSOA_FISICA).count(),
+            "pessoas_juridicas": qs.filter(tipo_pessoa=Cliente.TIPO_PESSOA_JURIDICA).count(),
+            "clientes_identificados": qs.filter(cliente_padrao=False).count(),
+            "cliente_padrao": qs.filter(cliente_padrao=True).count(),
+            "com_consentimento": qs.filter(Q(aceita_email=True) | Q(aceita_whatsapp=True) | Q(aceita_sms=True) | Q(mala_direta=True)).count(),
+            "clientes_com_compras": qs.filter(quantidade_compras__gt=0, cliente_padrao=False).count(),
+            "clientes_sem_compras": qs.filter(quantidade_compras=0, cliente_padrao=False).count(),
+        })
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        cliente = self.get_object()
+        before = instance_snapshot(cliente)
+        cliente.ativo = True
+        cliente.save(update_fields=["ativo", "cpf", "documento"])
+        AuditService.required_success(AuditAction.CLIENT_ACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        return Response(self.get_serializer(cliente).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        cliente = self.get_object()
+        if cliente.cliente_padrao:
+            return self._deny_cliente_padrao(cliente, request, "inativar")
+        before = instance_snapshot(cliente)
+        cliente.ativo = False
+        cliente.save(update_fields=["ativo", "cpf", "documento"])
+        AuditService.required_success(AuditAction.CLIENT_DEACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        return Response(self.get_serializer(cliente).data)
+
+    @action(detail=True, methods=["post"], url_path="bloquear")
+    def bloquear(self, request, pk=None):
+        cliente = self.get_object()
+        if cliente.cliente_padrao:
+            return self._deny_cliente_padrao(cliente, request, "bloquear")
+        motivo = (request.data.get("motivo") or request.data.get("motivo_bloqueio") or "").strip()
+        if not motivo:
+            raise ValidationError({"motivo": "Informe o motivo do bloqueio."})
+        before = instance_snapshot(cliente)
+        cliente.bloqueio = True
+        cliente.motivo_bloqueio = motivo[:80]
+        cliente.observacao_bloqueio = (request.data.get("observacao") or request.data.get("observacao_bloqueio") or "").strip() or None
+        cliente.bloqueado_em = timezone.now()
+        cliente.bloqueado_por = request.user if request.user.is_authenticated else None
+        cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
+        AuditService.required_success(AuditAction.CLIENT_BLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), metadata={"motivo": motivo}, status_code=200)
+        return Response(self.get_serializer(cliente).data)
+
+    @action(detail=True, methods=["post"], url_path="desbloquear")
+    def desbloquear(self, request, pk=None):
+        cliente = self.get_object()
+        before = instance_snapshot(cliente)
+        cliente.bloqueio = False
+        cliente.motivo_bloqueio = None
+        cliente.observacao_bloqueio = None
+        cliente.bloqueado_em = None
+        cliente.bloqueado_por = None
+        cliente.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "cpf", "documento"])
+        AuditService.required_success(AuditAction.CLIENT_UNBLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, before=before, after=instance_snapshot(cliente), status_code=200)
+        return Response(self.get_serializer(cliente).data)
+
+    def perform_destroy(self, instance):
+        if instance.cliente_padrao:
+            AuditService.denied(AuditAction.CLIENT_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"motivo": "cliente_padrao"}, status_code=400)
+            raise ValidationError({"detail": "Cliente padrão não pode ser excluído."})
+        impedimentos = self._impedimentos_exclusao(instance)
+        if impedimentos:
+            AuditService.denied(AuditAction.CLIENT_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"impedimentos": impedimentos}, status_code=400)
+            raise ValidationError({"detail": "Cliente possui vínculos. Inative o cadastro em vez de excluir.", "impedimentos": impedimentos})
+        before = instance_snapshot(instance)
+        try:
+            instance.delete()
+        except ProtectedError:
+            AuditService.denied(AuditAction.CLIENT_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"motivo": "protected_error"}, status_code=400)
+            raise ValidationError({"detail": "Cliente possui vínculos protegidos. Inative o cadastro em vez de excluir."})
+        AuditService.required_success(AuditAction.CLIENT_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=getattr(instance, "empresa", None), app_label="cadastros", model="cliente", object_id=instance.pk, before=before, status_code=204)
+
+    def _impedimentos_exclusao(self, cliente):
+        checks = [
+            ("vendas", "vendas_pdv"),
+            ("devoluções", "devolucoes_venda"),
+            ("cashback", "cashback_movimentos"),
+            ("vale-troca", "vales_troca"),
+        ]
+        impedimentos = []
+        for label, related_name in checks:
+            manager = getattr(cliente, related_name, None)
+            if manager is not None and manager.exists():
+                impedimentos.append(f"Possui {label}.")
+        manager = getattr(cliente, "titulos_receber", None)
+        if manager is not None and manager.exists():
+            impedimentos.append("Possui títulos financeiros.")
+        return impedimentos
+
+    def _deny_cliente_padrao(self, cliente, request, operacao):
+        AuditService.denied(AuditAction.CLIENT_OPERATION_DENIED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, metadata={"operacao": operacao, "motivo": "cliente_padrao"}, status_code=400)
+        return Response({"detail": "Cliente padrão não pode ser alterado por esta ação."}, status=400)
 
 
 class FornecedorViewSet(BaseCadastroViewSet):

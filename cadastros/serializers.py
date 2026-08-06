@@ -1,4 +1,6 @@
 from rest_framework import serializers
+from django.utils import timezone
+
 from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
 from .validators import (
     cpf_validator,
@@ -169,17 +171,28 @@ class LojaSerializer(serializers.ModelSerializer):
 # Cliente
 # ---------------------------
 class ClienteSerializer(serializers.ModelSerializer):
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), required=False)
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+    ultima_compra = serializers.DateTimeField(read_only=True)
+    total_comprado = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    quantidade_compras = serializers.IntegerField(read_only=True)
+    ticket_medio = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+
     class Meta:
         model = Cliente
         fields = "__all__"
+        read_only_fields = ("bloqueado_em", "bloqueado_por")
+
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        if "documento" not in mutable and mutable.get("cpf"):
+            mutable["documento"] = mutable.get("cpf")
+        return super().to_internal_value(mutable)
 
     def validate_cpf(self, value):
-        if not value:
-            return value
-        # Cliente padrão sem identificação
-        if only_digits(value) == "00000000000":
-            return "00000000000"
-        cpf_validator(value)  # lança erro se inválido
+        return _norm_digits(value)
+
+    def validate_documento(self, value):
         return _norm_digits(value)
 
     def validate_email(self, value):
@@ -205,6 +218,95 @@ class ClienteSerializer(serializers.ModelSerializer):
             return value
         cep_validator(value)
         return _norm_digits(value)
+
+    def validate_estado(self, value):
+        value = (value or "").strip().upper()
+        if value and len(value) != 2:
+            raise serializers.ValidationError("Informe a UF com duas letras.")
+        return value or None
+
+    def validate_nome_cliente(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe o nome do cliente.")
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        if not empresa and user and getattr(user, "empresa_id", None):
+            empresa = user.empresa
+            attrs["empresa"] = empresa
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Cliente deve pertencer a uma empresa."})
+
+        tipo = attrs.get("tipo_pessoa", getattr(self.instance, "tipo_pessoa", Cliente.TIPO_PESSOA_FISICA))
+        documento = attrs.get("documento", attrs.get("cpf", getattr(self.instance, "documento", None)))
+        documento = _norm_digits(documento)
+        cliente_padrao = attrs.get("cliente_padrao", getattr(self.instance, "cliente_padrao", False))
+
+        if self.instance and self.instance.cliente_padrao:
+            protegidos = {"empresa", "cliente_padrao", "documento", "cpf", "tipo_pessoa", "ativo", "bloqueio"}
+            alterados = protegidos & set(attrs.keys())
+            valores_invalidos = (
+                attrs.get("empresa", self.instance.empresa) != self.instance.empresa
+                or attrs.get("cliente_padrao", True) is not True
+                or _norm_digits(attrs.get("documento", self.instance.documento)) != Cliente.DOCUMENTO_CONSUMIDOR_FINAL
+                or attrs.get("tipo_pessoa", self.instance.tipo_pessoa) != Cliente.TIPO_PESSOA_FISICA
+                or attrs.get("ativo", True) is not True
+                or attrs.get("bloqueio", False) is not False
+            )
+            if alterados and valores_invalidos:
+                raise serializers.ValidationError({"cliente_padrao": "Cliente padrão possui dados protegidos."})
+
+        if cliente_padrao:
+            attrs["tipo_pessoa"] = Cliente.TIPO_PESSOA_FISICA
+            attrs["documento"] = Cliente.DOCUMENTO_CONSUMIDOR_FINAL
+            attrs["cpf"] = Cliente.DOCUMENTO_CONSUMIDOR_FINAL
+            attrs["ativo"] = True
+            attrs["bloqueio"] = False
+            attrs["aceita_email"] = False
+            attrs["aceita_whatsapp"] = False
+            attrs["aceita_sms"] = False
+        else:
+            attrs["documento"] = documento
+            attrs["cpf"] = documento
+            if documento == Cliente.DOCUMENTO_CONSUMIDOR_FINAL:
+                raise serializers.ValidationError({"documento": "Documento 00000000000 é reservado ao cliente padrão."})
+            if documento:
+                if tipo == Cliente.TIPO_PESSOA_FISICA:
+                    try:
+                        cpf_validator(documento)
+                    except Exception:
+                        raise serializers.ValidationError({"documento": "CPF inválido."})
+                elif tipo == Cliente.TIPO_PESSOA_JURIDICA:
+                    try:
+                        cnpj_validator(documento)
+                    except Exception:
+                        raise serializers.ValidationError({"documento": "CNPJ inválido."})
+                else:
+                    raise serializers.ValidationError({"tipo_pessoa": "Tipo de pessoa inválido."})
+
+        aniversario = attrs.get("aniversario", getattr(self.instance, "aniversario", None))
+        if aniversario and aniversario > timezone.localdate():
+            raise serializers.ValidationError({"aniversario": "Aniversário não pode ser futuro."})
+        bloqueio = attrs.get("bloqueio", getattr(self.instance, "bloqueio", False))
+        motivo = (attrs.get("motivo_bloqueio", getattr(self.instance, "motivo_bloqueio", "")) or "").strip()
+        if bloqueio and not motivo:
+            raise serializers.ValidationError({"motivo_bloqueio": "Informe o motivo do bloqueio."})
+        if attrs.get("email"):
+            attrs["email"] = _norm_email(attrs["email"])
+        for field in ("telefone1", "telefone2", "cep"):
+            if attrs.get(field):
+                attrs[field] = _norm_digits(attrs[field])
+        qs = Cliente.objects.filter(empresa=empresa, documento=attrs.get("documento")) if attrs.get("documento") else Cliente.objects.none()
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            doc_label = "CPF" if tipo == Cliente.TIPO_PESSOA_FISICA else "CNPJ"
+            raise serializers.ValidationError({"documento": f"Já existe um cliente com este {doc_label} nesta empresa."})
+        return attrs
 
 # ---------------------------
 # Fornecedor

@@ -42,6 +42,7 @@ from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
 from produto.models import Estoque, EstoqueMovimentacao, Ncm, Produto, ProdutoDetalhe
 from cadastros.models import Cliente, Funcionarios
+from cadastros.services import ClientePadraoService
 
 
 UF_CODIGO = {
@@ -451,8 +452,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         valor_recebido = money(data.get("valor_recebido"))
         pagamentos_payload = self._normalizar_pagamentos(data)
 
-        if not loja_id or not caixa_id or not cliente_id or not vendedor_id:
-            return Response({"detail": "Informe loja, caixa, cliente e vendedor."}, status=status.HTTP_400_BAD_REQUEST)
+        if not loja_id or not caixa_id or not vendedor_id:
+            return Response({"detail": "Informe loja, caixa e vendedor."}, status=status.HTTP_400_BAD_REQUEST)
 
         empresa_id = self._empresa_id_usuario()
         if not empresa_id and not request.user.is_superuser:
@@ -467,9 +468,17 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return Response({"detail": "O caixa informado não pertence à loja ou não está ativo."}, status=status.HTTP_400_BAD_REQUEST)
         if empresa_id and caixa.idloja.empresa_id != int(empresa_id):
             return Response({"detail": "A loja informada pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
-        cliente = Cliente.objects.filter(pk=cliente_id).first()
-        if not cliente or (empresa_id and cliente.empresa_id and cliente.empresa_id != int(empresa_id)):
+        if cliente_id:
+            cliente = Cliente.objects.filter(pk=cliente_id).first()
+        else:
+            cliente, _ = ClientePadraoService.obter_ou_criar(caixa.idloja.empresa, user=request.user, request=request)
+            cliente_id = cliente.pk
+        if not cliente or cliente.empresa_id != caixa.idloja.empresa_id or (empresa_id and cliente.empresa_id != int(empresa_id)):
             return Response({"detail": "O cliente informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
+        if cliente.ativo is False:
+            return Response({"detail": "Cliente inativo não pode ser utilizado em nova venda."}, status=status.HTTP_400_BAD_REQUEST)
+        if cliente.bloqueio:
+            return Response({"detail": "Cliente bloqueado não pode ser utilizado em nova venda."}, status=status.HTTP_400_BAD_REQUEST)
         vendedor = (
             Funcionarios.objects
             .filter(pk=vendedor_id, idloja_id=loja_id, ativo=True, categoria__iexact="Vendedor")
