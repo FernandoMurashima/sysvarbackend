@@ -436,6 +436,7 @@ class LojaViewSet(BaseCadastroViewSet):
 
 
 class ClienteViewSet(BaseCadastroViewSet):
+    EXCLUSAO_NEGADA_DETAIL = "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação."
     queryset = Cliente.objects.select_related("empresa", "bloqueado_por").all()
     serializer_class = ClienteSerializer
 
@@ -637,7 +638,7 @@ class ClienteViewSet(BaseCadastroViewSet):
             "origem": log.origin,
             "resultado": log.result,
             "campos_alterados": log.changed_fields or [],
-            "motivo": metadata.get("motivo") or after.get("motivo_bloqueio") or before.get("motivo_bloqueio"),
+            "motivo": metadata.get("mensagem") or log.error_message or metadata.get("motivo") or after.get("motivo_bloqueio") or before.get("motivo_bloqueio"),
             "observacao": metadata.get("observacao") or after.get("observacao_bloqueio") or before.get("observacao_bloqueio"),
         }
 
@@ -650,6 +651,7 @@ class ClienteViewSet(BaseCadastroViewSet):
             AuditAction.CLIENT_BLOCKED: "Cliente bloqueado",
             AuditAction.CLIENT_UNBLOCKED: "Cliente desbloqueado",
             AuditAction.CLIENT_DELETED: "Cliente excluído",
+            AuditAction.CLIENT_DELETE_DENIED: "Exclusão negada",
         }.get(action_name, action_name)
 
     @action(detail=True, methods=["get"], url_path="compras")
@@ -805,15 +807,20 @@ class ClienteViewSet(BaseCadastroViewSet):
             raise ValidationError({"detail": "Cliente padrão não pode ser excluído."})
         impedimentos = self._impedimentos_exclusao(instance)
         if impedimentos:
-            AuditService.denied(AuditAction.CLIENT_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"impedimentos": impedimentos}, status_code=400)
-            raise ValidationError({"detail": "Cliente possui vínculos. Inative o cadastro em vez de excluir.", "impedimentos": impedimentos})
+            self._auditar_exclusao_negada(instance, "vinculos", impedimentos)
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
         before = instance_snapshot(instance)
+        object_id = instance.pk
+        empresa = getattr(instance, "empresa", None)
         try:
             instance.delete()
         except ProtectedError:
-            AuditService.denied(AuditAction.CLIENT_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"motivo": "protected_error"}, status_code=400)
-            raise ValidationError({"detail": "Cliente possui vínculos protegidos. Inative o cadastro em vez de excluir."})
-        AuditService.required_success(AuditAction.CLIENT_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=getattr(instance, "empresa", None), app_label="cadastros", model="cliente", object_id=instance.pk, before=before, status_code=204)
+            self._auditar_exclusao_negada(instance, "protected_error")
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
+        except IntegrityError:
+            self._auditar_exclusao_negada(instance, "integrity_error")
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
+        AuditService.required_success(AuditAction.CLIENT_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=empresa, app_label="cadastros", model="cliente", object_id=object_id, before=before, status_code=204)
 
     def _impedimentos_exclusao(self, cliente):
         checks = [
@@ -821,16 +828,30 @@ class ClienteViewSet(BaseCadastroViewSet):
             ("devoluções", "devolucoes_venda"),
             ("cashback", "cashback_movimentos"),
             ("vale-troca", "vales_troca"),
+            ("títulos financeiros", "receber_set"),
         ]
         impedimentos = []
         for label, related_name in checks:
             manager = getattr(cliente, related_name, None)
             if manager is not None and manager.exists():
                 impedimentos.append(f"Possui {label}.")
-        manager = getattr(cliente, "titulos_receber", None)
-        if manager is not None and manager.exists():
-            impedimentos.append("Possui títulos financeiros.")
         return impedimentos
+
+    def _auditar_exclusao_negada(self, cliente, motivo, impedimentos=None):
+        AuditService.denied(
+            AuditAction.CLIENT_DELETE_DENIED,
+            category=AuditCategory.CADASTRO,
+            request=self.request,
+            user=self.request.user,
+            instance=cliente,
+            metadata={
+                "motivo": motivo,
+                "impedimentos": impedimentos or [],
+                "mensagem": self.EXCLUSAO_NEGADA_DETAIL,
+            },
+            error_message=self.EXCLUSAO_NEGADA_DETAIL,
+            status_code=400,
+        )
 
     def _deny_cliente_padrao(self, cliente, request, operacao):
         AuditService.denied(AuditAction.CLIENT_OPERATION_DENIED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cliente, metadata={"operacao": operacao, "motivo": "cliente_padrao"}, status_code=400)

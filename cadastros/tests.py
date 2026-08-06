@@ -6,6 +6,8 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
+from django.db.models import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -16,6 +18,7 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Cliente, Empresa, EmpresaContrato, Funcionarios, Loja, ModuloSistema
 from cadastros.services import ClientePadraoService
 from fiscal.models import VendaDevolucao, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from financeiro.models import CashbackMovimento
 from produto.models import ConfigEan, Cor, Grade, Produto, ProdutoDetalhe, Tamanho, Unidade
 
 
@@ -224,6 +227,7 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
 
         self.assertEqual(res_inativar.status_code, 400)
         self.assertEqual(res_delete.status_code, 400)
+        self.assertEqual(res_delete.data["detail"], "Cliente padrão não pode ser excluído.")
         self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED).exists())
 
     def test_indicadores_refletem_carteira_de_clientes(self):
@@ -739,9 +743,78 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
         res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
 
         self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data, {"detail": "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação."})
         self.assertTrue(Cliente.objects.filter(pk=cliente.pk).exists())
         self.assertTrue(VendaPdv.objects.filter(cliente=cliente).exists())
-        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED, object_id=str(cliente.pk)).exists())
+        logs = AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED, object_id=str(cliente.pk))
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.get().error_message, "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação.")
+
+        historico = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/historico/")
+        self.assertEqual(historico.status_code, 200)
+        self.assertEqual(historico.data["results"][0]["acao"], AuditAction.CLIENT_DELETE_DENIED)
+        self.assertIn("Exclusão negada", historico.data["results"][0]["acao_descricao"])
+        self.assertIn("Utilize a inativação", historico.data["results"][0]["motivo"])
+
+    def test_cliente_sem_vinculos_pode_ser_excluido(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(Cliente.objects.filter(pk=cliente.pk).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETED, object_id=str(cliente.pk)).exists())
+
+    def test_cliente_de_outra_empresa_nao_pode_ser_excluido(self):
+        outro_cliente = Cliente.objects.create(empresa=self.outra, nome_cliente="Outro", tipo_pessoa="PF", documento="39053344705")
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.delete(f"/api/cadastros/clientes/{outro_cliente.pk}/")
+
+        self.assertEqual(res.status_code, 404)
+        self.assertTrue(Cliente.objects.filter(pk=outro_cliente.pk).exists())
+
+    def test_cliente_com_cashback_nao_pode_ser_excluido(self):
+        cliente = self._cliente()
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("10.00"),
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data["detail"], "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação.")
+        self.assertTrue(Cliente.objects.filter(pk=cliente.pk).exists())
+        self.assertTrue(CashbackMovimento.objects.filter(cliente=cliente).exists())
+
+    def test_protected_error_na_exclusao_de_cliente_retorna_mensagem_amigavel(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        with patch("cadastros.models.Cliente.delete", side_effect=ProtectedError("Cannot delete", [])):
+            res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data, {"detail": "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação."})
+        self.assertNotIn("Cannot delete", str(res.data))
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED, object_id=str(cliente.pk)).count(), 1)
+
+    def test_integrity_error_na_exclusao_de_cliente_nao_vaza_detalhe_tecnico(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_edit)
+
+        with patch("cadastros.models.Cliente.delete", side_effect=IntegrityError("foreign key constraint fails")):
+            res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data, {"detail": "Este cliente possui vendas ou outros registros vinculados e não pode ser excluído. Utilize a inativação."})
+        self.assertNotIn("foreign key", str(res.data).lower())
+        self.assertEqual(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED, object_id=str(cliente.pk)).count(), 1)
 
     def test_compras_endpoint_nao_executa_n_mais_um_e_indicadores_sao_coerentes(self):
         cliente = self._cliente()
