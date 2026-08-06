@@ -1,5 +1,7 @@
-from unittest.mock import patch
 from io import StringIO
+from datetime import timedelta
+from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -11,8 +13,10 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
-from cadastros.models import Cliente, Empresa, EmpresaContrato, Loja, ModuloSistema
+from cadastros.models import Cliente, Empresa, EmpresaContrato, Funcionarios, Loja, ModuloSistema
 from cadastros.services import ClientePadraoService
+from fiscal.models import VendaDevolucao, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from produto.models import ConfigEan, Cor, Grade, Produto, ProdutoDetalhe, Tamanho, Unidade
 
 
 User = get_user_model()
@@ -341,6 +345,56 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
         defaults.update(kwargs)
         return Cliente.objects.create(**defaults)
 
+    def _sku(self, empresa=None):
+        empresa = empresa or self.empresa
+        unidade = Unidade.objects.create(empresa=empresa, Descricao="UN")
+        grade = Grade.objects.create(empresa=empresa, Descricao="Grade")
+        tamanho = Tamanho.objects.create(empresa=empresa, idgrade=grade, Tamanho="M")
+        cor = Cor.objects.create(empresa=empresa, Descricao="Preto", Codigo="PR", Cor="Preto")
+        config, _ = ConfigEan.objects.get_or_create(
+            empresa=empresa,
+            country_prefix="789",
+            company_prefix=str(empresa.pk).zfill(4)[-4:],
+            defaults={"next_itemref": 1, "ativo": True},
+        )
+        produto = Produto.objects.create(empresa=empresa, tipo_produto="2", descricao="Produto Teste", unidade=unidade)
+        return ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho, config_ean=config)
+
+    def _venda(self, cliente, documento, total="100.00", subtotal=None, status_venda=None, data=None, quantidade=2, desconto_item="0.00", desconto_geral="0.00", empresa=None, loja=None, vendedor=None, pagamentos=None):
+        empresa = empresa or cliente.empresa
+        loja = loja or self.loja
+        vendedor = vendedor or self.user_edit
+        if not isinstance(vendedor, Funcionarios):
+            vendedor = Funcionarios.objects.create(empresa=empresa, idloja=loja, nomefuncionario=f"Vendedor {documento}", categoria="Vendedor")
+        sku = self._sku(empresa)
+        venda = VendaPdv.objects.create(
+            empresa=empresa,
+            loja=loja,
+            cliente=cliente,
+            vendedor=vendedor,
+            documento=documento,
+            status=status_venda or VendaPdv.Status.FINALIZADA,
+            forma_pagamento="DINHEIRO",
+            data_venda=data or timezone.now(),
+            subtotal=Decimal(subtotal or total) + Decimal(desconto_item or "0.00") + Decimal(desconto_geral or "0.00"),
+            desconto_itens=Decimal(desconto_item or "0.00"),
+            desconto_geral=Decimal(desconto_geral or "0.00"),
+            total=Decimal(total),
+        )
+        VendaPdvItem.objects.create(
+            venda=venda,
+            produto=sku.produto,
+            sku=sku,
+            ean=sku.ean13,
+            descricao="Produto Teste",
+            quantidade=quantidade,
+            preco_unitario=Decimal(total) / Decimal(max(quantidade, 1)),
+            desconto=Decimal(desconto_item or "0.00"),
+        )
+        for pagamento in pagamentos or [{"forma": "DINHEIRO", "descricao": "Dinheiro", "valor": Decimal(total)}]:
+            VendaPdvPagamento.objects.create(venda=venda, **pagamento)
+        return venda
+
     def test_api_comum_bloqueia_mass_assignment_de_status_e_bloqueio_no_create(self):
         self.client.force_authenticate(self.user_edit)
 
@@ -527,3 +581,178 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
         cliente.refresh_from_db()
         self.assertFalse(cliente.bloqueio)
         self.assertIsNone(cliente.motivo_bloqueio)
+
+    def test_detalhe_cliente_retorna_indicadores_comerciais(self):
+        cliente = self._cliente()
+        antiga = timezone.now() - timedelta(days=2)
+        recente = timezone.now() - timedelta(days=1)
+        self._venda(cliente, "VENDA-1", total="100.00", data=antiga)
+        self._venda(cliente, "VENDA-2", total="50.00", data=recente)
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNotNone(res.data["ultima_compra"])
+        self.assertEqual(Decimal(str(res.data["total_comprado"])), Decimal("150.00"))
+        self.assertEqual(res.data["quantidade_compras"], 2)
+        self.assertEqual(Decimal(str(res.data["ticket_medio"])), Decimal("75.00"))
+
+    def test_cliente_sem_compras_retorna_indicadores_zerados(self):
+        cliente = self._cliente()
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.data["ultima_compra"])
+        self.assertEqual(Decimal(str(res.data["total_comprado"])), Decimal("0.00"))
+        self.assertEqual(res.data["quantidade_compras"], 0)
+        self.assertEqual(Decimal(str(res.data["ticket_medio"])), Decimal("0.00"))
+
+    def test_indicadores_ignoram_canceladas_e_outra_empresa_e_reduzem_devolucao(self):
+        cliente = self._cliente()
+        outro_cliente = Cliente.objects.create(empresa=self.outra, nome_cliente="Outro", tipo_pessoa="PF", documento="39053344705")
+        outra_loja = Loja.objects.create(empresa=self.outra, nome_loja="Outra Loja", apelido_loja="OL", cnpj="22333444000102")
+        venda = self._venda(cliente, "VENDA-VALIDA", total="100.00")
+        self._venda(cliente, "VENDA-CANCELADA", total="80.00", status_venda=VendaPdv.Status.CANCELADA)
+        self._venda(outro_cliente, "VENDA-OUTRA", total="500.00", empresa=self.outra, loja=outra_loja)
+        VendaDevolucao.objects.create(
+            empresa=self.empresa,
+            venda=venda,
+            loja=self.loja,
+            cliente=cliente,
+            documento="DEV-1",
+            status=VendaDevolucao.Status.FINALIZADA,
+            credito_cliente=Decimal("25.00"),
+        )
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(Decimal(str(res.data["total_comprado"])), Decimal("75.00"))
+        self.assertEqual(res.data["quantidade_compras"], 1)
+        self.assertEqual(Decimal(str(res.data["ticket_medio"])), Decimal("75.00"))
+
+    def test_compras_retorna_vendas_do_cliente_paginadas_e_mais_recentes(self):
+        cliente = self._cliente()
+        outro = self._cliente("Outro Cliente", "39053344705")
+        antiga = timezone.now() - timedelta(days=2)
+        recente = timezone.now() - timedelta(days=1)
+        self._venda(cliente, "ANTIGA", total="100.00", data=antiga, quantidade=1)
+        self._venda(cliente, "RECENTE", total="200.00", data=recente, quantidade=3, desconto_item="10.00", pagamentos=[
+            {"forma": "DINHEIRO", "descricao": "Dinheiro", "valor": Decimal("100.00")},
+            {"forma": "PIX", "descricao": "Pix", "valor": Decimal("100.00")},
+        ])
+        self._venda(outro, "OUTRO", total="500.00")
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/?page=1&page_size=1")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 2)
+        self.assertEqual(len(res.data["results"]), 1)
+        row = res.data["results"][0]
+        self.assertEqual(row["numero_venda"], "RECENTE")
+        self.assertEqual(row["quantidade_itens"], 3)
+        self.assertEqual(row["forma_pagamento"], "Múltiplas")
+        self.assertEqual(Decimal(row["valor_bruto"]), Decimal("210.00"))
+        self.assertEqual(Decimal(row["desconto"]), Decimal("10.00"))
+        self.assertEqual(Decimal(row["valor_final"]), Decimal("200.00"))
+
+    def test_compras_nao_retorna_vendas_de_outra_empresa(self):
+        cliente = self._cliente()
+        outro_cliente = Cliente.objects.create(empresa=self.outra, nome_cliente="Outro", tipo_pessoa="PF", documento="39053344705")
+        outra_loja = Loja.objects.create(empresa=self.outra, nome_loja="Outra Loja", apelido_loja="OL", cnpj="22333444000102")
+        self._venda(cliente, "EMPRESA-1", total="100.00")
+        self._venda(outro_cliente, "EMPRESA-2", total="500.00", empresa=self.outra, loja=outra_loja)
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/")
+        res_outro = self.client.get(f"/api/cadastros/clientes/{outro_cliente.pk}/compras/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["numero_venda"], "EMPRESA-1")
+        self.assertEqual(res_outro.status_code, 404)
+
+    def test_compras_permissoes_view_e_none(self):
+        cliente = self._cliente()
+        self._venda(cliente, "VENDA-1", total="100.00")
+
+        self.client.force_authenticate(self.user_view)
+        res_view = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/")
+        self.client.force_authenticate(self.user_none)
+        res_none = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/")
+
+        self.assertEqual(res_view.status_code, 200)
+        self.assertEqual(res_none.status_code, 403)
+
+    def test_compras_identifica_cancelada_e_devolvida(self):
+        cliente = self._cliente()
+        venda = self._venda(cliente, "DEVOLVIDA", total="100.00")
+        self._venda(cliente, "CANCELADA", total="80.00", status_venda=VendaPdv.Status.CANCELADA)
+        VendaDevolucao.objects.create(
+            empresa=self.empresa,
+            venda=venda,
+            loja=self.loja,
+            cliente=cliente,
+            documento="DEV-1",
+            status=VendaDevolucao.Status.FINALIZADA,
+            credito_cliente=Decimal("100.00"),
+        )
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/?ordering=documento")
+        rows = {row["numero_venda"]: row for row in res.data["results"]}
+
+        self.assertEqual(rows["CANCELADA"]["status_descricao"], "Cancelada")
+        self.assertTrue(rows["CANCELADA"]["cancelada"])
+        self.assertEqual(rows["DEVOLVIDA"]["status_descricao"], "Devolvida")
+        self.assertTrue(rows["DEVOLVIDA"]["devolvida"])
+
+    def test_cliente_padrao_mostra_compras_da_propria_empresa(self):
+        padrao = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Consumidor Final",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento=Cliente.DOCUMENTO_CONSUMIDOR_FINAL,
+            cliente_padrao=True,
+        )
+        self._venda(padrao, "CF-1", total="30.00")
+        self.client.force_authenticate(self.user_view)
+
+        detail = self.client.get(f"/api/cadastros/clientes/{padrao.pk}/")
+        compras = self.client.get(f"/api/cadastros/clientes/{padrao.pk}/compras/")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(Decimal(str(detail.data["total_comprado"])), Decimal("30.00"))
+        self.assertEqual(compras.status_code, 200)
+        self.assertEqual(compras.data["count"], 1)
+
+    def test_cliente_com_venda_nao_pode_ser_excluido_e_audita(self):
+        cliente = self._cliente()
+        self._venda(cliente, "VENDA-1", total="100.00")
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.delete(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertTrue(Cliente.objects.filter(pk=cliente.pk).exists())
+        self.assertTrue(VendaPdv.objects.filter(cliente=cliente).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.CLIENT_DELETE_DENIED, object_id=str(cliente.pk)).exists())
+
+    def test_compras_endpoint_nao_executa_n_mais_um_e_indicadores_sao_coerentes(self):
+        cliente = self._cliente()
+        self._venda(cliente, "VENDA-1", total="100.00", quantidade=1)
+        self._venda(cliente, "VENDA-2", total="50.00", quantidade=2)
+        self.client.force_authenticate(self.user_view)
+
+        with self.assertNumQueries(11):
+            res = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/compras/?page_size=20")
+        detail = self.client.get(f"/api/cadastros/clientes/{cliente.pk}/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 2)
+        self.assertEqual(sum(Decimal(row["valor_final"]) for row in res.data["results"]), Decimal(str(detail.data["total_comprado"])))

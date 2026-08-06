@@ -1,10 +1,12 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Count, DecimalField, Max, ProtectedError, Q, Sum, Value
+from django.db.models import Case, Count, DateTimeField, DecimalField, ExpressionWrapper, F, IntegerField, Max, OuterRef, ProtectedError, Q, Sum, Value, When, Subquery
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -447,6 +449,7 @@ class ClienteViewSet(BaseCadastroViewSet):
     action_required_access = {
         "indicadores": "VIEW",
         "historico": "VIEW",
+        "compras": "VIEW",
         "ativar": "EDIT",
         "inativar": "EDIT",
         "bloquear": "EDIT",
@@ -466,19 +469,58 @@ class ClienteViewSet(BaseCadastroViewSet):
 
     def _with_indicadores_compra(self, qs):
         try:
-            from fiscal.models import VendaPdv
+            from fiscal.models import VendaDevolucao, VendaPdv
+
+            vendas_validas = (
+                VendaPdv.objects
+                .filter(
+                    cliente_id=OuterRef("pk"),
+                    empresa_id=OuterRef("empresa_id"),
+                    status=VendaPdv.Status.FINALIZADA,
+                )
+                .values("cliente_id")
+            )
+            devolucoes_validas = (
+                VendaDevolucao.objects
+                .filter(
+                    cliente_id=OuterRef("pk"),
+                    empresa_id=OuterRef("empresa_id"),
+                    status=VendaDevolucao.Status.FINALIZADA,
+                )
+                .values("cliente_id")
+            )
+            decimal_field = DecimalField(max_digits=18, decimal_places=2)
+            total_bruto = Coalesce(
+                Subquery(vendas_validas.annotate(total=Sum("total")).values("total")[:1], output_field=decimal_field),
+                Value(Decimal("0.00")),
+                output_field=decimal_field,
+            )
+            total_devolvido = Coalesce(
+                Subquery(devolucoes_validas.annotate(total=Sum("credito_cliente")).values("total")[:1], output_field=decimal_field),
+                Value(Decimal("0.00")),
+                output_field=decimal_field,
+            )
+            quantidade = Coalesce(
+                Subquery(vendas_validas.annotate(total=Count("id")).values("total")[:1], output_field=IntegerField()),
+                Value(0),
+                output_field=IntegerField(),
+            )
             return qs.annotate(
-                ultima_compra=Max("vendas_pdv__data_venda", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
-                total_comprado=Coalesce(
-                    Sum("vendas_pdv__total", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
-                    Value(0),
-                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                ultima_compra=Subquery(
+                    vendas_validas.annotate(ultima=Max("data_venda")).values("ultima")[:1],
+                    output_field=DateTimeField(),
                 ),
-                quantidade_compras=Count("vendas_pdv", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA), distinct=True),
-                ticket_medio=Coalesce(
-                    Avg("vendas_pdv__total", filter=Q(vendas_pdv__status=VendaPdv.Status.FINALIZADA)),
-                    Value(0),
-                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                total_vendas_bruto=total_bruto,
+                total_devolucoes=total_devolvido,
+                total_comprado=ExpressionWrapper(total_bruto - total_devolvido, output_field=decimal_field),
+                quantidade_compras=quantidade,
+                ticket_medio=Case(
+                    When(
+                        quantidade_compras__gt=0,
+                        then=ExpressionWrapper((total_bruto - total_devolvido) / F("quantidade_compras"), output_field=decimal_field),
+                    ),
+                    default=Value(Decimal("0.00")),
+                    output_field=decimal_field,
                 ),
             )
         except Exception:
@@ -609,6 +651,89 @@ class ClienteViewSet(BaseCadastroViewSet):
             AuditAction.CLIENT_UNBLOCKED: "Cliente desbloqueado",
             AuditAction.CLIENT_DELETED: "Cliente excluído",
         }.get(action_name, action_name)
+
+    @action(detail=True, methods=["get"], url_path="compras")
+    def compras(self, request, pk=None):
+        cliente = self.get_object()
+        from fiscal.models import VendaPdv
+
+        qs = (
+            VendaPdv.objects
+            .filter(cliente_id=cliente.pk, empresa_id=cliente.empresa_id)
+            .select_related("loja", "vendedor", "nfce")
+            .prefetch_related("itens", "pagamentos", "devolucoes")
+        )
+        data_inicio = request.query_params.get("data_inicio")
+        data_fim = request.query_params.get("data_fim")
+        status_q = request.query_params.get("status")
+        loja = request.query_params.get("loja")
+        if data_inicio:
+            qs = qs.filter(data_venda__date__gte=data_inicio)
+        if data_fim:
+            qs = qs.filter(data_venda__date__lte=data_fim)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        ordering = request.query_params.get("ordering") or "-data_venda"
+        allowed_ordering = {"data_venda", "-data_venda", "total", "-total", "documento", "-documento", "status", "-status"}
+        qs = qs.order_by(ordering if ordering in allowed_ordering else "-data_venda", "-id")
+        page = self.paginate_queryset(qs)
+        vendas = page if page is not None else qs
+        data = [self._compra_item(venda, request.user) for venda in vendas]
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
+    def _compra_item(self, venda, user):
+        devolucoes_finalizadas = [
+            devolucao for devolucao in venda.devolucoes.all()
+            if devolucao.status == devolucao.Status.FINALIZADA
+        ]
+        valor_devolvido = sum((Decimal(devolucao.credito_cliente or 0) for devolucao in devolucoes_finalizadas), Decimal("0.00"))
+        devolvida = bool(devolucoes_finalizadas)
+        total = Decimal(venda.total or 0)
+        cancelada = venda.status == venda.Status.CANCELADA
+        if cancelada:
+            status_descricao = "Cancelada"
+        elif venda.status == venda.Status.ABERTA:
+            status_descricao = "Aberta"
+        elif devolvida and valor_devolvido >= total:
+            status_descricao = "Devolvida"
+        elif devolvida:
+            status_descricao = "Parcialmente devolvida"
+        else:
+            status_descricao = venda.get_status_display()
+        pagamentos = list(venda.pagamentos.all())
+        if len(pagamentos) > 1:
+            forma_pagamento = "Múltiplas"
+        elif pagamentos:
+            forma_pagamento = pagamentos[0].descricao or pagamentos[0].forma
+        else:
+            forma_pagamento = venda.forma_pagamento
+        nfce = getattr(venda, "nfce", None)
+        return {
+            "id": venda.id,
+            "data_venda": venda.data_venda,
+            "numero_venda": venda.documento,
+            "numero_documento": str(getattr(nfce, "numero", "") or venda.documento),
+            "loja_id": venda.loja_id,
+            "loja_nome": getattr(venda.loja, "nome_loja", None),
+            "vendedor_id": venda.vendedor_id,
+            "vendedor_nome": getattr(venda.vendedor, "nomefuncionario", None),
+            "quantidade_itens": sum(int(item.quantidade or 0) for item in venda.itens.all()),
+            "valor_bruto": str(venda.subtotal),
+            "desconto": str(Decimal(venda.desconto_itens or 0) + Decimal(venda.desconto_geral or 0)),
+            "valor_final": str(venda.total),
+            "valor_devolvido": str(valor_devolvido),
+            "forma_pagamento": forma_pagamento,
+            "status": venda.status,
+            "status_descricao": status_descricao,
+            "cancelada": cancelada,
+            "devolvida": devolvida,
+            "pode_consultar_venda": False,
+            "detalhe_venda_url": None,
+        }
 
     @action(detail=True, methods=["post"], url_path="ativar")
     def ativar(self, request, pk=None):
