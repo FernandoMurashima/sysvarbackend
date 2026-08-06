@@ -1,6 +1,9 @@
 from unittest.mock import patch
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -9,6 +12,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, 
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Cliente, Empresa, EmpresaContrato, Loja, ModuloSistema
+from cadastros.services import ClientePadraoService
 
 
 User = get_user_model()
@@ -241,3 +245,88 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
         self.assertEqual(res.data["total"], 2)
         self.assertEqual(res.data["ativos"], 2)
         self.assertEqual(res.data["bloqueados"], 1)
+
+    def test_consentimento_preenche_data_sem_apagar_historico(self):
+        self.client.force_authenticate(self.user_edit)
+        res = self.client.post(
+            "/api/cadastros/clientes/",
+            {
+                "nome_cliente": "Cliente Consentimento",
+                "tipo_pessoa": Cliente.TIPO_PESSOA_FISICA,
+                "documento": "52998224725",
+                "aceita_email": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 201)
+        cliente = Cliente.objects.get(pk=res.data["id"])
+        self.assertIsNotNone(cliente.consentimento_em)
+        consentimento_em = cliente.consentimento_em
+
+        res = self.client.patch(
+            f"/api/cadastros/clientes/{cliente.pk}/",
+            {"aceita_email": False, "aceita_whatsapp": False, "aceita_sms": False},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.consentimento_em, consentimento_em)
+
+    def test_api_nao_permite_criar_cliente_padrao_manualmente(self):
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post(
+            "/api/cadastros/clientes/",
+            {
+                "nome_cliente": "Consumidor Final Manual",
+                "tipo_pessoa": Cliente.TIPO_PESSOA_FISICA,
+                "documento": Cliente.DOCUMENTO_CONSUMIDOR_FINAL,
+                "cliente_padrao": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("cliente_padrao", res.data)
+        self.assertFalse(Cliente.objects.filter(empresa=self.empresa, cliente_padrao=True).exists())
+
+    def test_api_nao_permite_marcar_cliente_comum_como_padrao(self):
+        cliente = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Cliente Comum",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="52998224725",
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.patch(
+            f"/api/cadastros/clientes/{cliente.pk}/",
+            {"cliente_padrao": True},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 400)
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.cliente_padrao)
+
+    def test_servico_oficial_cria_cliente_padrao(self):
+        cliente, created = ClientePadraoService.obter_ou_criar(self.empresa, aplicar=True)
+
+        self.assertTrue(created)
+        self.assertTrue(cliente.cliente_padrao)
+        self.assertEqual(cliente.documento, Cliente.DOCUMENTO_CONSUMIDOR_FINAL)
+        self.assertEqual(cliente.cpf, Cliente.DOCUMENTO_CONSUMIDOR_FINAL)
+
+    def test_diagnosticar_clientes_padrao_bloqueia_apply_ambiguo(self):
+        cliente = Cliente.objects.create(
+            empresa=self.empresa,
+            nome_cliente="Cliente Comum",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="52998224725",
+        )
+        Cliente.objects.filter(pk=cliente.pk).update(cliente_padrao=True)
+
+        with self.assertRaises(CommandError):
+            call_command("diagnosticar_clientes_padrao", "--empresa-id", str(self.empresa.pk), "--apply", stdout=StringIO())

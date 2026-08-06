@@ -8,7 +8,7 @@ from cadastros.models import Cliente
 
 class ClientePadraoService:
     nome = "Consumidor Final"
-    apelido = "Cliente nao identificado"
+    apelido = "Cliente nao ident."
     documento = Cliente.DOCUMENTO_CONSUMIDOR_FINAL
 
     @classmethod

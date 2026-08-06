@@ -245,6 +245,12 @@ class ClienteSerializer(serializers.ModelSerializer):
         documento = attrs.get("documento", attrs.get("cpf", getattr(self.instance, "documento", None)))
         documento = _norm_digits(documento)
         cliente_padrao = attrs.get("cliente_padrao", getattr(self.instance, "cliente_padrao", False))
+        solicitou_padrao = attrs.get("cliente_padrao") is True
+
+        if solicitou_padrao and not (self.instance and self.instance.cliente_padrao):
+            raise serializers.ValidationError({
+                "cliente_padrao": "Cliente padrão deve ser criado pelo serviço oficial."
+            })
 
         if self.instance and self.instance.cliente_padrao:
             protegidos = {"empresa", "cliente_padrao", "documento", "cpf", "tipo_pessoa", "ativo", "bloqueio"}
@@ -300,6 +306,12 @@ class ClienteSerializer(serializers.ModelSerializer):
         for field in ("telefone1", "telefone2", "cep"):
             if attrs.get(field):
                 attrs[field] = _norm_digits(attrs[field])
+        aceita_algum_canal = any(
+            attrs.get(field, getattr(self.instance, field, False))
+            for field in ("aceita_email", "aceita_whatsapp", "aceita_sms")
+        )
+        if aceita_algum_canal and not attrs.get("consentimento_em") and not getattr(self.instance, "consentimento_em", None):
+            attrs["consentimento_em"] = timezone.now()
         qs = Cliente.objects.filter(empresa=empresa, documento=attrs.get("documento")) if attrs.get("documento") else Cliente.objects.none()
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
