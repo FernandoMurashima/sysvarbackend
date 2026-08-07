@@ -15,7 +15,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
-from cadastros.models import Cliente, Empresa, EmpresaContrato, Funcionarios, Loja, ModuloSistema
+from cadastros.models import Cliente, Empresa, EmpresaContrato, Fornecedor, FornecedorContato, FornecedorEndereco, Funcionarios, Loja, ModuloSistema, Nat_Lancamento
 from cadastros.services import ClientePadraoService
 from fiscal.models import VendaDevolucao, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import CashbackMovimento
@@ -829,3 +829,212 @@ class ClienteMultiempresaTests(OperacionalBaseTest):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["count"], 2)
         self.assertEqual(sum(Decimal(row["valor_final"]) for row in res.data["results"]), Decimal(str(detail.data["total_comprado"])))
+
+
+class FornecedorFase1Tests(OperacionalBaseTest):
+    def _fornecedor(self, nome="Fornecedor Teste", documento="11222333000181", empresa=None, **kwargs):
+        defaults = {
+            "empresa": empresa or self.empresa,
+            "nome_fornecedor": nome,
+            "tipo_pessoa": Fornecedor.TIPO_PESSOA_JURIDICA,
+            "documento": documento,
+        }
+        defaults.update(kwargs)
+        return Fornecedor.objects.create(**defaults)
+
+    def test_cria_pf_pj_sem_documento_e_permite_multiplos_sem_documento(self):
+        self.client.force_authenticate(self.user_edit)
+
+        pf = self.client.post("/api/cadastros/fornecedores/", {
+            "nome_fornecedor": "Fornecedor PF",
+            "tipo_pessoa": "PF",
+            "documento": "529.982.247-25",
+        }, format="json")
+        pj = self.client.post("/api/cadastros/fornecedores/", {
+            "nome_fornecedor": "Fornecedor PJ",
+            "tipo_pessoa": "PJ",
+            "documento": "11.222.333/0001-81",
+        }, format="json")
+        sem_doc_1 = self.client.post("/api/cadastros/fornecedores/", {"nome_fornecedor": "Sem Doc 1", "tipo_pessoa": "PJ"}, format="json")
+        sem_doc_2 = self.client.post("/api/cadastros/fornecedores/", {"nome_fornecedor": "Sem Doc 2", "tipo_pessoa": "PJ"}, format="json")
+
+        self.assertEqual(pf.status_code, 201)
+        self.assertEqual(pf.data["documento"], "52998224725")
+        self.assertEqual(pj.status_code, 201)
+        self.assertEqual(pj.data["documento"], "11222333000181")
+        self.assertEqual(pj.data["cnpj"], "11222333000181")
+        self.assertEqual(sem_doc_1.status_code, 201)
+        self.assertEqual(sem_doc_2.status_code, 201)
+
+    def test_documento_invalido_duplicado_e_mesmo_documento_em_outra_empresa(self):
+        self._fornecedor(documento="11222333000181")
+        self.client.force_authenticate(self.user_edit)
+
+        invalido = self.client.post("/api/cadastros/fornecedores/", {"nome_fornecedor": "Inválido", "tipo_pessoa": "PJ", "documento": "11111111111111"}, format="json")
+        duplicado = self.client.post("/api/cadastros/fornecedores/", {"nome_fornecedor": "Duplicado", "tipo_pessoa": "PJ", "documento": "11222333000181"}, format="json")
+        outro = self._fornecedor(nome="Outra Empresa", documento="11222333000181", empresa=self.outra)
+
+        self.assertEqual(invalido.status_code, 400)
+        self.assertIn("documento", invalido.data)
+        self.assertEqual(duplicado.status_code, 400)
+        self.assertIn("documento", duplicado.data)
+        self.assertEqual(outro.empresa, self.outra)
+
+    def test_isolamento_multiempresa_e_mass_assignment_de_empresa(self):
+        outro = self._fornecedor(nome="Fornecedor Outra", documento="04252011000110", empresa=self.outra)
+        self.client.force_authenticate(self.user_edit)
+
+        listagem = self.client.get("/api/cadastros/fornecedores/")
+        detalhe_outro = self.client.get(f"/api/cadastros/fornecedores/{outro.pk}/")
+        criar_outra_empresa = self.client.post("/api/cadastros/fornecedores/", {
+            "empresa": self.outra.pk,
+            "nome_fornecedor": "Tentativa Cruzada",
+            "tipo_pessoa": "PJ",
+        }, format="json")
+
+        self.assertEqual(listagem.status_code, 200)
+        self.assertFalse(any(row["id"] == outro.pk for row in listagem.data["results"]))
+        self.assertEqual(detalhe_outro.status_code, 404)
+        self.assertEqual(criar_outra_empresa.status_code, 400)
+
+    def test_categorias_multiplas_contatos_enderecos_e_principal_por_tipo(self):
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post("/api/cadastros/fornecedores/", {
+            "nome_fornecedor": "Fornecedor Completo",
+            "tipo_pessoa": "PJ",
+            "documento": "11222333000181",
+            "categorias": ["MATERIA_PRIMA", "AVIAMENTO"],
+            "contatos": [
+                {"nome": "Ana", "tipo": "COMERCIAL", "principal": True},
+                {"nome": "Bruno", "tipo": "COMERCIAL", "principal": True},
+                {"nome": "Carla", "tipo": "FINANCEIRO", "principal": True},
+            ],
+            "enderecos": [
+                {"tipo": "FISCAL", "endereco": "Rua Central", "estado": "sp", "principal": True},
+                {"tipo": "FISCAL", "endereco": "Rua Secundaria", "principal": True},
+            ],
+        }, format="json")
+
+        self.assertEqual(res.status_code, 201)
+        fornecedor = Fornecedor.objects.get(pk=res.data["id"])
+        self.assertEqual(set(fornecedor.categorias_rel.values_list("categoria", flat=True)), {"MATERIA_PRIMA", "AVIAMENTO"})
+        self.assertEqual(fornecedor.contatos.filter(tipo="COMERCIAL", principal=True).count(), 1)
+        self.assertEqual(fornecedor.contatos.filter(tipo="FINANCEIRO", principal=True).count(), 1)
+        self.assertEqual(fornecedor.enderecos.filter(tipo="FISCAL", principal=True).count(), 1)
+
+    def test_ciclo_de_vida_e_historico_auditado(self):
+        fornecedor = self._fornecedor()
+        self.client.force_authenticate(self.user_edit)
+
+        inativar = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/inativar/")
+        ativar = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/ativar/")
+        bloquear_sem_motivo = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/bloquear/", {}, format="json")
+        bloquear = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/bloquear/", {"motivo": "qualidade", "observacao": "lote recusado"}, format="json")
+        desbloquear = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/desbloquear/")
+        historico = self.client.get(f"/api/cadastros/fornecedores/{fornecedor.pk}/historico/")
+
+        self.assertEqual(inativar.status_code, 200)
+        self.assertEqual(ativar.status_code, 200)
+        self.assertEqual(bloquear_sem_motivo.status_code, 400)
+        self.assertEqual(bloquear.status_code, 200)
+        self.assertTrue(bloquear.data["bloqueio"])
+        self.assertEqual(desbloquear.status_code, 200)
+        self.assertFalse(desbloquear.data["bloqueio"])
+        self.assertEqual(historico.status_code, 200)
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.SUPPLIER_BLOCKED, object_id=str(fornecedor.pk)).exists())
+
+    def test_contato_e_endereco_actions_auditam(self):
+        fornecedor = self._fornecedor()
+        self.client.force_authenticate(self.user_edit)
+
+        contato = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/contatos/", {"nome": "Ana", "tipo": "COMERCIAL", "principal": True}, format="json")
+        endereco = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/enderecos/", {"tipo": "FISCAL", "endereco": "Rua Central", "principal": True}, format="json")
+        contato_inativado = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/contatos/{contato.data['id']}/inativar/")
+        endereco_inativado = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/enderecos/{endereco.data['id']}/inativar/")
+
+        self.assertEqual(contato.status_code, 201)
+        self.assertEqual(endereco.status_code, 201)
+        self.assertEqual(contato_inativado.status_code, 200)
+        self.assertEqual(endereco_inativado.status_code, 200)
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.SUPPLIER_CONTACT_CREATED, object_id=str(contato.data["id"])).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.SUPPLIER_ADDRESS_CREATED, object_id=str(endereco.data["id"])).exists())
+
+    def test_exclusao_negada_por_compra_e_bloqueio_de_uso_em_novo_pedido(self):
+        from compras.models import PedidoCompra
+
+        compras_modulo = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": "BASICO", "basico": True, "ativo": True, "ordem": 3},
+        )[0]
+        PerfilModuloPermissao.objects.update_or_create(
+            perfil=self.edit_profile,
+            modulo=compras_modulo,
+            defaults={"acesso": UserModulePermission.Access.EDIT},
+        )
+        fornecedor = self._fornecedor()
+        PedidoCompra.objects.create(empresa=self.empresa, tipo="1", loja=self.loja, fornecedor=fornecedor, status="AB")
+        self.client.force_authenticate(self.user_edit)
+
+        delete = self.client.delete(f"/api/cadastros/fornecedores/{fornecedor.pk}/")
+        fornecedor.bloqueio = True
+        fornecedor.motivo_bloqueio = "restrição"
+        fornecedor.save()
+        novo_pedido = self.client.post("/api/compras/pedidos/", {
+            "tipo": "1",
+            "loja": self.loja.pk,
+            "fornecedor": fornecedor.pk,
+            "emissao": timezone.localdate().isoformat(),
+        }, format="json")
+
+        self.assertEqual(delete.status_code, 400)
+        self.assertEqual(delete.data["detail"], "Este fornecedor possui compras ou outros registros vinculados e não pode ser excluído. Utilize a inativação.")
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.SUPPLIER_DELETE_DENIED, object_id=str(fornecedor.pk)).exists())
+        self.assertEqual(novo_pedido.status_code, 400)
+        self.assertIn("fornecedor", novo_pedido.data)
+
+    def test_financeiro_recusa_fornecedor_inativo_em_titulo_novo(self):
+        financeiro_modulo = ModuloSistema.objects.update_or_create(
+            chave="financeiro",
+            defaults={"nome": "Financeiro", "categoria": "BASICO", "basico": True, "ativo": True, "ordem": 4},
+        )[0]
+        PerfilModuloPermissao.objects.update_or_create(
+            perfil=self.edit_profile,
+            modulo=financeiro_modulo,
+            defaults={"acesso": UserModulePermission.Access.EDIT},
+        )
+        fornecedor = self._fornecedor(ativo=False)
+        natureza = Nat_Lancamento.objects.create(
+            empresa=self.empresa,
+            codigo="FORN",
+            categoria_principal="Compras",
+            subcategoria="Fornecedores",
+            descricao="Fornecedor",
+            tipo="Despesa",
+            status="Ativo",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+        )
+        self.client.force_authenticate(self.user_edit)
+
+        res = self.client.post("/api/financeiro/pagar/", {
+            "idloja": self.loja.pk,
+            "idfornecedor": fornecedor.pk,
+            "Titulo": "Teste",
+            "Data_emissao": timezone.localdate().isoformat(),
+            "Valor_total": "10.00",
+            "Idnatureza": natureza.pk,
+        }, format="json")
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("idfornecedor", res.data)
+
+    def test_dados_bancarios_ocultos_sem_permissao_de_campo(self):
+        fornecedor = self._fornecedor(banco="Banco", agencia="0001", conta="123", chave_pix="pix")
+        self.client.force_authenticate(self.user_view)
+
+        res = self.client.get(f"/api/cadastros/fornecedores/{fornecedor.pk}/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["dados_bancarios_ocultos"])
+        self.assertIsNone(res.data["banco"])

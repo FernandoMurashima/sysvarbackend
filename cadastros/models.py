@@ -550,6 +550,12 @@ class Cliente(models.Model):
 
 
 class Fornecedor(models.Model):
+    TIPO_PESSOA_FISICA = "PF"
+    TIPO_PESSOA_JURIDICA = "PJ"
+    TIPO_PESSOA_CHOICES = [
+        (TIPO_PESSOA_FISICA, "Pessoa física"),
+        (TIPO_PESSOA_JURIDICA, "Pessoa jurídica"),
+    ]
     CATEGORIA_CHOICES = (
         ("MATERIA_PRIMA", "Matéria-prima"),
         ("AVIAMENTO", "Aviamento"),
@@ -559,18 +565,38 @@ class Fornecedor(models.Model):
         ("TRANSPORTADORA", "Transportadora"),
         ("OUTROS", "Outros"),
     )
+    MOTIVO_BLOQUEIO_CHOICES = (
+        ("CADASTRAL", "Pendência cadastral"),
+        ("FINANCEIRO", "Pendência financeira"),
+        ("QUALIDADE", "Problema de qualidade"),
+        ("COMERCIAL", "Restrição comercial"),
+        ("OUTRO", "Outro"),
+    )
+    TIPO_CONTA_CHOICES = (
+        ("CORRENTE", "Conta corrente"),
+        ("POUPANCA", "Conta poupança"),
+        ("PAGAMENTO", "Conta de pagamento"),
+        ("OUTRA", "Outra"),
+    )
 
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
         related_name="fornecedores",
         db_index=True,
     )
+    tipo_pessoa = models.CharField(
+        max_length=2,
+        choices=TIPO_PESSOA_CHOICES,
+        default=TIPO_PESSOA_JURIDICA,
+        db_index=True,
+    )
+    documento = models.CharField(max_length=14, null=True, blank=True, db_index=True)
     nome_fornecedor = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=18, null=True, blank=True, db_index=True)
-    cnpj = models.CharField(max_length=18, validators=[cnpj_validator])
+    cnpj = models.CharField(max_length=18, null=True, blank=True, validators=[cnpj_validator], db_index=True)
     logradouro = models.CharField(max_length=50, null=True, blank=True)
     endereco = models.CharField(max_length=50, null=True, blank=True)
     numero = models.CharField(max_length=10, null=True, blank=True)
@@ -584,17 +610,53 @@ class Fornecedor(models.Model):
     email = models.CharField(max_length=50, null=True, blank=True, validators=[email_simple_validator])
     categoria = models.CharField(max_length=15, choices=CATEGORIA_CHOICES, null=True, blank=True, db_index=True)
     bloqueio = models.BooleanField(default=False, db_index=True)
+    motivo_bloqueio = models.CharField(max_length=80, null=True, blank=True)
+    observacao_bloqueio = models.TextField(null=True, blank=True)
+    bloqueado_em = models.DateTimeField(null=True, blank=True)
+    bloqueado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fornecedores_bloqueados",
+    )
     mala_direta = models.BooleanField(default=False, db_index=True)
+    inscricao_estadual = models.CharField(max_length=20, null=True, blank=True)
+    inscricao_municipal = models.CharField(max_length=20, null=True, blank=True)
+    contribuinte_icms = models.CharField(max_length=20, null=True, blank=True)
+    site = models.CharField(max_length=120, null=True, blank=True)
+    prazo_padrao_pagamento = models.PositiveIntegerField(null=True, blank=True)
+    observacoes_comerciais = models.TextField(null=True, blank=True)
     conta_contabil = models.CharField(max_length=50, null=True, blank=True)
+    natureza_padrao = models.ForeignKey(
+        "cadastros.Nat_Lancamento",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="fornecedores_padrao",
+    )
+    banco = models.CharField(max_length=80, null=True, blank=True)
+    agencia = models.CharField(max_length=20, null=True, blank=True)
+    conta = models.CharField(max_length=30, null=True, blank=True)
+    tipo_conta = models.CharField(max_length=20, choices=TIPO_CONTA_CHOICES, null=True, blank=True)
+    chave_pix = models.CharField(max_length=120, null=True, blank=True)
+    favorecido = models.CharField(max_length=120, null=True, blank=True)
+    documento_favorecido = models.CharField(max_length=14, null=True, blank=True)
+    observacao_bancaria = models.TextField(null=True, blank=True)
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["empresa", "cnpj"], name="uq_empresa_fornecedor_cnpj")
+            models.UniqueConstraint(fields=["empresa", "documento"], name="uq_empresa_fornecedor_documento")
         ]
         indexes = [
             models.Index(fields=["cnpj"]),
+            models.Index(fields=["empresa", "documento"], name="idx_forn_empresa_doc"),
+            models.Index(fields=["empresa", "nome_fornecedor"], name="idx_forn_empresa_nome"),
+            models.Index(fields=["empresa", "ativo"], name="idx_forn_empresa_ativo"),
+            models.Index(fields=["empresa", "bloqueio"], name="idx_forn_empresa_bloq"),
+            models.Index(fields=["empresa", "tipo_pessoa"], name="idx_forn_empresa_tipo"),
             models.Index(fields=["cidade", "estado"]),
             models.Index(fields=["categoria"]),
             models.Index(fields=["bloqueio"]),
@@ -605,6 +667,222 @@ class Fornecedor(models.Model):
 
     def __str__(self):
         return self.nome_fornecedor
+
+    def clean(self):
+        super().clean()
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Fornecedor deve pertencer a uma empresa."})
+        self.tipo_pessoa = self.tipo_pessoa or self.TIPO_PESSOA_JURIDICA
+        self._normalizar_campos()
+        if not self.nome_fornecedor:
+            raise ValidationError({"nome_fornecedor": "Informe o nome do fornecedor."})
+        if self.estado and len(self.estado) != 2:
+            raise ValidationError({"estado": "Informe a UF com duas letras."})
+        if self.bloqueio and not self.motivo_bloqueio:
+            raise ValidationError({"motivo_bloqueio": "Informe o motivo do bloqueio."})
+        if self.documento:
+            if self.tipo_pessoa == self.TIPO_PESSOA_FISICA and not check_cpf(self.documento):
+                raise ValidationError({"documento": "CPF inválido."})
+            if self.tipo_pessoa == self.TIPO_PESSOA_JURIDICA and not check_cnpj(self.documento):
+                raise ValidationError({"documento": "CNPJ inválido."})
+
+    def save(self, *args, **kwargs):
+        self._normalizar_campos()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def _normalizar_campos(self):
+        strip_fields = [
+            "nome_fornecedor",
+            "apelido",
+            "logradouro",
+            "endereco",
+            "numero",
+            "complemento",
+            "bairro",
+            "cidade",
+            "categoria",
+            "conta_contabil",
+            "motivo_bloqueio",
+            "observacao_bloqueio",
+            "inscricao_estadual",
+            "inscricao_municipal",
+            "contribuinte_icms",
+            "site",
+            "observacoes_comerciais",
+            "banco",
+            "agencia",
+            "conta",
+            "tipo_conta",
+            "chave_pix",
+            "favorecido",
+            "observacao_bancaria",
+        ]
+        for field in strip_fields:
+            value = getattr(self, field, None)
+            if isinstance(value, str):
+                setattr(self, field, value.strip() or None)
+        self.email = (self.email or "").strip().lower() or None
+        self.telefone1 = only_digits(self.telefone1 or "") or None
+        self.telefone2 = only_digits(self.telefone2 or "") or None
+        self.cep = only_digits(self.cep or "") or None
+        self.estado = (self.estado or "").strip().upper() or None
+        self.documento = only_digits(self.documento or self.cnpj or "") or None
+        self.documento_favorecido = only_digits(self.documento_favorecido or "") or None
+        if self.tipo_pessoa == self.TIPO_PESSOA_JURIDICA:
+            self.cnpj = self.documento
+        elif self.cnpj:
+            self.cnpj = only_digits(self.cnpj) or None
+
+
+class FornecedorCategoria(models.Model):
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name="categorias_rel")
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="fornecedor_categorias", db_index=True)
+    categoria = models.CharField(max_length=20, choices=Fornecedor.CATEGORIA_CHOICES, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["fornecedor", "categoria"], name="uq_fornecedor_categoria")
+        ]
+        indexes = [
+            models.Index(fields=["empresa", "categoria"], name="idx_forncat_empresa_cat"),
+        ]
+
+    def clean(self):
+        if self.fornecedor_id and self.empresa_id and self.fornecedor.empresa_id != self.empresa_id:
+            raise ValidationError({"empresa": "Categoria deve pertencer à mesma empresa do fornecedor."})
+
+    def save(self, *args, **kwargs):
+        if self.fornecedor_id and not self.empresa_id:
+            self.empresa = self.fornecedor.empresa
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class FornecedorContato(models.Model):
+    TIPO_COMERCIAL = "COMERCIAL"
+    TIPO_FINANCEIRO = "FINANCEIRO"
+    TIPO_FISCAL = "FISCAL"
+    TIPO_PRODUCAO_FACCAO = "PRODUCAO_FACCAO"
+    TIPO_LOGISTICA = "LOGISTICA"
+    TIPO_OUTRO = "OUTRO"
+    TIPO_CHOICES = (
+        (TIPO_COMERCIAL, "Comercial"),
+        (TIPO_FINANCEIRO, "Financeiro"),
+        (TIPO_FISCAL, "Fiscal"),
+        (TIPO_PRODUCAO_FACCAO, "Produção/Facção"),
+        (TIPO_LOGISTICA, "Logística"),
+        (TIPO_OUTRO, "Outro"),
+    )
+
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name="contatos")
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="fornecedor_contatos", db_index=True)
+    nome = models.CharField(max_length=80)
+    cargo_funcao = models.CharField(max_length=80, null=True, blank=True)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_COMERCIAL, db_index=True)
+    telefone = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
+    whatsapp = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
+    email = models.CharField(max_length=80, null=True, blank=True, validators=[email_simple_validator])
+    observacao = models.TextField(null=True, blank=True)
+    principal = models.BooleanField(default=False, db_index=True)
+    ativo = models.BooleanField(default=True, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    data_atualizacao = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["empresa", "fornecedor", "tipo"], name="idx_forncont_emp_forn_tipo"),
+            models.Index(fields=["empresa", "ativo"], name="idx_forncont_emp_ativo"),
+        ]
+
+    def clean(self):
+        if self.fornecedor_id and self.empresa_id and self.fornecedor.empresa_id != self.empresa_id:
+            raise ValidationError({"empresa": "Contato deve pertencer à mesma empresa do fornecedor."})
+        self.nome = (self.nome or "").strip()
+        if not self.nome:
+            raise ValidationError({"nome": "Informe o nome do contato."})
+        self.cargo_funcao = (self.cargo_funcao or "").strip() or None
+        self.observacao = (self.observacao or "").strip() or None
+        self.telefone = only_digits(self.telefone or "") or None
+        self.whatsapp = only_digits(self.whatsapp or "") or None
+        self.email = (self.email or "").strip().lower() or None
+
+    def save(self, *args, **kwargs):
+        if self.fornecedor_id and not self.empresa_id:
+            self.empresa = self.fornecedor.empresa
+        self.full_clean()
+        super().save(*args, **kwargs)
+        if self.principal:
+            FornecedorContato.objects.filter(
+                empresa=self.empresa,
+                fornecedor=self.fornecedor,
+                tipo=self.tipo,
+                principal=True,
+            ).exclude(pk=self.pk).update(principal=False)
+
+
+class FornecedorEndereco(models.Model):
+    TIPO_CHOICES = (
+        ("FISCAL", "Fiscal"),
+        ("COMERCIAL", "Comercial"),
+        ("COBRANCA", "Cobrança"),
+        ("RETIRADA_COLETA", "Retirada/Coleta"),
+        ("ENTREGA", "Entrega"),
+        ("UNIDADE_FABRIL", "Unidade fabril"),
+        ("OUTRO", "Outro"),
+    )
+
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name="enderecos")
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="fornecedor_enderecos", db_index=True)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default="FISCAL", db_index=True)
+    logradouro = models.CharField(max_length=50, null=True, blank=True)
+    endereco = models.CharField(max_length=80)
+    numero = models.CharField(max_length=10, null=True, blank=True)
+    complemento = models.CharField(max_length=100, null=True, blank=True)
+    cep = models.CharField(max_length=10, null=True, blank=True, validators=[cep_validator])
+    bairro = models.CharField(max_length=40, null=True, blank=True)
+    cidade = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    estado = models.CharField(max_length=2, null=True, blank=True, db_index=True)
+    principal = models.BooleanField(default=False, db_index=True)
+    ativo = models.BooleanField(default=True, db_index=True)
+    observacao = models.TextField(null=True, blank=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    data_atualizacao = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["empresa", "fornecedor", "tipo"], name="idx_fornend_emp_forn_tipo"),
+            models.Index(fields=["empresa", "ativo"], name="idx_fornend_emp_ativo"),
+        ]
+
+    def clean(self):
+        if self.fornecedor_id and self.empresa_id and self.fornecedor.empresa_id != self.empresa_id:
+            raise ValidationError({"empresa": "Endereço deve pertencer à mesma empresa do fornecedor."})
+        self.endereco = (self.endereco or "").strip()
+        if not self.endereco:
+            raise ValidationError({"endereco": "Informe o endereço."})
+        for field in ("logradouro", "numero", "complemento", "bairro", "cidade", "observacao"):
+            value = getattr(self, field, None)
+            if isinstance(value, str):
+                setattr(self, field, value.strip() or None)
+        self.cep = only_digits(self.cep or "") or None
+        self.estado = (self.estado or "").strip().upper() or None
+        if self.estado and len(self.estado) != 2:
+            raise ValidationError({"estado": "Informe a UF com duas letras."})
+
+    def save(self, *args, **kwargs):
+        if self.fornecedor_id and not self.empresa_id:
+            self.empresa = self.fornecedor.empresa
+        self.full_clean()
+        super().save(*args, **kwargs)
+        if self.principal:
+            FornecedorEndereco.objects.filter(
+                empresa=self.empresa,
+                fornecedor=self.fornecedor,
+                tipo=self.tipo,
+                principal=True,
+            ).exclude(pk=self.pk).update(principal=False)
 
 
 class Funcionarios(models.Model):

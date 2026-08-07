@@ -131,13 +131,13 @@ class BaseViewSet(viewsets.ModelViewSet):
         if self._model_has_field(model, 'empresa') and user.is_superuser:
             if not serializer.validated_data.get('empresa'):
                 raise ValidationError({'empresa': 'Informe a empresa do cadastro.'})
-            self._validar_vinculos_empresa(serializer.validated_data, serializer.validated_data['empresa'].id)
+            self._validar_vinculos_empresa(serializer.validated_data, serializer.validated_data['empresa'].id, validar_fornecedor_utilizavel=True)
             serializer.save()
             return
         if not empresa_id and not user.is_superuser:
             raise ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
         if empresa_id:
-            self._validar_vinculos_empresa(serializer.validated_data, empresa_id)
+            self._validar_vinculos_empresa(serializer.validated_data, empresa_id, validar_fornecedor_utilizavel=True)
         if self._model_has_field(model, 'empresa') and empresa_id:
             empresa = serializer.validated_data.get('empresa')
             if empresa and empresa.id != empresa_id:
@@ -175,7 +175,7 @@ class BaseViewSet(viewsets.ModelViewSet):
         except Exception:
             return False
 
-    def _validar_vinculos_empresa(self, data, empresa_id):
+    def _validar_vinculos_empresa(self, data, empresa_id, validar_fornecedor_utilizavel=False):
         for campo in ('idloja', 'loja'):
             loja = data.get(campo)
             if loja and getattr(loja, 'empresa_id', None) and loja.empresa_id != empresa_id:
@@ -186,6 +186,10 @@ class BaseViewSet(viewsets.ModelViewSet):
         fornecedor = data.get('idfornecedor') or data.get('fornecedor')
         if fornecedor and getattr(fornecedor, 'empresa_id', None) and fornecedor.empresa_id != empresa_id:
             raise ValidationError({'fornecedor': 'O fornecedor informado pertence a outra empresa.'})
+        if validar_fornecedor_utilizavel and fornecedor and getattr(fornecedor, 'ativo', True) is False:
+            raise ValidationError({'fornecedor': 'Fornecedor inativo não pode ser utilizado em novo título.'})
+        if validar_fornecedor_utilizavel and fornecedor and getattr(fornecedor, 'bloqueio', False):
+            raise ValidationError({'fornecedor': 'Fornecedor bloqueado não pode ser utilizado em novo título.'})
         forma = data.get('forma')
         if forma and getattr(forma, 'empresa_id', None) and forma.empresa_id != empresa_id:
             raise ValidationError({'forma': 'A forma de pagamento pertence a outra empresa.'})

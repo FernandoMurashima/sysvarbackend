@@ -171,6 +171,7 @@ class PagarSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         natureza = attrs.get('Idnatureza', getattr(self.instance, 'Idnatureza', None))
+        fornecedor = attrs.get('idfornecedor', getattr(self.instance, 'idfornecedor', None))
         if not natureza:
             raise serializers.ValidationError({'Idnatureza': 'Informe a natureza de lançamento.'})
         if natureza and getattr(natureza, 'ativo', True) is False:
@@ -178,6 +179,10 @@ class PagarSerializer(serializers.ModelSerializer):
         operacao = str(getattr(natureza, 'natureza_operacao', '') or '').upper()
         if operacao not in {'DESPESA', 'AJUSTE'}:
             raise serializers.ValidationError({'Idnatureza': 'Contas a pagar deve usar natureza de despesa ou ajuste.'})
+        if fornecedor and getattr(fornecedor, 'ativo', True) is False and not self.instance:
+            raise serializers.ValidationError({'idfornecedor': 'Fornecedor inativo não pode ser utilizado em novo título.'})
+        if fornecedor and getattr(fornecedor, 'bloqueio', False) and not self.instance:
+            raise serializers.ValidationError({'idfornecedor': 'Fornecedor bloqueado não pode ser utilizado em novo título.'})
         return attrs
 
 

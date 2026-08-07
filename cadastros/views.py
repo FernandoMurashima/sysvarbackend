@@ -17,12 +17,25 @@ from accounts.serializers import EmpresaContratoDetalheSerializer
 from auditoria.models import AuditAction, AuditCategory, AuditLog
 from auditoria.services import AuditService, instance_snapshot
 
-from .models import Empresa, EmpresaContrato, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento, PlanoContabil
+from .models import (
+    Empresa,
+    EmpresaContrato,
+    Loja,
+    Cliente,
+    Fornecedor,
+    FornecedorContato,
+    FornecedorEndereco,
+    Funcionarios,
+    Nat_Lancamento,
+    PlanoContabil,
+)
 from .serializers import (
     EmpresaSerializer,
     LojaSerializer,
     ClienteSerializer,
     FornecedorSerializer,
+    FornecedorContatoSerializer,
+    FornecedorEnderecoSerializer,
     FuncionariosSerializer,
     NatLancamentoSerializer,
     PlanoContabilSerializer,
@@ -859,13 +872,456 @@ class ClienteViewSet(BaseCadastroViewSet):
 
 
 class FornecedorViewSet(BaseCadastroViewSet):
-    queryset = Fornecedor.objects.all()
+    EXCLUSAO_NEGADA_DETAIL = "Este fornecedor possui compras ou outros registros vinculados e não pode ser excluído. Utilize a inativação."
+    queryset = Fornecedor.objects.select_related("empresa", "bloqueado_por", "natureza_padrao").prefetch_related("categorias_rel", "contatos", "enderecos").all()
     serializer_class = FornecedorSerializer
 
-    filterset_fields = ["ativo", "empresa", "estado", "cidade", "categoria", "bloqueio", "mala_direta", "cnpj"]
-    search_fields = ["nome_fornecedor", "apelido", "cnpj", "email", "cidade", "telefone1", "telefone2"]
-    ordering_fields = ["nome_fornecedor", "cidade", "estado", "data_cadastro"]
+    filterset_fields = ["ativo", "empresa", "estado", "cidade", "categoria", "bloqueio", "mala_direta", "cnpj", "documento", "tipo_pessoa"]
+    search_fields = ["nome_fornecedor", "apelido", "documento", "cnpj", "email", "cidade", "telefone1", "telefone2"]
+    ordering_fields = ["nome_fornecedor", "cidade", "estado", "data_cadastro", "ultima_compra", "total_comprado", "quantidade_compras", "ticket_medio", "saldo_a_pagar"]
     ordering = ["nome_fornecedor"]
+    action_required_access = {
+        "indicadores": "VIEW",
+        "historico": "VIEW",
+        "compras": "VIEW",
+        "financeiro": "VIEW",
+        "possiveis_duplicados": "VIEW",
+        "ativar": "EDIT",
+        "inativar": "EDIT",
+        "bloquear": "EDIT",
+        "desbloquear": "EDIT",
+        "contatos": "EDIT",
+        "contato": "EDIT",
+        "contato_inativar": "EDIT",
+        "contato_reativar": "EDIT",
+        "enderecos": "EDIT",
+        "endereco": "EDIT",
+        "endereco_inativar": "EDIT",
+        "endereco_reativar": "EDIT",
+    }
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        categoria = self.request.query_params.get("categoria")
+        if categoria:
+            qs = qs.filter(Q(categoria=categoria) | Q(categorias_rel__categoria=categoria)).distinct()
+        somente_utilizaveis = str(self.request.query_params.get("utilizavel") or "").lower() == "true"
+        if somente_utilizaveis:
+            qs = qs.filter(ativo=True, bloqueio=False)
+        return self._with_indicadores(qs)
+
+    def _with_indicadores(self, qs):
+        try:
+            from compras.models import PedidoCompra
+            from financeiro.models import PagarItem
+
+            pedidos_validos = (
+                PedidoCompra.objects
+                .filter(
+                    fornecedor_id=OuterRef("pk"),
+                    empresa_id=OuterRef("empresa_id"),
+                    status__in=["AP", "AT"],
+                )
+                .values("fornecedor_id")
+            )
+            itens_abertos = (
+                PagarItem.objects
+                .filter(
+                    Idpagar__idfornecedor_id=OuterRef("pk"),
+                    Idpagar__empresa_id=OuterRef("empresa_id"),
+                )
+                .exclude(status__in=[PagarItem.STATUS_BAIXADO, PagarItem.STATUS_CANCELADO])
+                .values("Idpagar__idfornecedor_id")
+            )
+            decimal_field = DecimalField(max_digits=18, decimal_places=2)
+            total_comprado = Coalesce(
+                Subquery(pedidos_validos.annotate(total=Sum("total_pedido")).values("total")[:1], output_field=decimal_field),
+                Value(Decimal("0.00")),
+                output_field=decimal_field,
+            )
+            quantidade = Coalesce(
+                Subquery(pedidos_validos.annotate(total=Count("id")).values("total")[:1], output_field=IntegerField()),
+                Value(0),
+                output_field=IntegerField(),
+            )
+            saldo = Coalesce(
+                Subquery(itens_abertos.annotate(total=Sum("valor_parcela")).values("total")[:1], output_field=decimal_field),
+                Value(Decimal("0.00")),
+                output_field=decimal_field,
+            )
+            return qs.annotate(
+                ultima_compra=Subquery(pedidos_validos.annotate(ultima=Max("emissao")).values("ultima")[:1]),
+                total_comprado=total_comprado,
+                quantidade_compras=quantidade,
+                ticket_medio=Case(
+                    When(
+                        quantidade_compras__gt=0,
+                        then=ExpressionWrapper(total_comprado / F("quantidade_compras"), output_field=decimal_field),
+                    ),
+                    default=Value(Decimal("0.00")),
+                    output_field=decimal_field,
+                ),
+                saldo_a_pagar=saldo,
+            )
+        except Exception:
+            return qs.annotate(
+                total_comprado=Value(0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+                quantidade_compras=Value(0),
+                ticket_medio=Value(0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+                saldo_a_pagar=Value(0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+            )
+
+    def perform_create(self, serializer):
+        try:
+            with transaction.atomic():
+                fornecedor = self._save_fornecedor(serializer)
+                AuditService.required_success(AuditAction.SUPPLIER_CREATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=fornecedor, after=instance_snapshot(fornecedor), status_code=201)
+        except IntegrityError:
+            raise ValidationError({"documento": "Já existe um fornecedor com este documento nesta empresa."})
+
+    def perform_update(self, serializer):
+        before = instance_snapshot(serializer.instance)
+        try:
+            with transaction.atomic():
+                fornecedor = self._save_fornecedor(serializer)
+                AuditService.required_success(AuditAction.SUPPLIER_UPDATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=fornecedor, before=before, after=instance_snapshot(fornecedor), changed_fields=sorted(serializer.validated_data.keys()), status_code=200)
+        except IntegrityError:
+            raise ValidationError({"documento": "Já existe um fornecedor com este documento nesta empresa."})
+
+    def _save_fornecedor(self, serializer):
+        user = self.request.user
+        if user.is_superuser:
+            if not serializer.validated_data.get("empresa") and not getattr(serializer.instance, "empresa_id", None):
+                raise ValidationError({"empresa": "Informe a empresa do fornecedor."})
+            return serializer.save()
+        if not getattr(user, "empresa_id", None):
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa = serializer.validated_data.get("empresa")
+        if empresa and empresa.id != user.empresa_id:
+            raise ValidationError({"empresa": "Você só pode cadastrar fornecedores na empresa vinculada ao seu usuário."})
+        return serializer.save(empresa=user.empresa)
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        return Response({
+            "total": qs.count(),
+            "ativos": qs.filter(ativo=True).count(),
+            "inativos": qs.filter(ativo=False).count(),
+            "bloqueados": qs.filter(bloqueio=True).count(),
+            "pessoas_fisicas": qs.filter(tipo_pessoa=Fornecedor.TIPO_PESSOA_FISICA).count(),
+            "pessoas_juridicas": qs.filter(tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA).count(),
+            "sem_documento": qs.filter(documento__isnull=True).count(),
+            "com_compras": qs.filter(quantidade_compras__gt=0).count(),
+            "saldo_a_pagar": qs.aggregate(total=Coalesce(Sum("saldo_a_pagar"), Value(Decimal("0.00")), output_field=DecimalField(max_digits=18, decimal_places=2)))["total"],
+        })
+
+    @action(detail=False, methods=["get"], url_path="possiveis-duplicados")
+    def possiveis_duplicados(self, request):
+        nome = self._normalizar_nome(request.query_params.get("nome") or "")
+        if not nome:
+            return Response([])
+        qs = self.get_queryset()
+        atual = request.query_params.get("id")
+        if atual:
+            qs = qs.exclude(pk=atual)
+        data = []
+        for fornecedor in qs.only("id", "nome_fornecedor", "apelido", "documento")[:500]:
+            candidatos = [fornecedor.nome_fornecedor, fornecedor.apelido]
+            if any(nome and (nome == self._normalizar_nome(c) or nome in self._normalizar_nome(c) or self._normalizar_nome(c) in nome) for c in candidatos if c):
+                data.append({"id": fornecedor.pk, "nome_fornecedor": fornecedor.nome_fornecedor, "apelido": fornecedor.apelido, "documento": fornecedor.documento})
+        return Response(data[:10])
+
+    def _normalizar_nome(self, value):
+        import unicodedata
+
+        normalized = unicodedata.normalize("NFD", str(value or "").strip().lower())
+        normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        return " ".join(normalized.split())
+
+    @action(detail=True, methods=["get"], url_path="historico")
+    def historico(self, request, pk=None):
+        fornecedor = self.get_object()
+        qs = AuditLog.objects.filter(
+            empresa_id=fornecedor.empresa_id,
+            app_label="cadastros",
+            model__in=["fornecedor", "fornecedorcontato", "fornecedorendereco"],
+        ).filter(Q(object_id=str(fornecedor.pk)) | Q(metadata__fornecedor_id=fornecedor.pk)).select_related("user").order_by("-created_at", "-id")
+        page = self.paginate_queryset(qs)
+        logs = page if page is not None else qs
+        data = [self._historico_item(log) for log in logs]
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
+    def _historico_item(self, log):
+        metadata = log.metadata or {}
+        return {
+            "id": log.id,
+            "created_at": log.created_at,
+            "acao": log.action,
+            "acao_descricao": self._historico_descricao(log.action),
+            "usuario": log.user_nome_snapshot or log.username_snapshot or None,
+            "origem": log.origin,
+            "resultado": log.result,
+            "campos_alterados": log.changed_fields or [],
+            "motivo": metadata.get("mensagem") or log.error_message or metadata.get("motivo"),
+            "observacao": metadata.get("observacao"),
+        }
+
+    def _historico_descricao(self, action_name):
+        return {
+            AuditAction.SUPPLIER_CREATED: "Fornecedor criado",
+            AuditAction.SUPPLIER_UPDATED: "Fornecedor atualizado",
+            AuditAction.SUPPLIER_ACTIVATED: "Fornecedor ativado",
+            AuditAction.SUPPLIER_DEACTIVATED: "Fornecedor inativado",
+            AuditAction.SUPPLIER_BLOCKED: "Fornecedor bloqueado",
+            AuditAction.SUPPLIER_UNBLOCKED: "Fornecedor desbloqueado",
+            AuditAction.SUPPLIER_DELETED: "Fornecedor excluído",
+            AuditAction.SUPPLIER_DELETE_DENIED: "Exclusão negada",
+            AuditAction.SUPPLIER_CONTACT_CREATED: "Contato criado",
+            AuditAction.SUPPLIER_CONTACT_UPDATED: "Contato atualizado",
+            AuditAction.SUPPLIER_CONTACT_DEACTIVATED: "Contato inativado",
+            AuditAction.SUPPLIER_CONTACT_REACTIVATED: "Contato reativado",
+            AuditAction.SUPPLIER_ADDRESS_CREATED: "Endereço criado",
+            AuditAction.SUPPLIER_ADDRESS_UPDATED: "Endereço atualizado",
+            AuditAction.SUPPLIER_ADDRESS_DEACTIVATED: "Endereço inativado",
+            AuditAction.SUPPLIER_ADDRESS_REACTIVATED: "Endereço reativado",
+        }.get(action_name, action_name)
+
+    @action(detail=True, methods=["get"], url_path="compras")
+    def compras(self, request, pk=None):
+        fornecedor = self.get_object()
+        from compras.models import PedidoCompra
+
+        qs = PedidoCompra.objects.filter(fornecedor=fornecedor, empresa_id=fornecedor.empresa_id).select_related("loja").order_by("-emissao", "-id")
+        status_q = request.query_params.get("status")
+        loja = request.query_params.get("loja")
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        page = self.paginate_queryset(qs)
+        pedidos = page if page is not None else qs
+        data = [{
+            "id": pedido.id,
+            "data": pedido.emissao,
+            "tipo": pedido.tipo,
+            "tipo_descricao": pedido.get_tipo_display(),
+            "loja_id": pedido.loja_id,
+            "loja_nome": getattr(pedido.loja, "nome_loja", None),
+            "status": pedido.status,
+            "status_descricao": pedido.get_status_display(),
+            "total": str(pedido.total_pedido),
+        } for pedido in pedidos]
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="financeiro")
+    def financeiro(self, request, pk=None):
+        fornecedor = self.get_object()
+        from financeiro.models import PagarItem
+
+        qs = PagarItem.objects.filter(Idpagar__idfornecedor=fornecedor, Idpagar__empresa_id=fornecedor.empresa_id).select_related("Idpagar", "Idpagar__idloja", "Idnatureza").order_by("Data_vencimento", "Idpagaritem")
+        page = self.paginate_queryset(qs)
+        itens = page if page is not None else qs
+        data = [{
+            "id": item.Idpagaritem,
+            "titulo_id": item.Idpagar_id,
+            "titulo": item.Idpagar.Titulo,
+            "documento": item.Idpagar.Documento,
+            "loja_nome": getattr(item.Idpagar.idloja, "nome_loja", None),
+            "parcela_n": item.parcela_n,
+            "status": item.status,
+            "vencimento": item.Data_vencimento,
+            "valor": str(item.valor_parcela),
+            "valor_baixa": str(item.valor_baixa or Decimal("0.00")),
+            "natureza": getattr(item.Idnatureza, "descricao", None),
+        } for item in itens]
+        if page is not None:
+            return self.get_paginated_response(data)
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        scoped = self.get_object()
+        with transaction.atomic():
+            fornecedor = Fornecedor.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(fornecedor)
+            fornecedor.ativo = True
+            fornecedor.save(update_fields=["ativo", "documento", "cnpj"])
+            AuditService.required_success(AuditAction.SUPPLIER_ACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=fornecedor, before=before, after=instance_snapshot(fornecedor), changed_fields=["ativo"], status_code=200)
+        return Response(self.get_serializer(fornecedor).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        scoped = self.get_object()
+        with transaction.atomic():
+            fornecedor = Fornecedor.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(fornecedor)
+            fornecedor.ativo = False
+            fornecedor.save(update_fields=["ativo", "documento", "cnpj"])
+            AuditService.required_success(AuditAction.SUPPLIER_DEACTIVATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=fornecedor, before=before, after=instance_snapshot(fornecedor), changed_fields=["ativo"], status_code=200)
+        return Response(self.get_serializer(fornecedor).data)
+
+    @action(detail=True, methods=["post"], url_path="bloquear")
+    def bloquear(self, request, pk=None):
+        scoped = self.get_object()
+        motivo = (request.data.get("motivo") or request.data.get("motivo_bloqueio") or "").strip()
+        if not motivo:
+            raise ValidationError({"motivo": "Informe o motivo do bloqueio."})
+        observacao = (request.data.get("observacao") or request.data.get("observacao_bloqueio") or "").strip() or None
+        with transaction.atomic():
+            fornecedor = Fornecedor.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(fornecedor)
+            fornecedor.bloqueio = True
+            fornecedor.motivo_bloqueio = motivo[:80]
+            fornecedor.observacao_bloqueio = observacao
+            fornecedor.bloqueado_em = timezone.now()
+            fornecedor.bloqueado_por = request.user if request.user.is_authenticated else None
+            fornecedor.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "documento", "cnpj"])
+            AuditService.required_success(AuditAction.SUPPLIER_BLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=fornecedor, before=before, after=instance_snapshot(fornecedor), changed_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por"], metadata={"motivo": motivo[:80], "observacao": observacao}, status_code=200)
+        return Response(self.get_serializer(fornecedor).data)
+
+    @action(detail=True, methods=["post"], url_path="desbloquear")
+    def desbloquear(self, request, pk=None):
+        scoped = self.get_object()
+        with transaction.atomic():
+            fornecedor = Fornecedor.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(fornecedor)
+            motivo_anterior = fornecedor.motivo_bloqueio
+            observacao_anterior = fornecedor.observacao_bloqueio
+            fornecedor.bloqueio = False
+            fornecedor.motivo_bloqueio = None
+            fornecedor.observacao_bloqueio = None
+            fornecedor.bloqueado_em = None
+            fornecedor.bloqueado_por = None
+            fornecedor.save(update_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por", "documento", "cnpj"])
+            AuditService.required_success(AuditAction.SUPPLIER_UNBLOCKED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=fornecedor, before=before, after=instance_snapshot(fornecedor), changed_fields=["bloqueio", "motivo_bloqueio", "observacao_bloqueio", "bloqueado_em", "bloqueado_por"], metadata={"motivo": motivo_anterior, "observacao": observacao_anterior}, status_code=200)
+        return Response(self.get_serializer(fornecedor).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="contatos")
+    def contatos(self, request, pk=None):
+        fornecedor = self.get_object()
+        if request.method == "GET":
+            return Response(FornecedorContatoSerializer(fornecedor.contatos.order_by("-principal", "tipo", "nome"), many=True).data)
+        serializer = FornecedorContatoSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        contato = serializer.save(fornecedor=fornecedor, empresa=fornecedor.empresa)
+        AuditService.required_success(AuditAction.SUPPLIER_CONTACT_CREATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=contato, after=instance_snapshot(contato), metadata={"fornecedor_id": fornecedor.pk}, status_code=201)
+        return Response(FornecedorContatoSerializer(contato).data, status=201)
+
+    @action(detail=True, methods=["patch"], url_path=r"contatos/(?P<contato_id>[^/.]+)")
+    def contato(self, request, pk=None, contato_id=None):
+        fornecedor = self.get_object()
+        contato = fornecedor.contatos.get(pk=contato_id, empresa=fornecedor.empresa)
+        before = instance_snapshot(contato)
+        serializer = FornecedorContatoSerializer(contato, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        contato = serializer.save()
+        AuditService.required_success(AuditAction.SUPPLIER_CONTACT_UPDATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=contato, before=before, after=instance_snapshot(contato), changed_fields=sorted(serializer.validated_data.keys()), metadata={"fornecedor_id": fornecedor.pk}, status_code=200)
+        return Response(FornecedorContatoSerializer(contato).data)
+
+    @action(detail=True, methods=["post"], url_path=r"contatos/(?P<contato_id>[^/.]+)/inativar")
+    def contato_inativar(self, request, pk=None, contato_id=None):
+        return self._toggle_contato(request, contato_id, False, AuditAction.SUPPLIER_CONTACT_DEACTIVATED)
+
+    @action(detail=True, methods=["post"], url_path=r"contatos/(?P<contato_id>[^/.]+)/reativar")
+    def contato_reativar(self, request, pk=None, contato_id=None):
+        return self._toggle_contato(request, contato_id, True, AuditAction.SUPPLIER_CONTACT_REACTIVATED)
+
+    def _toggle_contato(self, request, contato_id, ativo, action_name):
+        fornecedor = self.get_object()
+        contato = fornecedor.contatos.get(pk=contato_id, empresa=fornecedor.empresa)
+        before = instance_snapshot(contato)
+        contato.ativo = ativo
+        contato.save(update_fields=["ativo", "data_atualizacao"])
+        AuditService.required_success(action_name, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=contato, before=before, after=instance_snapshot(contato), changed_fields=["ativo"], metadata={"fornecedor_id": fornecedor.pk}, status_code=200)
+        return Response(FornecedorContatoSerializer(contato).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="enderecos")
+    def enderecos(self, request, pk=None):
+        fornecedor = self.get_object()
+        if request.method == "GET":
+            return Response(FornecedorEnderecoSerializer(fornecedor.enderecos.order_by("-principal", "tipo", "endereco"), many=True).data)
+        serializer = FornecedorEnderecoSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        endereco = serializer.save(fornecedor=fornecedor, empresa=fornecedor.empresa)
+        AuditService.required_success(AuditAction.SUPPLIER_ADDRESS_CREATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=endereco, after=instance_snapshot(endereco), metadata={"fornecedor_id": fornecedor.pk}, status_code=201)
+        return Response(FornecedorEnderecoSerializer(endereco).data, status=201)
+
+    @action(detail=True, methods=["patch"], url_path=r"enderecos/(?P<endereco_id>[^/.]+)")
+    def endereco(self, request, pk=None, endereco_id=None):
+        fornecedor = self.get_object()
+        endereco = fornecedor.enderecos.get(pk=endereco_id, empresa=fornecedor.empresa)
+        before = instance_snapshot(endereco)
+        serializer = FornecedorEnderecoSerializer(endereco, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        endereco = serializer.save()
+        AuditService.required_success(AuditAction.SUPPLIER_ADDRESS_UPDATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=endereco, before=before, after=instance_snapshot(endereco), changed_fields=sorted(serializer.validated_data.keys()), metadata={"fornecedor_id": fornecedor.pk}, status_code=200)
+        return Response(FornecedorEnderecoSerializer(endereco).data)
+
+    @action(detail=True, methods=["post"], url_path=r"enderecos/(?P<endereco_id>[^/.]+)/inativar")
+    def endereco_inativar(self, request, pk=None, endereco_id=None):
+        return self._toggle_endereco(request, endereco_id, False, AuditAction.SUPPLIER_ADDRESS_DEACTIVATED)
+
+    @action(detail=True, methods=["post"], url_path=r"enderecos/(?P<endereco_id>[^/.]+)/reativar")
+    def endereco_reativar(self, request, pk=None, endereco_id=None):
+        return self._toggle_endereco(request, endereco_id, True, AuditAction.SUPPLIER_ADDRESS_REACTIVATED)
+
+    def _toggle_endereco(self, request, endereco_id, ativo, action_name):
+        fornecedor = self.get_object()
+        endereco = fornecedor.enderecos.get(pk=endereco_id, empresa=fornecedor.empresa)
+        before = instance_snapshot(endereco)
+        endereco.ativo = ativo
+        endereco.save(update_fields=["ativo", "data_atualizacao"])
+        AuditService.required_success(action_name, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=endereco, before=before, after=instance_snapshot(endereco), changed_fields=["ativo"], metadata={"fornecedor_id": fornecedor.pk}, status_code=200)
+        return Response(FornecedorEnderecoSerializer(endereco).data)
+
+    def perform_destroy(self, instance):
+        impedimentos = self._impedimentos_exclusao(instance)
+        if impedimentos:
+            self._auditar_exclusao_negada(instance, "vinculos", impedimentos)
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
+        before = instance_snapshot(instance)
+        object_id = instance.pk
+        empresa = getattr(instance, "empresa", None)
+        try:
+            instance.delete()
+        except ProtectedError:
+            self._auditar_exclusao_negada(instance, "protected_error")
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
+        except IntegrityError:
+            self._auditar_exclusao_negada(instance, "integrity_error")
+            raise ValidationError({"detail": self.EXCLUSAO_NEGADA_DETAIL})
+        AuditService.required_success(AuditAction.SUPPLIER_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=empresa, app_label="cadastros", model="fornecedor", object_id=object_id, before=before, status_code=204)
+
+    def _impedimentos_exclusao(self, fornecedor):
+        checks = [
+            ("compras", "pedidos_compra"),
+            ("títulos financeiros", "pagar_set"),
+            ("itens de ficha técnica", "itens_ficha_tecnica"),
+            ("itens de ordem de produção", "itens_ordem_producao"),
+        ]
+        impedimentos = []
+        for label, related_name in checks:
+            manager = getattr(fornecedor, related_name, None)
+            if manager is not None and manager.exists():
+                impedimentos.append(f"Possui {label}.")
+        return impedimentos
+
+    def _auditar_exclusao_negada(self, fornecedor, motivo, impedimentos=None):
+        AuditService.denied(
+            AuditAction.SUPPLIER_DELETE_DENIED,
+            category=AuditCategory.CADASTRO,
+            request=self.request,
+            user=self.request.user,
+            instance=fornecedor,
+            metadata={"motivo": motivo, "impedimentos": impedimentos or [], "mensagem": self.EXCLUSAO_NEGADA_DETAIL},
+            error_message=self.EXCLUSAO_NEGADA_DETAIL,
+            status_code=400,
+        )
 
 
 class FuncionariosViewSet(BaseCadastroViewSet):

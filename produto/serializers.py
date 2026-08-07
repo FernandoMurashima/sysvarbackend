@@ -478,6 +478,10 @@ class FichaTecnicaItemSerializer(serializers.ModelSerializer):
                 unidade = produto.unidade
         if fornecedor and fornecedor.empresa_id != empresa_id:
             raise serializers.ValidationError({'fornecedor': 'O fornecedor selecionado pertence a outra empresa.'})
+        if fornecedor and fornecedor.ativo is False and not self.instance:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor inativo não pode ser utilizado em novo item.'})
+        if fornecedor and fornecedor.bloqueio and not self.instance:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor bloqueado não pode ser utilizado em novo item.'})
         if unidade and unidade.empresa_id and unidade.empresa_id != empresa_id:
             raise serializers.ValidationError({'unidade': 'A unidade selecionada pertence a outra empresa.'})
         if quantidade is not None and unidade and not unidade.permite_decimal:
@@ -551,6 +555,21 @@ class OrdemProducaoItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrdemProducaoItem
         fields = '__all__'
+
+    def validate(self, attrs):
+        ordem = attrs.get('ordem', getattr(self.instance, 'ordem', None))
+        fornecedor = attrs.get('fornecedor', getattr(self.instance, 'fornecedor', None))
+        produto = attrs.get('produto', getattr(self.instance, 'produto', None))
+        empresa_id = getattr(ordem, 'empresa_id', None)
+        if fornecedor and empresa_id and fornecedor.empresa_id != empresa_id:
+            raise serializers.ValidationError({'fornecedor': 'O fornecedor selecionado pertence a outra empresa.'})
+        if fornecedor and fornecedor.ativo is False and not self.instance:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor inativo não pode ser utilizado em novo item.'})
+        if fornecedor and fornecedor.bloqueio and not self.instance:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor bloqueado não pode ser utilizado em novo item.'})
+        if produto and empresa_id and produto.empresa_id != empresa_id:
+            raise serializers.ValidationError({'produto': 'O produto selecionado pertence a outra empresa.'})
+        return attrs
 
 
 class OrdemProducaoGradeSerializer(serializers.ModelSerializer):

@@ -1,7 +1,17 @@
 from rest_framework import serializers
 from django.utils import timezone
 
-from .models import Empresa, Loja, Cliente, Fornecedor, Funcionarios, Nat_Lancamento
+from .models import (
+    Empresa,
+    Loja,
+    Cliente,
+    Fornecedor,
+    FornecedorCategoria,
+    FornecedorContato,
+    FornecedorEndereco,
+    Funcionarios,
+    Nat_Lancamento,
+)
 from .validators import (
     cpf_validator,
     cnpj_validator,
@@ -338,6 +348,62 @@ class ClienteSerializer(serializers.ModelSerializer):
 # ---------------------------
 # Fornecedor
 # ---------------------------
+class FornecedorContatoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FornecedorContato
+        fields = "__all__"
+        read_only_fields = ("empresa", "fornecedor", "data_cadastro", "data_atualizacao")
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        email_simple_validator(value)
+        return _norm_email(value)
+
+    def validate_telefone(self, value):
+        if not value:
+            return value
+        telefone_br_validator(value)
+        return _norm_digits(value)
+
+    def validate_whatsapp(self, value):
+        if not value:
+            return value
+        telefone_br_validator(value)
+        return _norm_digits(value)
+
+    def validate_nome(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe o nome do contato.")
+        return value
+
+
+class FornecedorEnderecoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FornecedorEndereco
+        fields = "__all__"
+        read_only_fields = ("empresa", "fornecedor", "data_cadastro", "data_atualizacao")
+
+    def validate_cep(self, value):
+        if not value:
+            return value
+        cep_validator(value)
+        return _norm_digits(value)
+
+    def validate_estado(self, value):
+        value = (value or "").strip().upper()
+        if value and len(value) != 2:
+            raise serializers.ValidationError("Informe a UF com duas letras.")
+        return value or None
+
+    def validate_endereco(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe o endereço.")
+        return value
+
+
 class FornecedorSerializer(serializers.ModelSerializer):
     CATEGORIAS_NORMALIZADAS = {
         "materiaprima": "MATERIA_PRIMA",
@@ -354,9 +420,74 @@ class FornecedorSerializer(serializers.ModelSerializer):
         "outros": "OUTROS",
     }
 
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), required=False)
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+    bloqueado_por_nome = serializers.CharField(source="bloqueado_por.username", read_only=True)
+    categorias = serializers.ListField(child=serializers.CharField(), required=False, write_only=True)
+    categorias_lista = serializers.SerializerMethodField()
+    contatos = FornecedorContatoSerializer(many=True, required=False)
+    enderecos = FornecedorEnderecoSerializer(many=True, required=False)
+    ultima_compra = serializers.DateField(read_only=True)
+    total_comprado = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    quantidade_compras = serializers.IntegerField(read_only=True)
+    ticket_medio = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    saldo_a_pagar = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    dados_bancarios_ocultos = serializers.SerializerMethodField()
+    LIFECYCLE_FIELDS = {
+        "ativo",
+        "bloqueio",
+        "motivo_bloqueio",
+        "observacao_bloqueio",
+        "bloqueado_em",
+        "bloqueado_por",
+    }
+    BANK_FIELDS = {
+        "banco",
+        "agencia",
+        "conta",
+        "tipo_conta",
+        "chave_pix",
+        "favorecido",
+        "documento_favorecido",
+        "observacao_bancaria",
+    }
+
     class Meta:
         model = Fornecedor
         fields = "__all__"
+        read_only_fields = ("bloqueado_em", "bloqueado_por")
+
+    def get_categorias_lista(self, obj):
+        rel = getattr(obj, "categorias_rel", None)
+        if rel is not None:
+            values = [item.categoria for item in rel.all()]
+            if values:
+                return values
+        return [obj.categoria] if obj.categoria else []
+
+    def _pode_ver_banco(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return has_field_permission(user, "fornecedor.dados_bancarios", default_roles=["Admin", "Diretor"])
+
+    def get_dados_bancarios_ocultos(self, obj):
+        return not self._pode_ver_banco()
+
+    def to_internal_value(self, data):
+        mutable = data.copy()
+        if "documento" not in mutable and mutable.get("cnpj"):
+            mutable["documento"] = mutable.get("cnpj")
+        if mutable.get("documento"):
+            mutable["documento"] = _norm_digits(mutable.get("documento"))
+        return super().to_internal_value(mutable)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["categorias"] = data.get("categorias_lista", [])
+        if not self._pode_ver_banco():
+            for field in self.BANK_FIELDS:
+                data[field] = None
+        return data
 
     def validate_categoria(self, value):
         if not value:
@@ -371,9 +502,20 @@ class FornecedorSerializer(serializers.ModelSerializer):
             return codigo
         raise serializers.ValidationError("Categoria de fornecedor inválida.")
 
+    def validate_categorias(self, value):
+        categorias = []
+        for categoria in value or []:
+            codigo = self.validate_categoria(categoria)
+            if codigo and codigo not in categorias:
+                categorias.append(codigo)
+        return categorias
+
+    def validate_documento(self, value):
+        return _norm_digits(value)
+
     def validate_cnpj(self, value):
         if not value:
-            return value
+            return None
         cnpj_validator(value)
         return _norm_digits(value)
 
@@ -400,6 +542,116 @@ class FornecedorSerializer(serializers.ModelSerializer):
             return value
         cep_validator(value)
         return _norm_digits(value)
+
+    def validate_estado(self, value):
+        value = (value or "").strip().upper()
+        if value and len(value) != 2:
+            raise serializers.ValidationError("Informe a UF com duas letras.")
+        return value or None
+
+    def validate_nome_fornecedor(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe o nome do fornecedor.")
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        if not empresa and user and getattr(user, "empresa_id", None):
+            empresa = user.empresa
+            attrs["empresa"] = empresa
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Fornecedor deve pertencer a uma empresa."})
+
+        sent_bank = self.BANK_FIELDS & set(getattr(self, "initial_data", {}) or {})
+        if sent_bank and not self._pode_ver_banco():
+            raise serializers.ValidationError({field: "Você não tem permissão para alterar dados bancários." for field in sorted(sent_bank)})
+
+        lifecycle_requested = self.LIFECYCLE_FIELDS & set(getattr(self, "initial_data", {}) or {})
+        if lifecycle_requested and not self.context.get("allow_lifecycle_fields"):
+            errors = {}
+            for field in sorted(lifecycle_requested):
+                if field == "ativo":
+                    errors[field] = "O status do fornecedor deve ser alterado pela ação Ativar ou Inativar."
+                else:
+                    errors[field] = "O bloqueio do fornecedor deve ser alterado pela ação Bloquear ou Desbloquear."
+            raise serializers.ValidationError(errors)
+
+        tipo = attrs.get("tipo_pessoa", getattr(self.instance, "tipo_pessoa", Fornecedor.TIPO_PESSOA_JURIDICA))
+        documento = _norm_digits(attrs.get("documento", attrs.get("cnpj", getattr(self.instance, "documento", None))))
+        attrs["documento"] = documento
+        if tipo == Fornecedor.TIPO_PESSOA_JURIDICA:
+            attrs["cnpj"] = documento
+        elif "cnpj" in attrs and not attrs.get("cnpj"):
+            attrs["cnpj"] = None
+        if documento:
+            try:
+                if tipo == Fornecedor.TIPO_PESSOA_FISICA:
+                    cpf_validator(documento)
+                elif tipo == Fornecedor.TIPO_PESSOA_JURIDICA:
+                    cnpj_validator(documento)
+                else:
+                    raise serializers.ValidationError({"tipo_pessoa": "Tipo de pessoa inválido."})
+            except Exception:
+                label = "CPF" if tipo == Fornecedor.TIPO_PESSOA_FISICA else "CNPJ"
+                raise serializers.ValidationError({"documento": f"{label} inválido."})
+            qs = Fornecedor.objects.filter(empresa=empresa, documento=documento)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                label = "CPF" if tipo == Fornecedor.TIPO_PESSOA_FISICA else "CNPJ"
+                raise serializers.ValidationError({"documento": f"Já existe um fornecedor com este {label} nesta empresa."})
+
+        natureza = attrs.get("natureza_padrao", getattr(self.instance, "natureza_padrao", None))
+        if natureza and natureza.empresa_id and natureza.empresa_id != empresa.id:
+            raise serializers.ValidationError({"natureza_padrao": "A natureza deve pertencer à mesma empresa do fornecedor."})
+        return attrs
+
+    def create(self, validated_data):
+        categorias = validated_data.pop("categorias", None)
+        contatos = validated_data.pop("contatos", [])
+        enderecos = validated_data.pop("enderecos", [])
+        fornecedor = super().create(validated_data)
+        self._sync_relacionamentos(fornecedor, categorias, contatos, enderecos, replace_children=True)
+        return fornecedor
+
+    def update(self, instance, validated_data):
+        categorias = validated_data.pop("categorias", None)
+        contatos = validated_data.pop("contatos", None)
+        enderecos = validated_data.pop("enderecos", None)
+        fornecedor = super().update(instance, validated_data)
+        self._sync_relacionamentos(fornecedor, categorias, contatos, enderecos, replace_children=False)
+        return fornecedor
+
+    def _sync_relacionamentos(self, fornecedor, categorias, contatos, enderecos, replace_children=False):
+        if categorias is not None:
+            FornecedorCategoria.objects.filter(fornecedor=fornecedor).exclude(categoria__in=categorias).delete()
+            for categoria in categorias:
+                FornecedorCategoria.objects.get_or_create(
+                    fornecedor=fornecedor,
+                    empresa=fornecedor.empresa,
+                    categoria=categoria,
+                )
+            fornecedor.categoria = categorias[0] if categorias else None
+            fornecedor.save(update_fields=["categoria"])
+        elif fornecedor.categoria and not fornecedor.categorias_rel.exists():
+            FornecedorCategoria.objects.get_or_create(
+                fornecedor=fornecedor,
+                empresa=fornecedor.empresa,
+                categoria=fornecedor.categoria,
+            )
+        if contatos is not None:
+            if replace_children:
+                fornecedor.contatos.all().delete()
+            for contato_data in contatos:
+                FornecedorContato.objects.create(fornecedor=fornecedor, empresa=fornecedor.empresa, **contato_data)
+        if enderecos is not None:
+            if replace_children:
+                fornecedor.enderecos.all().delete()
+            for endereco_data in enderecos:
+                FornecedorEndereco.objects.create(fornecedor=fornecedor, empresa=fornecedor.empresa, **endereco_data)
 
 # ---------------------------
 # Funcionários

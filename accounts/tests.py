@@ -79,7 +79,7 @@ class MultiEmpresaIsolationTests(TestCase):
             empresa=empresa,
             nome_fornecedor=f"Fornecedor Isolamento {sufixo}",
             apelido=f"FOR{sufixo}",
-            cnpj=f"{'33' if sufixo == 'A' else '44'}3333330001{'91' if sufixo == 'A' else '02'}",
+            cnpj="04252011000110" if sufixo == "A" else "11444777000161",
             cidade="Sao Paulo",
         )
         vendedor = Funcionarios.objects.create(

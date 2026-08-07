@@ -110,6 +110,10 @@ class PedidoCompraViewSet(BaseViewSet):
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
         if loja.empresa_id and fornecedor.empresa_id and loja.empresa_id != fornecedor.empresa_id:
             raise ValidationError({"fornecedor": "O fornecedor informado pertence a outra empresa."})
+        if fornecedor.ativo is False:
+            raise ValidationError({"fornecedor": "Fornecedor inativo não pode ser utilizado em novo pedido."})
+        if fornecedor.bloqueio:
+            raise ValidationError({"fornecedor": "Fornecedor bloqueado não pode ser utilizado em novo pedido."})
         serializer.save(empresa=loja.empresa)
 
     def perform_update(self, serializer):
@@ -123,6 +127,10 @@ class PedidoCompraViewSet(BaseViewSet):
             raise ValidationError({"empresa": "Pedido pertence a outra empresa."})
         if loja.empresa_id and fornecedor.empresa_id and loja.empresa_id != fornecedor.empresa_id:
             raise ValidationError({"fornecedor": "O fornecedor informado pertence a outra empresa."})
+        if serializer.instance.status == "AB" and fornecedor.ativo is False:
+            raise ValidationError({"fornecedor": "Fornecedor inativo não pode ser utilizado em novo pedido."})
+        if serializer.instance.status == "AB" and fornecedor.bloqueio:
+            raise ValidationError({"fornecedor": "Fornecedor bloqueado não pode ser utilizado em novo pedido."})
         serializer.save(empresa=loja.empresa)
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
