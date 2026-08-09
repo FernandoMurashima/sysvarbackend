@@ -1038,3 +1038,81 @@ class FornecedorFase1Tests(OperacionalBaseTest):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["dados_bancarios_ocultos"])
         self.assertIsNone(res.data["banco"])
+
+    def test_contato_e_endereco_principal_unico_por_tipo_via_endpoint(self):
+        fornecedor = self._fornecedor()
+        self.client.force_authenticate(self.user_edit)
+
+        contato_a = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/contatos/", {"nome": "Ana", "tipo": "COMERCIAL", "principal": True}, format="json")
+        contato_b = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/contatos/", {"nome": "Bruno", "tipo": "COMERCIAL", "principal": True}, format="json")
+        contato_c = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/contatos/", {"nome": "Carla", "tipo": "FINANCEIRO", "principal": True}, format="json")
+        endereco_a = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/enderecos/", {"tipo": "FISCAL", "endereco": "Rua A", "principal": True}, format="json")
+        endereco_b = self.client.post(f"/api/cadastros/fornecedores/{fornecedor.pk}/enderecos/", {"tipo": "FISCAL", "endereco": "Rua B", "principal": True}, format="json")
+
+        self.assertEqual(contato_a.status_code, 201)
+        self.assertEqual(contato_b.status_code, 201)
+        self.assertEqual(contato_c.status_code, 201)
+        self.assertEqual(endereco_a.status_code, 201)
+        self.assertEqual(endereco_b.status_code, 201)
+        self.assertEqual(fornecedor.contatos.filter(tipo="COMERCIAL", ativo=True, principal=True).count(), 1)
+        self.assertEqual(fornecedor.contatos.filter(tipo="FINANCEIRO", ativo=True, principal=True).count(), 1)
+        self.assertEqual(fornecedor.enderecos.filter(tipo="FISCAL", ativo=True, principal=True).count(), 1)
+
+    def test_indicador_e_financeiro_calculam_saldo_real_aberto(self):
+        from financeiro.models import Pagar, PagarItem
+
+        fornecedor = self._fornecedor()
+        natureza = Nat_Lancamento.objects.create(
+            empresa=self.empresa,
+            codigo="SALDO",
+            categoria_principal="Compras",
+            subcategoria="Fornecedores",
+            descricao="Fornecedor",
+            tipo="Despesa",
+            status="Ativo",
+            tipo_natureza="DEBITO",
+            natureza_operacao="DESPESA",
+        )
+        titulo = Pagar.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            idfornecedor=fornecedor,
+            Titulo="Saldo fornecedor",
+            Valor_total=Decimal("450.00"),
+            Idnatureza=natureza,
+        )
+        PagarItem.objects.create(Idpagar=titulo, parcela_n=1, status=PagarItem.STATUS_EFETIVO, Data_vencimento=timezone.localdate(), valor_parcela=Decimal("100.00"), valor_baixa=Decimal("30.00"), Idnatureza=natureza)
+        PagarItem.objects.create(Idpagar=titulo, parcela_n=2, status=PagarItem.STATUS_BAIXADO, Data_vencimento=timezone.localdate(), valor_parcela=Decimal("200.00"), valor_baixa=Decimal("200.00"), Idnatureza=natureza)
+        PagarItem.objects.create(Idpagar=titulo, parcela_n=3, status=PagarItem.STATUS_CANCELADO, Data_vencimento=timezone.localdate(), valor_parcela=Decimal("150.00"), Idnatureza=natureza)
+        self.client.force_authenticate(self.user_edit)
+
+        detalhe = self.client.get(f"/api/cadastros/fornecedores/{fornecedor.pk}/")
+        financeiro = self.client.get(f"/api/cadastros/fornecedores/{fornecedor.pk}/financeiro/")
+        indicadores = self.client.get("/api/cadastros/fornecedores/indicadores/")
+
+        self.assertEqual(detalhe.status_code, 200)
+        self.assertEqual(Decimal(str(detalhe.data["saldo_a_pagar"])), Decimal("70.00"))
+        self.assertEqual(financeiro.status_code, 200)
+        saldos = [Decimal(str(item["saldo"])) for item in financeiro.data["results"]]
+        self.assertEqual(saldos, [Decimal("70.00"), Decimal("0.00"), Decimal("0.00")])
+        self.assertEqual(indicadores.status_code, 200)
+        self.assertEqual(Decimal(str(indicadores.data["saldo_a_pagar"])), Decimal("70.00"))
+
+    def test_paginacao_filtros_e_duplicidade_respeitam_empresa(self):
+        self._fornecedor(nome="Alpha Aviamento", documento="04252011000110", categoria="AVIAMENTO")
+        self._fornecedor(nome="Beta Facção", documento="11444777000161", categoria="FACCAO", tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA)
+        self._fornecedor(nome="Alpha Outra", documento="11222333000181", empresa=self.outra)
+        self.client.force_authenticate(self.user_edit)
+
+        pagina = self.client.get("/api/cadastros/fornecedores/", {"page": 1, "page_size": 1, "search": "Alpha"})
+        filtro_categoria = self.client.get("/api/cadastros/fornecedores/", {"categoria": "FACCAO"})
+        duplicados = self.client.get("/api/cadastros/fornecedores/possiveis-duplicados/", {"nome": "Alpha"})
+
+        self.assertEqual(pagina.status_code, 200)
+        self.assertEqual(pagina.data["count"], 1)
+        self.assertEqual(len(pagina.data["results"]), 1)
+        self.assertEqual(filtro_categoria.status_code, 200)
+        self.assertEqual(filtro_categoria.data["count"], 1)
+        self.assertEqual(duplicados.status_code, 200)
+        self.assertEqual(len(duplicados.data), 1)
+        self.assertEqual(duplicados.data[0]["nome_fornecedor"], "Alpha Aviamento")

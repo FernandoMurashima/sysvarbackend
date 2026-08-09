@@ -924,13 +924,27 @@ class FornecedorViewSet(BaseCadastroViewSet):
                 )
                 .values("fornecedor_id")
             )
+            saldo_item = Case(
+                When(
+                    status__in=[PagarItem.STATUS_BAIXADO, PagarItem.STATUS_CANCELADO],
+                    then=Value(Decimal("0.00")),
+                ),
+                When(
+                    valor_baixa__gte=F("valor_parcela"),
+                    then=Value(Decimal("0.00")),
+                ),
+                default=ExpressionWrapper(
+                    F("valor_parcela") - Coalesce(F("valor_baixa"), Value(Decimal("0.00"))),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                ),
+                output_field=DecimalField(max_digits=18, decimal_places=2),
+            )
             itens_abertos = (
                 PagarItem.objects
                 .filter(
                     Idpagar__idfornecedor_id=OuterRef("pk"),
                     Idpagar__empresa_id=OuterRef("empresa_id"),
                 )
-                .exclude(status__in=[PagarItem.STATUS_BAIXADO, PagarItem.STATUS_CANCELADO])
                 .values("Idpagar__idfornecedor_id")
             )
             decimal_field = DecimalField(max_digits=18, decimal_places=2)
@@ -945,7 +959,7 @@ class FornecedorViewSet(BaseCadastroViewSet):
                 output_field=IntegerField(),
             )
             saldo = Coalesce(
-                Subquery(itens_abertos.annotate(total=Sum("valor_parcela")).values("total")[:1], output_field=decimal_field),
+                Subquery(itens_abertos.annotate(total=Sum(saldo_item)).values("total")[:1], output_field=decimal_field),
                 Value(Decimal("0.00")),
                 output_field=decimal_field,
             )
@@ -1026,7 +1040,7 @@ class FornecedorViewSet(BaseCadastroViewSet):
         if atual:
             qs = qs.exclude(pk=atual)
         data = []
-        for fornecedor in qs.only("id", "nome_fornecedor", "apelido", "documento")[:500]:
+        for fornecedor in qs[:500]:
             candidatos = [fornecedor.nome_fornecedor, fornecedor.apelido]
             if any(nome and (nome == self._normalizar_nome(c) or nome in self._normalizar_nome(c) or self._normalizar_nome(c) in nome) for c in candidatos if c):
                 data.append({"id": fornecedor.pk, "nome_fornecedor": fornecedor.nome_fornecedor, "apelido": fornecedor.apelido, "documento": fornecedor.documento})
@@ -1126,6 +1140,12 @@ class FornecedorViewSet(BaseCadastroViewSet):
         qs = PagarItem.objects.filter(Idpagar__idfornecedor=fornecedor, Idpagar__empresa_id=fornecedor.empresa_id).select_related("Idpagar", "Idpagar__idloja", "Idnatureza").order_by("Data_vencimento", "Idpagaritem")
         page = self.paginate_queryset(qs)
         itens = page if page is not None else qs
+        def saldo_item(item):
+            if item.status in [PagarItem.STATUS_BAIXADO, PagarItem.STATUS_CANCELADO]:
+                return Decimal("0.00")
+            saldo = Decimal(item.valor_parcela or 0) - Decimal(item.valor_baixa or 0)
+            return max(saldo, Decimal("0.00"))
+
         data = [{
             "id": item.Idpagaritem,
             "titulo_id": item.Idpagar_id,
@@ -1137,6 +1157,7 @@ class FornecedorViewSet(BaseCadastroViewSet):
             "vencimento": item.Data_vencimento,
             "valor": str(item.valor_parcela),
             "valor_baixa": str(item.valor_baixa or Decimal("0.00")),
+            "saldo": str(saldo_item(item)),
             "natureza": getattr(item.Idnatureza, "descricao", None),
         } for item in itens]
         if page is not None:

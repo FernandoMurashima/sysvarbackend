@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from cadastros.validators import (
@@ -812,14 +812,15 @@ class FornecedorContato(models.Model):
         if self.fornecedor_id and not self.empresa_id:
             self.empresa = self.fornecedor.empresa
         self.full_clean()
-        super().save(*args, **kwargs)
-        if self.principal:
-            FornecedorContato.objects.filter(
-                empresa=self.empresa,
-                fornecedor=self.fornecedor,
-                tipo=self.tipo,
-                principal=True,
-            ).exclude(pk=self.pk).update(principal=False)
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if self.principal:
+                FornecedorContato.objects.select_for_update().filter(
+                    empresa=self.empresa,
+                    fornecedor=self.fornecedor,
+                    tipo=self.tipo,
+                    principal=True,
+                ).exclude(pk=self.pk).update(principal=False)
 
 
 class FornecedorEndereco(models.Model):
@@ -875,14 +876,15 @@ class FornecedorEndereco(models.Model):
         if self.fornecedor_id and not self.empresa_id:
             self.empresa = self.fornecedor.empresa
         self.full_clean()
-        super().save(*args, **kwargs)
-        if self.principal:
-            FornecedorEndereco.objects.filter(
-                empresa=self.empresa,
-                fornecedor=self.fornecedor,
-                tipo=self.tipo,
-                principal=True,
-            ).exclude(pk=self.pk).update(principal=False)
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if self.principal:
+                FornecedorEndereco.objects.select_for_update().filter(
+                    empresa=self.empresa,
+                    fornecedor=self.fornecedor,
+                    tipo=self.tipo,
+                    principal=True,
+                ).exclude(pk=self.pk).update(principal=False)
 
 
 class Funcionarios(models.Model):
