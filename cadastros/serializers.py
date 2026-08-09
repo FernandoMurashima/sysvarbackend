@@ -433,6 +433,14 @@ class FornecedorSerializer(serializers.ModelSerializer):
     ticket_medio = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     saldo_a_pagar = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     dados_bancarios_ocultos = serializers.SerializerMethodField()
+    contribuinte_icms_descricao = serializers.CharField(source="get_contribuinte_icms_display", read_only=True)
+    prazo_padrao_descricao = serializers.CharField(source="prazo_padrao_pagamento_ref.descricao", read_only=True)
+    prazo_padrao_codigo = serializers.CharField(source="prazo_padrao_pagamento_ref.codigo", read_only=True)
+    conta_contabil_codigo = serializers.CharField(source="conta_contabil_padrao.codigo", read_only=True)
+    conta_contabil_descricao = serializers.CharField(source="conta_contabil_padrao.descricao", read_only=True)
+    natureza_padrao_codigo = serializers.CharField(source="natureza_padrao.codigo", read_only=True)
+    natureza_padrao_descricao = serializers.CharField(source="natureza_padrao.descricao", read_only=True)
+    tipo_conta_descricao = serializers.CharField(source="get_tipo_conta_display", read_only=True)
     LIFECYCLE_FIELDS = {
         "ativo",
         "bloqueio",
@@ -607,6 +615,24 @@ class FornecedorSerializer(serializers.ModelSerializer):
         natureza = attrs.get("natureza_padrao", getattr(self.instance, "natureza_padrao", None))
         if natureza and natureza.empresa_id and natureza.empresa_id != empresa.id:
             raise serializers.ValidationError({"natureza_padrao": "A natureza deve pertencer à mesma empresa do fornecedor."})
+        if natureza and getattr(natureza, "ativo", True) is False:
+            raise serializers.ValidationError({"natureza_padrao": "A natureza selecionada está inativa."})
+
+        prazo = attrs.get("prazo_padrao_pagamento_ref", getattr(self.instance, "prazo_padrao_pagamento_ref", None))
+        if prazo and prazo.empresa_id and prazo.empresa_id != empresa.id:
+            raise serializers.ValidationError({"prazo_padrao_pagamento_ref": "O prazo deve pertencer à mesma empresa do fornecedor."})
+        if prazo and getattr(prazo, "ativo", True) is False:
+            raise serializers.ValidationError({"prazo_padrao_pagamento_ref": "O prazo selecionado está inativo."})
+        if prazo:
+            attrs["prazo_padrao_pagamento"] = prazo.pk
+
+        conta_contabil = attrs.get("conta_contabil_padrao", getattr(self.instance, "conta_contabil_padrao", None))
+        if conta_contabil and conta_contabil.empresa_id and conta_contabil.empresa_id != empresa.id:
+            raise serializers.ValidationError({"conta_contabil_padrao": "A conta contábil deve pertencer à mesma empresa do fornecedor."})
+        if conta_contabil and (not getattr(conta_contabil, "ativa", True) or not getattr(conta_contabil, "analitica", True)):
+            raise serializers.ValidationError({"conta_contabil_padrao": "Selecione uma conta contábil analítica e ativa."})
+        if conta_contabil:
+            attrs["conta_contabil"] = conta_contabil.codigo
         return attrs
 
     def create(self, validated_data):

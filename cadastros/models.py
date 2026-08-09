@@ -578,6 +578,11 @@ class Fornecedor(models.Model):
         ("PAGAMENTO", "Conta de pagamento"),
         ("OUTRA", "Outra"),
     )
+    CONTRIBUINTE_ICMS_CHOICES = (
+        ("SIM", "Sim"),
+        ("NAO", "Não"),
+        ("ISENTO", "Isento"),
+    )
 
     empresa = models.ForeignKey(
         Empresa,
@@ -623,11 +628,25 @@ class Fornecedor(models.Model):
     mala_direta = models.BooleanField(default=False, db_index=True)
     inscricao_estadual = models.CharField(max_length=20, null=True, blank=True)
     inscricao_municipal = models.CharField(max_length=20, null=True, blank=True)
-    contribuinte_icms = models.CharField(max_length=20, null=True, blank=True)
+    contribuinte_icms = models.CharField(max_length=20, choices=CONTRIBUINTE_ICMS_CHOICES, null=True, blank=True)
     site = models.CharField(max_length=120, null=True, blank=True)
     prazo_padrao_pagamento = models.PositiveIntegerField(null=True, blank=True)
+    prazo_padrao_pagamento_ref = models.ForeignKey(
+        "financeiro.PrazoPagamento",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="fornecedores_padrao",
+    )
     observacoes_comerciais = models.TextField(null=True, blank=True)
     conta_contabil = models.CharField(max_length=50, null=True, blank=True)
+    conta_contabil_padrao = models.ForeignKey(
+        "cadastros.PlanoContabil",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="fornecedores_padrao",
+    )
     natureza_padrao = models.ForeignKey(
         "cadastros.Nat_Lancamento",
         on_delete=models.PROTECT,
@@ -685,6 +704,18 @@ class Fornecedor(models.Model):
                 raise ValidationError({"documento": "CPF inválido."})
             if self.tipo_pessoa == self.TIPO_PESSOA_JURIDICA and not check_cnpj(self.documento):
                 raise ValidationError({"documento": "CNPJ inválido."})
+        if self.prazo_padrao_pagamento_ref_id and self.prazo_padrao_pagamento_ref.empresa_id != self.empresa_id:
+            raise ValidationError({"prazo_padrao_pagamento_ref": "O prazo deve pertencer à mesma empresa do fornecedor."})
+        if self.conta_contabil_padrao_id:
+            if self.conta_contabil_padrao.empresa_id != self.empresa_id:
+                raise ValidationError({"conta_contabil_padrao": "A conta contábil deve pertencer à mesma empresa do fornecedor."})
+            if not self.conta_contabil_padrao.ativa or not self.conta_contabil_padrao.analitica:
+                raise ValidationError({"conta_contabil_padrao": "Selecione uma conta contábil analítica e ativa."})
+        if self.natureza_padrao_id:
+            if self.natureza_padrao.empresa_id != self.empresa_id:
+                raise ValidationError({"natureza_padrao": "A natureza deve pertencer à mesma empresa do fornecedor."})
+            if getattr(self.natureza_padrao, "ativo", True) is False:
+                raise ValidationError({"natureza_padrao": "Selecione uma natureza ativa."})
 
     def save(self, *args, **kwargs):
         self._normalizar_campos()
@@ -722,6 +753,12 @@ class Fornecedor(models.Model):
             value = getattr(self, field, None)
             if isinstance(value, str):
                 setattr(self, field, value.strip() or None)
+        self.contribuinte_icms = (self.contribuinte_icms or "").strip().upper() or None
+        self.tipo_conta = (self.tipo_conta or "").strip().upper() or None
+        if self.prazo_padrao_pagamento_ref_id:
+            self.prazo_padrao_pagamento = self.prazo_padrao_pagamento_ref_id
+        if self.conta_contabil_padrao_id:
+            self.conta_contabil = self.conta_contabil_padrao.codigo
         self.email = (self.email or "").strip().lower() or None
         self.telefone1 = only_digits(self.telefone1 or "") or None
         self.telefone2 = only_digits(self.telefone2 or "") or None

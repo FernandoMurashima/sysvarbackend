@@ -873,7 +873,13 @@ class ClienteViewSet(BaseCadastroViewSet):
 
 class FornecedorViewSet(BaseCadastroViewSet):
     EXCLUSAO_NEGADA_DETAIL = "Este fornecedor possui compras ou outros registros vinculados e não pode ser excluído. Utilize a inativação."
-    queryset = Fornecedor.objects.select_related("empresa", "bloqueado_por", "natureza_padrao").prefetch_related("categorias_rel", "contatos", "enderecos").all()
+    queryset = Fornecedor.objects.select_related(
+        "empresa",
+        "bloqueado_por",
+        "prazo_padrao_pagamento_ref",
+        "conta_contabil_padrao",
+        "natureza_padrao",
+    ).prefetch_related("categorias_rel", "contatos", "enderecos").all()
     serializer_class = FornecedorSerializer
 
     filterset_fields = ["ativo", "empresa", "estado", "cidade", "categoria", "bloqueio", "mala_direta", "cnpj", "documento", "tipo_pessoa"]

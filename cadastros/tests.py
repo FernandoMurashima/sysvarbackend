@@ -15,10 +15,10 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
-from cadastros.models import Cliente, Empresa, EmpresaContrato, Fornecedor, FornecedorContato, FornecedorEndereco, Funcionarios, Loja, ModuloSistema, Nat_Lancamento
+from cadastros.models import Cliente, Empresa, EmpresaContrato, Fornecedor, FornecedorContato, FornecedorEndereco, Funcionarios, Loja, ModuloSistema, Nat_Lancamento, PlanoContabil
 from cadastros.services import ClientePadraoService
 from fiscal.models import VendaDevolucao, VendaPdv, VendaPdvItem, VendaPdvPagamento
-from financeiro.models import CashbackMovimento
+from financeiro.models import CashbackMovimento, PrazoPagamento
 from produto.models import ConfigEan, Cor, Grade, Produto, ProdutoDetalhe, Tamanho, Unidade
 
 
@@ -922,6 +922,87 @@ class FornecedorFase1Tests(OperacionalBaseTest):
         self.assertEqual(fornecedor.contatos.filter(tipo="COMERCIAL", principal=True).count(), 1)
         self.assertEqual(fornecedor.contatos.filter(tipo="FINANCEIRO", principal=True).count(), 1)
         self.assertEqual(fornecedor.enderecos.filter(tipo="FISCAL", principal=True).count(), 1)
+
+    def test_padroes_fiscais_financeiros_estruturados_e_multiempresa(self):
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30", descricao="30 dias", num_parcelas=1, intervalo_dias=30, ativo=True)
+        prazo_outra = PrazoPagamento.objects.create(empresa=self.outra, codigo="60", descricao="60 dias", num_parcelas=1, intervalo_dias=60, ativo=True)
+        conta = PlanoContabil.objects.create(empresa=self.empresa, codigo="2.1.01.001", descricao="Fornecedores Nacionais", classe=PlanoContabil.CLASSE_PASSIVO, natureza=PlanoContabil.NATUREZA_CREDITO, analitica=True, ativa=True)
+        conta_outra = PlanoContabil.objects.create(empresa=self.outra, codigo="2.1.01.999", descricao="Fornecedor Outra Empresa", classe=PlanoContabil.CLASSE_PASSIVO, natureza=PlanoContabil.NATUREZA_CREDITO, analitica=True, ativa=True)
+        natureza = Nat_Lancamento.objects.create(empresa=self.empresa, codigo="FORN", categoria_principal="Financeiro", subcategoria="Fornecedores", descricao="Pagamento fornecedor", tipo="DESPESA", status="ATIVO", tipo_natureza="DEBITO", natureza_operacao="DESPESA", ativo=True)
+        natureza_outra = Nat_Lancamento.objects.create(empresa=self.outra, codigo="OUTR", categoria_principal="Financeiro", subcategoria="Fornecedores", descricao="Outra natureza", tipo="DESPESA", status="ATIVO", tipo_natureza="DEBITO", natureza_operacao="DESPESA", ativo=True)
+
+        self.client.force_authenticate(self.user_edit)
+        res = self.client.post("/api/cadastros/fornecedores/", {
+            "nome_fornecedor": "Fornecedor Padroes",
+            "tipo_pessoa": "PJ",
+            "documento": "11444777000161",
+            "contribuinte_icms": "SIM",
+            "prazo_padrao_pagamento_ref": prazo.pk,
+            "conta_contabil_padrao": conta.pk,
+            "natureza_padrao": natureza.pk,
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["contribuinte_icms_descricao"], "Sim")
+        self.assertEqual(res.data["prazo_padrao_descricao"], "30 dias")
+        self.assertEqual(res.data["conta_contabil_codigo"], "2.1.01.001")
+        self.assertEqual(res.data["natureza_padrao_descricao"], "Pagamento fornecedor")
+        fornecedor = Fornecedor.objects.get(pk=res.data["id"])
+        self.assertEqual(fornecedor.prazo_padrao_pagamento_ref_id, prazo.pk)
+        self.assertEqual(fornecedor.prazo_padrao_pagamento, prazo.pk)
+        self.assertEqual(fornecedor.conta_contabil_padrao_id, conta.pk)
+        self.assertEqual(fornecedor.conta_contabil, conta.codigo)
+
+        patch = self.client.patch(f"/api/cadastros/fornecedores/{fornecedor.pk}/", {"apelido": "Mantem"}, format="json")
+        self.assertEqual(patch.status_code, 200)
+        fornecedor.refresh_from_db()
+        self.assertEqual(fornecedor.prazo_padrao_pagamento_ref_id, prazo.pk)
+        self.assertEqual(fornecedor.conta_contabil_padrao_id, conta.pk)
+        self.assertEqual(fornecedor.natureza_padrao_id, natureza.pk)
+
+        for campo, valor in [
+            ("prazo_padrao_pagamento_ref", prazo_outra.pk),
+            ("conta_contabil_padrao", conta_outra.pk),
+            ("natureza_padrao", natureza_outra.pk),
+        ]:
+            cruzado = self.client.post("/api/cadastros/fornecedores/", {
+                "nome_fornecedor": f"Fornecedor {campo}",
+                "tipo_pessoa": "PJ",
+                campo: valor,
+            }, format="json")
+            self.assertEqual(cruzado.status_code, 400)
+            self.assertIn(campo, cruzado.data)
+
+        invalido = self.client.post("/api/cadastros/fornecedores/", {
+            "nome_fornecedor": "ICMS Invalido",
+            "tipo_pessoa": "PJ",
+            "contribuinte_icms": "TALVEZ",
+        }, format="json")
+        self.assertEqual(invalido.status_code, 400)
+        self.assertIn("contribuinte_icms", invalido.data)
+
+        self.client.force_authenticate(self.superuser)
+        for tipo_conta, descricao in [
+            ("CORRENTE", "Conta corrente"),
+            ("POUPANCA", "Conta poupança"),
+            ("PAGAMENTO", "Conta de pagamento"),
+            ("OUTRA", "Outra"),
+        ]:
+            conta_res = self.client.post("/api/cadastros/fornecedores/", {
+                "empresa": self.empresa.pk,
+                "nome_fornecedor": f"Fornecedor {tipo_conta}",
+                "tipo_pessoa": "PJ",
+                "tipo_conta": tipo_conta,
+            }, format="json")
+            self.assertEqual(conta_res.status_code, 201)
+            self.assertEqual(conta_res.data["tipo_conta_descricao"], descricao)
+        tipo_invalido = self.client.post("/api/cadastros/fornecedores/", {
+            "empresa": self.empresa.pk,
+            "nome_fornecedor": "Fornecedor CC",
+            "tipo_pessoa": "PJ",
+            "tipo_conta": "CC",
+        }, format="json")
+        self.assertEqual(tipo_invalido.status_code, 400)
+        self.assertIn("tipo_conta", tipo_invalido.data)
 
     def test_ciclo_de_vida_e_historico_auditado(self):
         fornecedor = self._fornecedor()
