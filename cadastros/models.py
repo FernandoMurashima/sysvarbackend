@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from cadastros.validators import (
@@ -516,7 +517,7 @@ class Cliente(models.Model):
 
     def save(self, *args, **kwargs):
         self._normalizar_campos()
-        self.full_clean()
+        self.cpf = only_digits(self.cpf or "") or None
         return super().save(*args, **kwargs)
 
     def _normalizar_campos(self):
@@ -719,7 +720,7 @@ class Fornecedor(models.Model):
 
     def save(self, *args, **kwargs):
         self._normalizar_campos()
-        self.full_clean()
+        self.cpf = only_digits(self.cpf or "") or None
         return super().save(*args, **kwargs)
 
     def _normalizar_campos(self):
@@ -924,7 +925,57 @@ class FornecedorEndereco(models.Model):
                 ).exclude(pk=self.pk).update(principal=False)
 
 
+class Cargo(models.Model):
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="cargos", db_index=True)
+    codigo = models.CharField(max_length=20)
+    descricao = models.CharField(max_length=80, db_index=True)
+    ativo = models.BooleanField(default=True, db_index=True)
+    participa_vendas = models.BooleanField(default=False, db_index=True)
+    permite_comissao = models.BooleanField(default=False, db_index=True)
+    autoridade_operacional_loja = models.BooleanField(default=False, db_index=True)
+    permite_multiplas_lojas = models.BooleanField(default=False, db_index=True)
+    gerencial = models.BooleanField(default=False, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    data_atualizacao = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["descricao"]
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "codigo"], name="uq_empresa_cargo_codigo"),
+        ]
+        indexes = [
+            models.Index(fields=["empresa", "ativo"], name="idx_cargo_empresa_ativo"),
+            models.Index(fields=["empresa", "descricao"], name="idx_cargo_empresa_desc"),
+        ]
+
+    def clean(self):
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Cargo deve pertencer a uma empresa."})
+        self.codigo = (self.codigo or "").strip().upper()
+        self.descricao = (self.descricao or "").strip()
+        if not self.codigo:
+            raise ValidationError({"codigo": "Informe o código do cargo."})
+        if not self.descricao:
+            raise ValidationError({"descricao": "Informe a descrição do cargo."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.descricao
+
+
 class Funcionarios(models.Model):
+    SITUACAO_ATIVO = "ATIVO"
+    SITUACAO_AFASTADO = "AFASTADO"
+    SITUACAO_DESLIGADO = "DESLIGADO"
+    SITUACAO_CHOICES = [
+        (SITUACAO_ATIVO, "Ativo"),
+        (SITUACAO_AFASTADO, "Afastado"),
+        (SITUACAO_DESLIGADO, "Desligado"),
+    ]
+
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,
@@ -933,29 +984,131 @@ class Funcionarios(models.Model):
         related_name="funcionarios",
         db_index=True,
     )
+    matricula = models.CharField(max_length=6, null=True, blank=True, db_index=True)
     nomefuncionario = models.CharField(max_length=50, db_index=True)
     apelido = models.CharField(max_length=20, null=True, blank=True, db_index=True)
     cpf = models.CharField(max_length=15, null=True, blank=True, validators=[cpf_validator], db_index=True)
     inicio = models.DateField(null=True, blank=True, db_index=True)
     fim = models.DateField(null=True, blank=True, db_index=True)
+    cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, null=True, blank=True, related_name="funcionarios", db_index=True)
+    # Legado/depreciado: preserva texto antigo. A fonte funcional passa a ser cargo.
     categoria = models.CharField(max_length=15, null=True, blank=True, db_index=True)
+    # Legado/depreciado: metas serão tratadas em módulo próprio de vendas.
     meta = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, db_index=True)
+    situacao = models.CharField(max_length=12, choices=SITUACAO_CHOICES, default=SITUACAO_ATIVO, db_index=True)
+    participa_vendas = models.BooleanField(default=False, db_index=True)
+    comissionado = models.BooleanField(default=False, db_index=True)
     comissao_percentual = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     salario = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     idloja = models.ForeignKey(Loja, on_delete=models.CASCADE, null=True, blank=True, related_name='funcionarios', db_index=True)
+    lojas_supervisionadas = models.ManyToManyField(Loja, blank=True, related_name="funcionarios_abrangencia")
+    todas_lojas_da_empresa = models.BooleanField(default=False, db_index=True)
+    usuario = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="funcionario")
+    telefone = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
+    whatsapp = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
+    email = models.CharField(max_length=80, null=True, blank=True, validators=[email_simple_validator])
+    data_nascimento = models.DateField(null=True, blank=True)
+    endereco = models.CharField(max_length=160, null=True, blank=True)
+    observacoes = models.TextField(null=True, blank=True)
     ativo = models.BooleanField(default=True, db_index=True)
     data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    data_atualizacao = models.DateTimeField(auto_now=True)
 
     class Meta:
         indexes = [
+            models.Index(fields=["empresa", "matricula"], name="idx_func_emp_matricula"),
+            models.Index(fields=["empresa", "cpf"], name="idx_func_emp_cpf"),
+            models.Index(fields=["empresa", "situacao"], name="idx_func_emp_situacao"),
             models.Index(fields=["idloja"]),
             models.Index(fields=["categoria"]),
             models.Index(fields=["ativo"]),
             models.Index(fields=["data_cadastro"]),
         ]
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "matricula"], name="uq_empresa_funcionario_matricula"),
+            models.UniqueConstraint(fields=["empresa", "cpf"], name="uq_empresa_funcionario_cpf"),
+        ]
 
     def __str__(self):
         return self.nomefuncionario
+
+    def clean(self):
+        super().clean()
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Funcionário deve pertencer a uma empresa."})
+        self.nomefuncionario = (self.nomefuncionario or "").strip()
+        if not self.nomefuncionario:
+            raise ValidationError({"nomefuncionario": "Informe o nome do funcionário."})
+        self.cpf = only_digits(self.cpf or "") or None
+        if not self.cpf:
+            raise ValidationError({"cpf": "CPF é obrigatório."})
+        if self.cpf == "00000000000" or not check_cpf(self.cpf):
+            raise ValidationError({"cpf": "CPF inválido."})
+        self.matricula = (self.matricula or "").strip()
+        if not self.matricula:
+            raise ValidationError({"matricula": "Matrícula é obrigatória."})
+        if self.cargo_id:
+            if self.cargo.empresa_id != self.empresa_id:
+                raise ValidationError({"cargo": "O cargo deve pertencer à mesma empresa do funcionário."})
+            if not self.cargo.ativo:
+                raise ValidationError({"cargo": "O cargo selecionado está inativo."})
+            if self.cargo.autoridade_operacional_loja and not self.idloja_id:
+                raise ValidationError({"idloja": "Informe a loja principal para este cargo."})
+        if self.idloja_id and self.idloja.empresa_id != self.empresa_id:
+            raise ValidationError({"idloja": "A loja selecionada pertence a outra empresa."})
+        if self.usuario_id and self.usuario.empresa_id != self.empresa_id:
+            raise ValidationError({"usuario": "O usuário vinculado pertence a outra empresa."})
+        if self.comissao_percentual is not None and (self.comissao_percentual < 0 or self.comissao_percentual > 100):
+            raise ValidationError({"comissao_percentual": "Informe percentual entre 0 e 100."})
+        if self.situacao == self.SITUACAO_DESLIGADO and not self.fim:
+            raise ValidationError({"fim": "Informe a data de desligamento."})
+        if self.inicio and self.fim and self.fim < self.inicio:
+            raise ValidationError({"fim": "Data de desligamento não pode ser anterior à admissão."})
+
+    def save(self, *args, **kwargs):
+        if not self.matricula and self.empresa_id:
+            with transaction.atomic():
+                Funcionarios.objects.select_for_update().filter(empresa_id=self.empresa_id).exists()
+                max_matricula = Funcionarios.objects.filter(empresa_id=self.empresa_id, matricula__regex=r"^\d+$").aggregate(Max("matricula"))["matricula__max"]
+                self.matricula = str(int(max_matricula or "0") + 1).zfill(6)
+        self.cpf = only_digits(self.cpf or "") or None
+        return super().save(*args, **kwargs)
+
+
+class FuncionarioHistorico(models.Model):
+    TIPO_CARGO = "CARGO"
+    TIPO_LOJA = "LOJA"
+    TIPO_ABRANGENCIA = "ABRANGENCIA"
+    TIPO_AFASTAMENTO = "AFASTAMENTO"
+    TIPO_RETORNO = "RETORNO"
+    TIPO_DESLIGAMENTO = "DESLIGAMENTO"
+    TIPO_RECONTRATACAO = "RECONTRATACAO"
+    TIPO_CHOICES = [
+        (TIPO_CARGO, "Mudança de cargo"),
+        (TIPO_LOJA, "Mudança de loja"),
+        (TIPO_ABRANGENCIA, "Alteração de abrangência"),
+        (TIPO_AFASTAMENTO, "Afastamento"),
+        (TIPO_RETORNO, "Retorno"),
+        (TIPO_DESLIGAMENTO, "Desligamento"),
+        (TIPO_RECONTRATACAO, "Recontratação"),
+    ]
+
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="funcionarios_historico", db_index=True)
+    funcionario = models.ForeignKey(Funcionarios, on_delete=models.CASCADE, related_name="historico")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
+    data_hora = models.DateTimeField(default=timezone.now, db_index=True)
+    usuario_responsavel = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="funcionarios_historico")
+    valor_anterior = models.JSONField(null=True, blank=True)
+    valor_novo = models.JSONField(null=True, blank=True)
+    motivo = models.CharField(max_length=120, null=True, blank=True)
+    observacao = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-data_hora", "-id"]
+        indexes = [
+            models.Index(fields=["empresa", "funcionario", "data_hora"], name="idx_funchist_emp_func_data"),
+            models.Index(fields=["empresa", "tipo"], name="idx_funchist_emp_tipo"),
+        ]
 
 class Nat_Lancamento(models.Model):
     idnatureza = models.BigAutoField(primary_key=True)

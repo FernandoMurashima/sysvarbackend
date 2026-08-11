@@ -21,22 +21,26 @@ from .models import (
     Empresa,
     EmpresaContrato,
     Loja,
+    Cargo,
     Cliente,
     Fornecedor,
     FornecedorContato,
     FornecedorEndereco,
     Funcionarios,
+    FuncionarioHistorico,
     Nat_Lancamento,
     PlanoContabil,
 )
 from .serializers import (
     EmpresaSerializer,
     LojaSerializer,
+    CargoSerializer,
     ClienteSerializer,
     FornecedorSerializer,
     FornecedorContatoSerializer,
     FornecedorEnderecoSerializer,
     FuncionariosSerializer,
+    FuncionarioHistoricoSerializer,
     NatLancamentoSerializer,
     PlanoContabilSerializer,
 )
@@ -1349,15 +1353,61 @@ class FornecedorViewSet(BaseCadastroViewSet):
         )
 
 
+class CargoViewSet(BaseCadastroViewSet):
+    queryset = Cargo.objects.select_related("empresa").all()
+    serializer_class = CargoSerializer
+    filterset_fields = ["ativo", "empresa", "participa_vendas", "permite_comissao", "autoridade_operacional_loja", "permite_multiplas_lojas", "gerencial"]
+    search_fields = ["codigo", "descricao"]
+    ordering_fields = ["codigo", "descricao", "ativo", "data_cadastro"]
+    ordering = ["descricao"]
+
+    def perform_create(self, serializer):
+        cargo = serializer.save(empresa=self.request.user.empresa) if not self.request.user.is_superuser else serializer.save()
+        AuditService.required_success(AuditAction.ROLE_CREATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=cargo, after=instance_snapshot(cargo), status_code=201)
+
+    def perform_update(self, serializer):
+        before = instance_snapshot(serializer.instance)
+        cargo = serializer.save()
+        AuditService.required_success(AuditAction.ROLE_UPDATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=cargo, before=before, after=instance_snapshot(cargo), changed_fields=sorted(serializer.validated_data.keys()), status_code=200)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        cargo = self.get_object()
+        before = instance_snapshot(cargo)
+        cargo.ativo = False
+        cargo.save(update_fields=["ativo", "data_atualizacao"])
+        AuditService.required_success(AuditAction.ROLE_UPDATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cargo, before=before, after=instance_snapshot(cargo), changed_fields=["ativo"], status_code=200)
+        return Response(self.get_serializer(cargo).data)
+
+    @action(detail=True, methods=["post"], url_path="reativar")
+    def reativar(self, request, pk=None):
+        cargo = self.get_object()
+        before = instance_snapshot(cargo)
+        cargo.ativo = True
+        cargo.save(update_fields=["ativo", "data_atualizacao"])
+        AuditService.required_success(AuditAction.ROLE_UPDATED, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=cargo, before=before, after=instance_snapshot(cargo), changed_fields=["ativo"], status_code=200)
+        return Response(self.get_serializer(cargo).data)
+
+    def perform_destroy(self, instance):
+        if instance.funcionarios.exists():
+            AuditService.denied(AuditAction.ROLE_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"mensagem": "Cargo em uso. Inative o cargo em vez de excluir."}, status_code=400)
+            raise ValidationError({"detail": "Cargo em uso. Inative o cargo em vez de excluir."})
+        before = instance_snapshot(instance)
+        empresa = instance.empresa
+        object_id = instance.pk
+        instance.delete()
+        AuditService.required_success(AuditAction.ROLE_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=empresa, app_label="cadastros", model="cargo", object_id=object_id, before=before, status_code=204)
+
+
 class FuncionariosViewSet(BaseCadastroViewSet):
     # select_related para otimizar a FK de loja
-    queryset = Funcionarios.objects.select_related("idloja").all()
+    queryset = Funcionarios.objects.select_related("empresa", "idloja", "cargo", "usuario").prefetch_related("lojas_supervisionadas").all()
     serializer_class = FuncionariosSerializer
 
-    filterset_fields = ["ativo", "empresa", "categoria", "idloja"]
-    search_fields = ["nomefuncionario", "apelido", "cpf"]
-    ordering_fields = ["nomefuncionario", "categoria", "data_cadastro", "meta"]
-    ordering = ["nomefuncionario"]
+    filterset_fields = ["ativo", "empresa", "cargo", "idloja", "situacao", "participa_vendas", "comissionado"]
+    search_fields = ["matricula", "nomefuncionario", "apelido", "cpf"]
+    ordering_fields = ["matricula", "nomefuncionario", "cargo__descricao", "idloja__nome_loja", "situacao", "inicio", "data_cadastro"]
+    ordering = ["matricula", "nomefuncionario"]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1368,6 +1418,118 @@ class FuncionariosViewSet(BaseCadastroViewSet):
                 lojas_ids.append(user.loja_id)
             return qs.filter(idloja_id__in=lojas_ids) if lojas_ids else qs.none()
         return qs
+
+    def perform_create(self, serializer):
+        funcionario = serializer.save(empresa=self.request.user.empresa) if not self.request.user.is_superuser else serializer.save()
+        AuditService.required_success(AuditAction.EMPLOYEE_CREATED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=funcionario, after=instance_snapshot(funcionario), status_code=201)
+
+    def perform_update(self, serializer):
+        before = instance_snapshot(serializer.instance)
+        old = serializer.instance
+        old_values = {"cargo": old.cargo_id, "loja": old.idloja_id, "comissao": str(old.comissao_percentual), "usuario": old.usuario_id, "todas_lojas": old.todas_lojas_da_empresa, "lojas": list(old.lojas_supervisionadas.values_list("id", flat=True))}
+        funcionario = serializer.save()
+        new_values = {"cargo": funcionario.cargo_id, "loja": funcionario.idloja_id, "comissao": str(funcionario.comissao_percentual), "usuario": funcionario.usuario_id, "todas_lojas": funcionario.todas_lojas_da_empresa, "lojas": list(funcionario.lojas_supervisionadas.values_list("id", flat=True))}
+        changed = sorted(serializer.validated_data.keys())
+        action_name = AuditAction.EMPLOYEE_UPDATED
+        historicos = []
+        if old_values["cargo"] != new_values["cargo"]:
+            action_name = AuditAction.EMPLOYEE_ROLE_CHANGED
+            historicos.append(FuncionarioHistorico.TIPO_CARGO)
+        if old_values["loja"] != new_values["loja"]:
+            action_name = AuditAction.EMPLOYEE_STORE_CHANGED
+            historicos.append(FuncionarioHistorico.TIPO_LOJA)
+        if old_values["lojas"] != new_values["lojas"] or old_values["todas_lojas"] != new_values["todas_lojas"]:
+            action_name = AuditAction.EMPLOYEE_SCOPE_CHANGED
+            historicos.append(FuncionarioHistorico.TIPO_ABRANGENCIA)
+        if old_values["comissao"] != new_values["comissao"]:
+            action_name = AuditAction.EMPLOYEE_COMMISSION_CHANGED
+        if old_values["usuario"] != new_values["usuario"]:
+            action_name = AuditAction.EMPLOYEE_USER_LINKED if new_values["usuario"] else AuditAction.EMPLOYEE_USER_UNLINKED
+        for tipo in historicos:
+            self._historico(funcionario, tipo, old_values, new_values)
+        AuditService.required_success(action_name, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=funcionario, before=before, after=instance_snapshot(funcionario), changed_fields=changed, status_code=200)
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        return Response(qs.aggregate(
+            total=Count("id"),
+            ativos=Count("id", filter=Q(situacao=Funcionarios.SITUACAO_ATIVO)),
+            afastados=Count("id", filter=Q(situacao=Funcionarios.SITUACAO_AFASTADO)),
+            desligados=Count("id", filter=Q(situacao=Funcionarios.SITUACAO_DESLIGADO)),
+            participantes_vendas=Count("id", filter=Q(participa_vendas=True)),
+        ))
+
+    @action(detail=True, methods=["get"], url_path="historico")
+    def historico(self, request, pk=None):
+        funcionario = self.get_object()
+        qs = funcionario.historico.select_related("usuario_responsavel", "empresa").all()
+        page = self.paginate_queryset(qs)
+        data = FuncionarioHistoricoSerializer(page if page is not None else qs, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=["post"], url_path="afastar")
+    def afastar(self, request, pk=None):
+        return self._mudar_situacao(request, Funcionarios.SITUACAO_AFASTADO, AuditAction.EMPLOYEE_LEAVE, FuncionarioHistorico.TIPO_AFASTAMENTO)
+
+    @action(detail=True, methods=["post"], url_path="retornar")
+    def retornar(self, request, pk=None):
+        return self._mudar_situacao(request, Funcionarios.SITUACAO_ATIVO, AuditAction.EMPLOYEE_RETURNED, FuncionarioHistorico.TIPO_RETORNO, limpar_fim=True)
+
+    @action(detail=True, methods=["post"], url_path="desligar")
+    def desligar(self, request, pk=None):
+        return self._mudar_situacao(request, Funcionarios.SITUACAO_DESLIGADO, AuditAction.EMPLOYEE_TERMINATED, FuncionarioHistorico.TIPO_DESLIGAMENTO, data_fim=True)
+
+    @action(detail=True, methods=["post"], url_path="recontratar")
+    def recontratar(self, request, pk=None):
+        return self._mudar_situacao(request, Funcionarios.SITUACAO_ATIVO, AuditAction.EMPLOYEE_REHIRED, FuncionarioHistorico.TIPO_RECONTRATACAO, limpar_fim=True)
+
+    def _mudar_situacao(self, request, situacao, action_name, tipo_historico, limpar_fim=False, data_fim=False):
+        scoped = self.get_object()
+        motivo = (request.data.get("motivo") or "").strip() or None
+        observacao = (request.data.get("observacao") or "").strip() or None
+        with transaction.atomic():
+            funcionario = Funcionarios.objects.select_for_update().get(pk=scoped.pk)
+            before = instance_snapshot(funcionario)
+            anterior = {"situacao": funcionario.situacao, "fim": funcionario.fim.isoformat() if funcionario.fim else None}
+            funcionario.situacao = situacao
+            funcionario.ativo = situacao == Funcionarios.SITUACAO_ATIVO
+            if limpar_fim:
+                funcionario.fim = None
+            if data_fim:
+                funcionario.fim = request.data.get("data") or timezone.localdate()
+            funcionario.__skip_audit_signal__ = True
+            funcionario.save(update_fields=["situacao", "ativo", "fim", "data_atualizacao"])
+            novo = {"situacao": funcionario.situacao, "fim": funcionario.fim.isoformat() if funcionario.fim else None}
+            self._historico(funcionario, tipo_historico, anterior, novo, motivo, observacao)
+            AuditService.required_success(action_name, category=AuditCategory.CADASTRO, request=request, user=request.user, instance=funcionario, before=before, after=instance_snapshot(funcionario), changed_fields=["situacao", "ativo", "fim"], metadata={"motivo": motivo, "observacao": observacao}, status_code=200)
+        return Response(self.get_serializer(funcionario).data)
+
+    def _historico(self, funcionario, tipo, anterior, novo, motivo=None, observacao=None):
+        return FuncionarioHistorico.objects.create(
+            empresa=funcionario.empresa,
+            funcionario=funcionario,
+            tipo=tipo,
+            usuario_responsavel=self.request.user if self.request.user.is_authenticated else None,
+            valor_anterior=anterior,
+            valor_novo=novo,
+            motivo=motivo,
+            observacao=observacao,
+        )
+
+    def perform_destroy(self, instance):
+        if instance.vendas_pdv.exists() or instance.historico.exists():
+            AuditService.denied(AuditAction.EMPLOYEE_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"mensagem": "Funcionário já utilizado em operações. Desligue o funcionário em vez de excluí-lo."}, status_code=400)
+            raise ValidationError({"detail": "Funcionário já utilizado em operações. Desligue o funcionário em vez de excluí-lo."})
+        before = instance_snapshot(instance)
+        empresa = instance.empresa
+        object_id = instance.pk
+        try:
+            instance.delete()
+        except (ProtectedError, IntegrityError):
+            AuditService.denied(AuditAction.EMPLOYEE_DELETE_DENIED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, instance=instance, metadata={"mensagem": "Funcionário já utilizado em operações. Desligue o funcionário em vez de excluí-lo."}, status_code=400)
+            raise ValidationError({"detail": "Funcionário já utilizado em operações. Desligue o funcionário em vez de excluí-lo."})
+        AuditService.required_success(AuditAction.EMPLOYEE_DELETED, category=AuditCategory.CADASTRO, request=self.request, user=self.request.user, empresa=empresa, app_label="cadastros", model="funcionarios", object_id=object_id, before=before, status_code=204)
 
 
 class PlanoContabilViewSet(BaseCadastroViewSet):

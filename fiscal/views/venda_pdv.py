@@ -481,11 +481,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Cliente bloqueado não pode ser utilizado em nova venda."}, status=status.HTTP_400_BAD_REQUEST)
         vendedor = (
             Funcionarios.objects
-            .filter(pk=vendedor_id, idloja_id=loja_id, ativo=True, categoria__iexact="Vendedor")
+            .filter(pk=vendedor_id, idloja_id=loja_id, ativo=True, situacao=Funcionarios.SITUACAO_ATIVO, participa_vendas=True)
             .first()
         )
         if not vendedor:
-            return Response({"detail": "O vendedor informado não está vinculado a esta loja."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "O vendedor informado não está ativo para vendas nesta loja."}, status=status.HTTP_400_BAD_REQUEST)
         if empresa_id and vendedor.empresa_id and vendedor.empresa_id != int(empresa_id):
             return Response({"detail": "O vendedor informado pertence a outra empresa."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1176,6 +1176,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         ).exists():
             return
 
+        # TODO(comissoes): preservar a aliquota aplicada no momento da venda
+        # para nao recalcular historico com a comissao atual do funcionario.
         percentual = Decimal(getattr(venda.vendedor, "comissao_percentual", 0) or 0)
         if percentual <= 0:
             return

@@ -1,15 +1,18 @@
 from rest_framework import serializers
 from django.utils import timezone
+from django.contrib.auth import get_user_model
 
 from .models import (
     Empresa,
     Loja,
+    Cargo,
     Cliente,
     Fornecedor,
     FornecedorCategoria,
     FornecedorContato,
     FornecedorEndereco,
     Funcionarios,
+    FuncionarioHistorico,
     Nat_Lancamento,
 )
 from .validators import (
@@ -22,6 +25,8 @@ from .validators import (
 )
 from typing import Optional
 from accounts.permissions import has_field_permission
+
+User = get_user_model()
 
 # Helpers de normalização
 def _norm_email(v: Optional[str]) -> Optional[str]:
@@ -682,12 +687,72 @@ class FornecedorSerializer(serializers.ModelSerializer):
 # ---------------------------
 # Funcionários
 # ---------------------------
+class CargoSerializer(serializers.ModelSerializer):
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), required=False)
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+
+    class Meta:
+        model = Cargo
+        fields = "__all__"
+
+    def validate_codigo(self, value):
+        value = (value or "").strip().upper()
+        if not value:
+            raise serializers.ValidationError("Informe o código do cargo.")
+        return value
+
+    def validate_descricao(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe a descrição do cargo.")
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        if not empresa and user and getattr(user, "empresa_id", None):
+            empresa = user.empresa
+            attrs["empresa"] = empresa
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Cargo deve pertencer a uma empresa."})
+        codigo = attrs.get("codigo", getattr(self.instance, "codigo", None))
+        if codigo:
+            qs = Cargo.objects.filter(empresa=empresa, codigo=codigo)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"codigo": "Já existe cargo com este código nesta empresa."})
+        return attrs
+
+
+class FuncionarioHistoricoSerializer(serializers.ModelSerializer):
+    usuario_responsavel_nome = serializers.CharField(source="usuario_responsavel.username", read_only=True)
+    tipo_descricao = serializers.CharField(source="get_tipo_display", read_only=True)
+
+    class Meta:
+        model = FuncionarioHistorico
+        fields = "__all__"
+        read_only_fields = (
+            "id", "empresa", "funcionario", "tipo", "data_hora", "usuario_responsavel",
+            "valor_anterior", "valor_novo", "motivo", "observacao",
+            "usuario_responsavel_nome", "tipo_descricao",
+        )
+
+
 class FuncionariosSerializer(serializers.ModelSerializer):
     salario_oculto = serializers.SerializerMethodField()
+    empresa = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.all(), required=False)
+    cargo_nome = serializers.CharField(source="cargo.descricao", read_only=True)
+    cargo_codigo = serializers.CharField(source="cargo.codigo", read_only=True)
+    loja_nome = serializers.CharField(source="idloja.nome_loja", read_only=True)
+    usuario_nome = serializers.CharField(source="usuario.username", read_only=True)
+    situacao_descricao = serializers.CharField(source="get_situacao_display", read_only=True)
 
     class Meta:
         model = Funcionarios
         fields = "__all__"
+        read_only_fields = ("data_cadastro", "data_atualizacao")
 
     def _pode_ver_salario(self):
         request = self.context.get("request")
@@ -708,41 +773,101 @@ class FuncionariosSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "salario": "Você não tem permissão para informar ou alterar salário."
             })
-        categoria = (attrs.get("categoria", getattr(self.instance, "categoria", "")) or "").strip().lower()
+        lifecycle_requested = {"situacao", "ativo", "fim"} & set(getattr(self, "initial_data", {}) or {})
+        if self.instance and lifecycle_requested and not self.context.get("allow_lifecycle_fields"):
+            raise serializers.ValidationError({"situacao": "Use as ações Afastar, Retornar, Desligar ou Recontratar para alterar a situação."})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
         empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        if not empresa and user and getattr(user, "empresa_id", None):
+            empresa = user.empresa
+            attrs["empresa"] = empresa
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Funcionário deve pertencer a uma empresa."})
+
         loja = attrs.get("idloja", getattr(self.instance, "idloja", None))
-        categorias_exigem_loja = {
-            "vendedor",
-            "caixa",
-            "gerente",
-            "assistente",
-            "assistente receber",
-            "assistente pagar",
-            "assistentecontasareceber",
-            "assistentecontasapagar",
-        }
-        categoria_normalizada = categoria.replace(" ", "").replace("_", "").replace("-", "")
-        if (categoria in categorias_exigem_loja or categoria_normalizada in categorias_exigem_loja) and not loja:
-            raise serializers.ValidationError({
-                "idloja": "Vincule este funcionário a uma filial ou matriz."
-            })
+        cargo = attrs.get("cargo", getattr(self.instance, "cargo", None))
+        usuario = attrs.get("usuario", getattr(self.instance, "usuario", None))
+        cpf = _norm_digits(attrs.get("cpf", getattr(self.instance, "cpf", None)))
+        matricula = (attrs.get("matricula", getattr(self.instance, "matricula", "")) or "").strip()
+
+        if self.instance is None and not attrs.get("situacao"):
+            attrs["situacao"] = Funcionarios.SITUACAO_ATIVO
+        if not cpf:
+            raise serializers.ValidationError({"cpf": "CPF é obrigatório."})
+        if cpf == "00000000000":
+            raise serializers.ValidationError({"cpf": "CPF inválido."})
+        try:
+            cpf_validator(cpf)
+        except Exception:
+            raise serializers.ValidationError({"cpf": "CPF inválido."})
+        attrs["cpf"] = cpf
+        if matricula:
+            attrs["matricula"] = matricula.zfill(6) if matricula.isdigit() else matricula
+        if not cargo:
+            raise serializers.ValidationError({"cargo": "Informe o cargo."})
+        if cargo.empresa_id != empresa.id:
+            raise serializers.ValidationError({"cargo": "O cargo deve pertencer à mesma empresa do funcionário."})
+        if not cargo.ativo and (self.instance is None or self.instance.cargo_id != cargo.pk):
+            raise serializers.ValidationError({"cargo": "O cargo selecionado está inativo."})
+        if cargo.autoridade_operacional_loja and not loja:
+            raise serializers.ValidationError({"idloja": "Informe a loja principal para este cargo."})
         if loja and empresa and loja.empresa_id and loja.empresa_id != empresa.id:
             raise serializers.ValidationError({
                 "idloja": "A loja selecionada pertence a outra empresa."
             })
-        if loja and not empresa:
-            attrs["empresa"] = loja.empresa
+        if usuario and usuario.empresa_id != empresa.id:
+            raise serializers.ValidationError({"usuario": "O usuário vinculado pertence a outra empresa."})
+        if usuario:
+            qs_user = Funcionarios.objects.filter(usuario=usuario)
+            if self.instance:
+                qs_user = qs_user.exclude(pk=self.instance.pk)
+            if qs_user.exists():
+                raise serializers.ValidationError({"usuario": "Este usuário já está vinculado a outro funcionário."})
+        qs_cpf = Funcionarios.objects.filter(empresa=empresa, cpf=cpf)
+        if self.instance:
+            qs_cpf = qs_cpf.exclude(pk=self.instance.pk)
+        if qs_cpf.exists():
+            raise serializers.ValidationError({"cpf": "Já existe funcionário com este CPF nesta empresa."})
+        if attrs.get("matricula"):
+            qs_mat = Funcionarios.objects.filter(empresa=empresa, matricula=attrs["matricula"])
+            if self.instance:
+                qs_mat = qs_mat.exclude(pk=self.instance.pk)
+            if qs_mat.exists():
+                raise serializers.ValidationError({"matricula": "Já existe funcionário com esta matrícula nesta empresa."})
+        percentual = attrs.get("comissao_percentual", getattr(self.instance, "comissao_percentual", 0))
+        if percentual is not None and (percentual < 0 or percentual > 100):
+            raise serializers.ValidationError({"comissao_percentual": "Informe percentual entre 0 e 100."})
+        if attrs.get("comissionado", getattr(self.instance, "comissionado", False)) and not cargo.permite_comissao:
+            raise serializers.ValidationError({"comissionado": "Este cargo não permite comissão."})
         return attrs
 
     def validate_cpf(self, value):
-        if not value:
-            return value
-        # Permitimos funcionário sem CPF? Normalmente não; mas se vier, valida.
-        if only_digits(value) == "00000000000":
-            # Para funcionário, manteremos regra estrita: não aceitar CPF padrão.
-            raise serializers.ValidationError("CPF padrão (000.000.000-00) não é permitido para funcionários.")
-        cpf_validator(value)
         return _norm_digits(value)
+
+    def create(self, validated_data):
+        lojas = validated_data.pop("lojas_supervisionadas", [])
+        funcionario = super().create(validated_data)
+        self._sync_lojas(funcionario, lojas)
+        return funcionario
+
+    def update(self, instance, validated_data):
+        lojas = validated_data.pop("lojas_supervisionadas", None)
+        funcionario = super().update(instance, validated_data)
+        if lojas is not None:
+            self._sync_lojas(funcionario, lojas)
+        return funcionario
+
+    def _sync_lojas(self, funcionario, lojas):
+        if not funcionario.cargo or not funcionario.cargo.permite_multiplas_lojas:
+            funcionario.lojas_supervisionadas.clear()
+            funcionario.todas_lojas_da_empresa = False
+            Funcionarios.objects.filter(pk=funcionario.pk).update(todas_lojas_da_empresa=False)
+            return
+        invalidas = [loja.pk for loja in lojas if loja.empresa_id != funcionario.empresa_id]
+        if invalidas:
+            raise serializers.ValidationError({"lojas_supervisionadas": "Todas as lojas devem pertencer à empresa do funcionário."})
+        funcionario.lojas_supervisionadas.set(lojas)
 
 from rest_framework import serializers
 from .models import Nat_Lancamento, PlanoContabil

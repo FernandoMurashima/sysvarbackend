@@ -15,7 +15,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.sessions import token_hash
 from auditoria.models import AuditAction, AuditLog
-from cadastros.models import Cliente, Empresa, EmpresaContrato, Fornecedor, FornecedorContato, FornecedorEndereco, Funcionarios, Loja, ModuloSistema, Nat_Lancamento, PlanoContabil
+from cadastros.models import Cargo, Cliente, Empresa, EmpresaContrato, Fornecedor, FornecedorContato, FornecedorEndereco, FuncionarioHistorico, Funcionarios, Loja, ModuloSistema, Nat_Lancamento, PlanoContabil
 from cadastros.services import ClientePadraoService
 from fiscal.models import VendaDevolucao, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import CashbackMovimento, PrazoPagamento
@@ -166,6 +166,87 @@ class LojaOperacionalTests(OperacionalBaseTest):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(AuditLog.objects.filter(action=AuditAction.STORE_CLOSED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditAction.STORE_REOPENED).exists())
+
+
+class FuncionariosFase1Tests(OperacionalBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.cargo_vendedor = Cargo.objects.create(
+            empresa=self.empresa,
+            codigo="VENDEDOR",
+            descricao="Vendedor",
+            ativo=True,
+            participa_vendas=True,
+            permite_comissao=True,
+            autoridade_operacional_loja=True,
+        )
+        self.cargo_supervisor = Cargo.objects.create(
+            empresa=self.empresa,
+            codigo="SUP",
+            descricao="Supervisor",
+            ativo=True,
+            permite_multiplas_lojas=True,
+            autoridade_operacional_loja=True,
+            gerencial=True,
+        )
+        self.cargo_outra = Cargo.objects.create(empresa=self.outra, codigo="OUT", descricao="Outro")
+        self.loja_outra = Loja.objects.create(empresa=self.outra, nome_loja="Outra Loja", apelido_loja="OL", cnpj="22333444000102")
+
+    def payload(self, **kwargs):
+        data = {
+            "nomefuncionario": "Ana Vendedora",
+            "cpf": "52998224725",
+            "cargo": self.cargo_vendedor.pk,
+            "idloja": self.loja.pk,
+            "inicio": timezone.localdate().isoformat(),
+            "participa_vendas": True,
+            "comissionado": True,
+            "comissao_percentual": "5.00",
+        }
+        data.update(kwargs)
+        return data
+
+    def test_criacao_valida_empresa_matricula_cpf_e_auditoria(self):
+        self.client.force_authenticate(self.user_edit)
+        res = self.client.post("/api/cadastros/funcionarios/", self.payload(), format="json")
+        self.assertEqual(res.status_code, 201)
+        funcionario = Funcionarios.objects.get(pk=res.data["id"])
+        self.assertEqual(funcionario.empresa_id, self.empresa.pk)
+        self.assertEqual(funcionario.matricula, "000001")
+        self.assertEqual(funcionario.cpf, "52998224725")
+        self.assertTrue(AuditLog.objects.filter(action=AuditAction.EMPLOYEE_CREATED, object_id=str(funcionario.pk)).exists())
+
+    def test_validacoes_cpf_matricula_cargo_loja_e_user(self):
+        self.client.force_authenticate(self.user_edit)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf=""), format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="11111111111"), format="json").status_code, 400)
+        ok = self.client.post("/api/cadastros/funcionarios/", self.payload(matricula="ABC001"), format="json")
+        self.assertEqual(ok.status_code, 201)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="15350946056", matricula="ABC001"), format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="15350946056", cargo=self.cargo_outra.pk), format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="15350946056", idloja=self.loja_outra.pk), format="json").status_code, 400)
+        outro_user = User.objects.create_user(username="outra-user", password="senha12345", empresa=self.outra, loja=self.loja_outra)
+        self.assertEqual(self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="15350946056", usuario=outro_user.pk), format="json").status_code, 400)
+
+    def test_multi_loja_ciclo_historico_filtros_e_exclusao_protegida(self):
+        self.client.force_authenticate(self.user_edit)
+        res = self.client.post("/api/cadastros/funcionarios/", self.payload(cargo=self.cargo_supervisor.pk, cpf="15350946056", lojas_supervisionadas=[self.loja.pk, self.loja2.pk], todas_lojas_da_empresa=True, comissionado=False), format="json")
+        self.assertEqual(res.status_code, 201)
+        funcionario = Funcionarios.objects.get(pk=res.data["id"])
+        self.assertEqual(funcionario.lojas_supervisionadas.count(), 2)
+        filtro = self.client.get("/api/cadastros/funcionarios/", {"situacao": "ATIVO", "page_size": 1})
+        self.assertEqual(filtro.status_code, 200)
+        self.assertIn("count", filtro.data)
+        afastar = self.client.post(f"/api/cadastros/funcionarios/{funcionario.pk}/afastar/", {"motivo": "licenca"}, format="json")
+        retornar = self.client.post(f"/api/cadastros/funcionarios/{funcionario.pk}/retornar/", format="json")
+        desligar = self.client.post(f"/api/cadastros/funcionarios/{funcionario.pk}/desligar/", format="json")
+        historico = self.client.get(f"/api/cadastros/funcionarios/{funcionario.pk}/historico/")
+        self.assertEqual(afastar.status_code, 200)
+        self.assertEqual(retornar.status_code, 200)
+        self.assertEqual(desligar.status_code, 200)
+        self.assertEqual(historico.status_code, 200)
+        self.assertGreaterEqual(FuncionarioHistorico.objects.filter(funcionario=funcionario).count(), 3)
+        self.assertEqual(self.client.delete(f"/api/cadastros/funcionarios/{funcionario.pk}/").status_code, 400)
 
 
 class ClienteMultiempresaTests(OperacionalBaseTest):

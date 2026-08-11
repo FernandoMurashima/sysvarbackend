@@ -464,7 +464,7 @@ class DashboardExecutivoView(APIView):
 
     def _filters_payload(self, user, empresa, lojas):
         empresas = Empresa.objects.filter(ativo=True).order_by("nome") if user.is_superuser else Empresa.objects.filter(pk=empresa.pk)
-        vendedores = Funcionarios.objects.filter(empresa=empresa, ativo=True, idloja_id__in=[loja.pk for loja in lojas]).order_by("nomefuncionario")
+        vendedores = Funcionarios.objects.filter(empresa=empresa, ativo=True, situacao=Funcionarios.SITUACAO_ATIVO, participa_vendas=True, idloja_id__in=[loja.pk for loja in lojas]).order_by("nomefuncionario")
         return {
             "empresas": [{"id": e.pk, "nome": str(e)} for e in empresas],
             "lojas": [{"id": loja.pk, "nome": loja.nome_loja, "tipo": loja.tipo_unidade} for loja in lojas],
