@@ -263,6 +263,10 @@ class FuncionariosFase1Tests(OperacionalBaseTest):
         self.assertIn("ASSFIN", codigos)
         self.assertIn("ALMOX", codigos)
         self.assertEqual(Cargo.objects.filter(empresa=self.empresa, codigo="ASSFIN").count(), 1)
+        self.assertTrue(Cargo.objects.get(empresa=self.empresa, codigo="VENDEDOR").permite_comissao)
+        self.assertTrue(Cargo.objects.get(empresa=self.empresa, codigo="GERENTE").permite_comissao)
+        self.assertTrue(Cargo.objects.get(empresa=self.empresa, codigo="SUPERVISOR").permite_comissao)
+        self.assertFalse(Cargo.objects.get(empresa=self.empresa, codigo="ASSFIN").permite_comissao)
         self.assertEqual(len(criados), 0)
 
         self.client.force_authenticate(self.user_edit)
@@ -299,6 +303,8 @@ class FuncionariosFase1Tests(OperacionalBaseTest):
         empresa = Empresa.objects.create(nome="Empresa Nova Cargos", documento="04252011000110", plano_completo=True)
         self.assertTrue(Cargo.objects.filter(empresa=empresa, codigo="ASSFIN", descricao="Assistente Financeiro").exists())
         self.assertTrue(Cargo.objects.filter(empresa=empresa, codigo="AUXADM", descricao="Auxiliar Administrativo").exists())
+        self.assertTrue(Cargo.objects.get(empresa=empresa, codigo="GERENTE").permite_comissao)
+        self.assertTrue(Cargo.objects.get(empresa=empresa, codigo="SUPERVISOR").permite_comissao)
 
 
 class ClienteMultiempresaTests(OperacionalBaseTest):
