@@ -171,25 +171,29 @@ class LojaOperacionalTests(OperacionalBaseTest):
 class FuncionariosFase1Tests(OperacionalBaseTest):
     def setUp(self):
         super().setUp()
-        self.cargo_vendedor = Cargo.objects.create(
+        self.cargo_vendedor, _ = Cargo.objects.update_or_create(
             empresa=self.empresa,
             codigo="VENDEDOR",
-            descricao="Vendedor",
-            ativo=True,
-            participa_vendas=True,
-            permite_comissao=True,
-            autoridade_operacional_loja=True,
+            defaults={
+                "descricao": "Vendedor",
+                "ativo": True,
+                "participa_vendas": True,
+                "permite_comissao": True,
+                "autoridade_operacional_loja": True,
+            },
         )
-        self.cargo_supervisor = Cargo.objects.create(
+        self.cargo_supervisor, _ = Cargo.objects.update_or_create(
             empresa=self.empresa,
             codigo="SUP",
-            descricao="Supervisor",
-            ativo=True,
-            permite_multiplas_lojas=True,
-            autoridade_operacional_loja=True,
-            gerencial=True,
+            defaults={
+                "descricao": "Supervisor",
+                "ativo": True,
+                "permite_multiplas_lojas": True,
+                "autoridade_operacional_loja": True,
+                "gerencial": True,
+            },
         )
-        self.cargo_outra = Cargo.objects.create(empresa=self.outra, codigo="OUT", descricao="Outro")
+        self.cargo_outra, _ = Cargo.objects.get_or_create(empresa=self.outra, codigo="OUT", defaults={"descricao": "Outro"})
         self.loja_outra = Loja.objects.create(empresa=self.outra, nome_loja="Outra Loja", apelido_loja="OL", cnpj="22333444000102")
 
     def payload(self, **kwargs):
@@ -247,6 +251,54 @@ class FuncionariosFase1Tests(OperacionalBaseTest):
         self.assertEqual(historico.status_code, 200)
         self.assertGreaterEqual(FuncionarioHistorico.objects.filter(funcionario=funcionario).count(), 3)
         self.assertEqual(self.client.delete(f"/api/cadastros/funcionarios/{funcionario.pk}/").status_code, 400)
+
+    def test_cargos_basicos_livres_api_e_sem_permissao_automatica(self):
+        from cadastros.services import CargoInicialService
+
+        criados = CargoInicialService.garantir_basicos(self.empresa)
+        CargoInicialService.garantir_basicos(self.empresa)
+        codigos = set(Cargo.objects.filter(empresa=self.empresa).values_list("codigo", flat=True))
+        self.assertIn("ASSISTENTE", codigos)
+        self.assertIn("AUXILIAR", codigos)
+        self.assertIn("ASSFIN", codigos)
+        self.assertIn("ALMOX", codigos)
+        self.assertEqual(Cargo.objects.filter(empresa=self.empresa, codigo="ASSFIN").count(), 1)
+        self.assertEqual(len(criados), 0)
+
+        self.client.force_authenticate(self.user_edit)
+        novo = self.client.post("/api/cadastros/cargos/", {
+            "codigo": "ANALISTA",
+            "descricao": "Analista de Operações",
+            "ativo": True,
+        }, format="json")
+        self.assertEqual(novo.status_code, 201)
+        lista = self.client.get("/api/cadastros/cargos/", {"search": "Analista"})
+        self.assertEqual(lista.status_code, 200)
+        self.assertEqual(lista.data["count"], 1)
+        duplicado = self.client.post("/api/cadastros/cargos/", {"codigo": "ANALISTA", "descricao": "Outro"}, format="json")
+        self.assertEqual(duplicado.status_code, 400)
+
+        self.client.force_authenticate(self.superuser)
+        mesmo_codigo_outra = self.client.post("/api/cadastros/cargos/", {
+            "empresa": self.outra.pk,
+            "codigo": "ANALISTA",
+            "descricao": "Analista Outra Empresa",
+        }, format="json")
+        self.assertEqual(mesmo_codigo_outra.status_code, 201)
+
+        self.client.force_authenticate(self.user_edit)
+        assfin = Cargo.objects.get(empresa=self.empresa, codigo="ASSFIN")
+        almox = Cargo.objects.get(empresa=self.empresa, codigo="ALMOX")
+        func_assfin = self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="15350946056", cargo=assfin.pk, idloja=None, participa_vendas=False, comissionado=False), format="json")
+        func_almox = self.client.post("/api/cadastros/funcionarios/", self.payload(cpf="11144477735", cargo=almox.pk, idloja=self.loja.pk, participa_vendas=False, comissionado=False), format="json")
+        self.assertEqual(func_assfin.status_code, 201)
+        self.assertEqual(func_almox.status_code, 201)
+        self.assertFalse(PerfilModuloPermissao.objects.filter(perfil=self.user_edit.perfil_principal, modulo__chave="financeiro").exists())
+
+    def test_empresa_nova_recebe_cargos_basicos_sem_lista_fechada(self):
+        empresa = Empresa.objects.create(nome="Empresa Nova Cargos", documento="04252011000110", plano_completo=True)
+        self.assertTrue(Cargo.objects.filter(empresa=empresa, codigo="ASSFIN", descricao="Assistente Financeiro").exists())
+        self.assertTrue(Cargo.objects.filter(empresa=empresa, codigo="AUXADM", descricao="Auxiliar Administrativo").exists())
 
 
 class ClienteMultiempresaTests(OperacionalBaseTest):

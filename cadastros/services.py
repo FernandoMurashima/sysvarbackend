@@ -3,7 +3,102 @@ from django.db import transaction
 
 from auditoria.models import AuditAction, AuditCategory, AuditOrigin
 from auditoria.services import AuditService, instance_snapshot
-from cadastros.models import Cliente
+from cadastros.models import Cargo, Cliente
+
+
+CARGOS_FUNCIONARIOS_INICIAIS = [
+    {
+        "codigo": "VENDEDOR",
+        "descricao": "Vendedor",
+        "participa_vendas": True,
+        "permite_comissao": True,
+        "autoridade_operacional_loja": True,
+        "permite_multiplas_lojas": False,
+        "gerencial": False,
+    },
+    {
+        "codigo": "CAIXA",
+        "descricao": "Caixa",
+        "participa_vendas": False,
+        "permite_comissao": False,
+        "autoridade_operacional_loja": True,
+        "permite_multiplas_lojas": False,
+        "gerencial": False,
+    },
+    {
+        "codigo": "GERENTE",
+        "descricao": "Gerente",
+        "participa_vendas": False,
+        "permite_comissao": False,
+        "autoridade_operacional_loja": True,
+        "permite_multiplas_lojas": False,
+        "gerencial": True,
+    },
+    {
+        "codigo": "SUPERVISOR",
+        "descricao": "Supervisor",
+        "participa_vendas": False,
+        "permite_comissao": False,
+        "autoridade_operacional_loja": True,
+        "permite_multiplas_lojas": True,
+        "gerencial": True,
+    },
+    {"codigo": "ASSISTENTE", "descricao": "Assistente"},
+    {"codigo": "AUXILIAR", "descricao": "Auxiliar"},
+    {"codigo": "AUXADM", "descricao": "Auxiliar Administrativo"},
+    {"codigo": "ASSADM", "descricao": "Assistente Administrativo"},
+    {"codigo": "ASSFIN", "descricao": "Assistente Financeiro"},
+    {"codigo": "AUXFIN", "descricao": "Auxiliar Financeiro"},
+    {"codigo": "COMPRADOR", "descricao": "Comprador"},
+    {
+        "codigo": "ESTOQUISTA",
+        "descricao": "Estoquista",
+        "autoridade_operacional_loja": True,
+    },
+    {
+        "codigo": "ALMOX",
+        "descricao": "Almoxarife",
+        "autoridade_operacional_loja": True,
+    },
+    {
+        "codigo": "CONFERENTE",
+        "descricao": "Conferente",
+        "autoridade_operacional_loja": True,
+    },
+    {
+        "codigo": "RECEBEDOR",
+        "descricao": "Recebedor",
+        "autoridade_operacional_loja": True,
+    },
+    {"codigo": "COSTUREIRA", "descricao": "Costureira"},
+    {"codigo": "AUXPROD", "descricao": "Auxiliar de Produção"},
+]
+
+
+class CargoInicialService:
+    @classmethod
+    def garantir_basicos(cls, empresa):
+        if not empresa:
+            raise ValidationError("Informe a empresa.")
+        criados = []
+        for item in CARGOS_FUNCIONARIOS_INICIAIS:
+            defaults = {
+                "descricao": item["descricao"],
+                "ativo": True,
+                "participa_vendas": item.get("participa_vendas", False),
+                "permite_comissao": item.get("permite_comissao", False),
+                "autoridade_operacional_loja": item.get("autoridade_operacional_loja", False),
+                "permite_multiplas_lojas": item.get("permite_multiplas_lojas", False),
+                "gerencial": item.get("gerencial", False),
+            }
+            cargo, created = Cargo.objects.get_or_create(
+                empresa=empresa,
+                codigo=item["codigo"],
+                defaults=defaults,
+            )
+            if created:
+                criados.append(cargo)
+        return criados
 
 
 class ClientePadraoService:

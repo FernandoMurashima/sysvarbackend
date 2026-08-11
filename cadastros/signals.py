@@ -44,3 +44,9 @@ def ensure_empresa_contract(sender, instance, created, **kwargs):
         ensure_default_profiles(instance)
     except Exception:
         pass
+    try:
+        from cadastros.services import CargoInicialService
+
+        CargoInicialService.garantir_basicos(instance)
+    except Exception:
+        pass
