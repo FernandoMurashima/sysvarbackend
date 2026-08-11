@@ -1,0 +1,13 @@
+.env
+.git
+.gitignore
+venv
+venv_antigo_quebrado
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+backups
+Dockerfile*
