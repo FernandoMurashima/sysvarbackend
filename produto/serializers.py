@@ -7,6 +7,7 @@ from accounts.permissions import has_field_permission
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
+    ProdutoVendaHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
     Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
@@ -240,6 +241,14 @@ class ProdutoSerializer(serializers.ModelSerializer):
         grupo = attrs.get('grupo', getattr(self.instance, 'grupo', None))
         subgrupo = attrs.get('subgrupo', getattr(self.instance, 'subgrupo', None))
         ncm_raw = attrs.get('ncm', getattr(self.instance, 'ncm', None))
+        descricao_reduzida = attrs.get('descricao_reduzida', getattr(self.instance, 'descricao_reduzida', None))
+
+        if self.instance and 'tipo_produto' in attrs and attrs['tipo_produto'] != self.instance.tipo_produto:
+            raise serializers.ValidationError({'tipo_produto': 'Tipo do produto não pode ser alterado após a criação.'})
+
+        if self.instance and 'grade' in attrs and attrs['grade'] != self.instance.grade:
+            if ProdutoDetalhe.objects.filter(produto=self.instance).exists():
+                raise serializers.ValidationError({'grade': 'Grade não pode ser alterada após a geração de SKUs.'})
 
         for campo, obj in (
             ('unidade', unidade),
@@ -260,6 +269,12 @@ class ProdutoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'colecao': 'Coleção com Código (2 dígitos) e Estação (2 dígitos) é obrigatória.'})
             if not grupo or not getattr(grupo, 'CodigoRef', None):
                 raise serializers.ValidationError({'grupo': 'Grupo com CodigoRef (2 dígitos) é obrigatório.'})
+            if not subgrupo:
+                raise serializers.ValidationError({'subgrupo': 'Subgrupo é obrigatório para produtos vendáveis.'})
+            if subgrupo and grupo and subgrupo.Idgrupo_id != grupo.Idgrupo:
+                raise serializers.ValidationError({'subgrupo': 'O subgrupo selecionado não pertence ao grupo informado.'})
+            if not descricao_reduzida or not str(descricao_reduzida).strip():
+                raise serializers.ValidationError({'descricao_reduzida': 'Descrição reduzida é obrigatória para produtos vendáveis.'})
             if grade is None:
                 raise serializers.ValidationError({'grade': 'Obrigatória para produtos vendáveis.'})
             ncm_fmt = _normalize_ncm_dotted(ncm_raw)
@@ -400,6 +415,59 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
         validated_data['ean13'] = base12 + dv
 
         return super().create(validated_data)
+
+
+class ProdutoVendaHistoricoSerializer(serializers.ModelSerializer):
+    usuario_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProdutoVendaHistorico
+        fields = (
+            'id', 'empresa', 'produto', 'data_evento', 'tipo_evento', 'usuario',
+            'usuario_nome', 'descricao', 'dados_anteriores', 'dados_novos',
+        )
+        read_only_fields = fields
+
+    def get_usuario_nome(self, obj):
+        user = obj.usuario
+        if not user:
+            return None
+        return getattr(user, 'get_full_name', lambda: '')() or getattr(user, 'username', None) or str(user)
+
+
+class ProdutoImagemSerializer(serializers.ModelSerializer):
+    imagem_url = serializers.SerializerMethodField()
+    imagem_reduzida_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProdutoImagem
+        fields = '__all__'
+        read_only_fields = ('data_cadastro',)
+
+    def get_imagem_url(self, obj):
+        request = self.context.get('request')
+        if not obj.imagem:
+            return None
+        url = obj.imagem.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_imagem_reduzida_url(self, obj):
+        request = self.context.get('request')
+        if not obj.imagem_reduzida:
+            return None
+        url = obj.imagem_reduzida.url
+        return request.build_absolute_uri(url) if request else url
+
+    def validate(self, attrs):
+        produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
+        if not produto:
+            raise serializers.ValidationError({'produto': 'Informe o produto.'})
+        empresa = _empresa_request(self)
+        if empresa and produto.empresa_id != empresa.id:
+            raise serializers.ValidationError({'produto': 'O produto selecionado pertence a outra empresa.'})
+        if not self.instance and ProdutoImagem.objects.filter(produto=produto).count() >= 3:
+            raise serializers.ValidationError({'produto': 'Produto permite no máximo 3 imagens.'})
+        return attrs
 
 class TabelaprecoProdutoSerializer(serializers.ModelSerializer):
     class Meta:

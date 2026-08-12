@@ -1,6 +1,7 @@
 from django.db import models, transaction
 from django.utils import timezone
 from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
+from django.conf import settings
 from decimal import Decimal
 
 # ------------------------------------------------------------
@@ -457,6 +458,75 @@ class ProdutoDetalhe(models.Model):
         if creating or (not self.config_ean_id or not self.codigo_item_ref or not self.ean13):
             self._alocar_itemref_e_ean()
         super().save(*args, **kwargs)
+
+
+class ProdutoVendaHistorico(models.Model):
+    CRIACAO = 'CRIACAO'
+    ALTERACAO_CADASTRAL = 'ALTERACAO_CADASTRAL'
+    ALTERACAO_FISCAL = 'ALTERACAO_FISCAL'
+    SKU_CRIADO = 'SKU_CRIADO'
+    SKU_INATIVADO = 'SKU_INATIVADO'
+    SKU_REATIVADO = 'SKU_REATIVADO'
+    ATIVACAO = 'ATIVACAO'
+    INATIVACAO = 'INATIVACAO'
+    BLOQUEIO_VENDA = 'BLOQUEIO_VENDA'
+    DESBLOQUEIO_VENDA = 'DESBLOQUEIO_VENDA'
+    IMAGEM_INCLUIDA = 'IMAGEM_INCLUIDA'
+    IMAGEM_REMOVIDA = 'IMAGEM_REMOVIDA'
+    IMAGEM_PRINCIPAL = 'IMAGEM_PRINCIPAL'
+    TIPO_EVENTO_CHOICES = (
+        (CRIACAO, 'Criação'),
+        (ALTERACAO_CADASTRAL, 'Alteração cadastral'),
+        (ALTERACAO_FISCAL, 'Alteração fiscal'),
+        (SKU_CRIADO, 'SKU criado'),
+        (SKU_INATIVADO, 'SKU inativado'),
+        (SKU_REATIVADO, 'SKU reativado'),
+        (ATIVACAO, 'Ativação'),
+        (INATIVACAO, 'Inativação'),
+        (BLOQUEIO_VENDA, 'Bloqueio de venda'),
+        (DESBLOQUEIO_VENDA, 'Desbloqueio de venda'),
+        (IMAGEM_INCLUIDA, 'Imagem incluída'),
+        (IMAGEM_REMOVIDA, 'Imagem removida'),
+        (IMAGEM_PRINCIPAL, 'Imagem principal'),
+    )
+
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='historicos_produto_venda', db_index=True)
+    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='historico_venda')
+    data_evento = models.DateTimeField(default=timezone.now, db_index=True)
+    tipo_evento = models.CharField(max_length=30, choices=TIPO_EVENTO_CHOICES, db_index=True)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='historicos_produto_venda')
+    descricao = models.TextField(blank=True, default='')
+    dados_anteriores = models.JSONField(default=dict, blank=True)
+    dados_novos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-data_evento', '-id']
+        indexes = [
+            models.Index(fields=['empresa', 'produto', '-data_evento']),
+            models.Index(fields=['produto', 'tipo_evento']),
+        ]
+
+    def __str__(self):
+        return f'{self.produto_id} - {self.tipo_evento} - {self.data_evento:%Y-%m-%d %H:%M}'
+
+
+class ProdutoImagem(models.Model):
+    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='imagens')
+    imagem = models.FileField(upload_to='produtos/imagens/')
+    imagem_reduzida = models.FileField(upload_to='produtos/imagens/reduzidas/', null=True, blank=True)
+    principal = models.BooleanField(default=False, db_index=True)
+    ordem = models.PositiveSmallIntegerField(default=1)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['ordem', 'id']
+        indexes = [
+            models.Index(fields=['produto', 'principal']),
+            models.Index(fields=['produto', 'ordem']),
+        ]
+
+    def __str__(self):
+        return f'{self.produto_id} - imagem {self.pk}'
 
 
 class TabelaprecoProduto(models.Model):

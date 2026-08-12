@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -18,6 +18,7 @@ from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
+    ProdutoVendaHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
     Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
@@ -26,6 +27,7 @@ from .serializers import (
     ConfigEanSerializer, NcmSerializer, GradeSerializer, TamanhoSerializer, CorSerializer,
     MaterialSerializer, ColecaoSerializer, UnidadeSerializer, GrupoSerializer, SubgrupoSerializer,
     TabelaprecoSerializer, CodigosSerializer, ProdutoSerializer, ProdutoDetalheSerializer,
+    ProdutoVendaHistoricoSerializer, ProdutoImagemSerializer,
     TabelaprecoProdutoSerializer, FichaTecnicaSerializer, FichaTecnicaItemSerializer,
     OrdemProducaoSerializer, OrdemProducaoItemSerializer, PromocaoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
     EstoqueMovimentacaoSerializer, InventarioEstoqueSerializer, InventarioEstoqueItemSerializer
@@ -191,9 +193,71 @@ class CodigosViewSet(BaseViewSet):
 class ProdutoViewSet(BaseViewSet):
     queryset = Produto.objects.all().order_by('-data_cadastro')
     serializer_class = ProdutoSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['data_cadastro', 'descricao', 'descricao_reduzida', 'referencia', 'tipo_produto', 'grupo', 'colecao', 'ativo']
+    ordering = ['-data_cadastro']
 
     # Usado por CanToggleProductFlags
     model_perm_codename = "produto.change_produto"
+
+    CADASTRAL_FIELDS = ['descricao', 'descricao_reduzida', 'unidade', 'grupo', 'subgrupo', 'colecao', 'material', 'grade', 'observacoes']
+    FISCAL_FIELDS = ['ncm', 'origem_mercadoria', 'csosn_ou_cst_icms', 'aliquota_icms', 'cfop_venda_dentro', 'cfop_venda_fora', 'cst_pis', 'aliq_pis', 'cst_cofins', 'aliq_cofins', 'ipi_situacao', 'aliq_ipi']
+
+    def _is_produto_venda(self, produto):
+        return produto.tipo_produto in ('1', '3')
+
+    def _snapshot(self, produto, fields):
+        data = {}
+        for field in fields:
+            value = getattr(produto, f'{field}_id', getattr(produto, field, None))
+            data[field] = str(value) if isinstance(value, Decimal) else value
+        return data
+
+    def _registrar_historico(self, produto, tipo_evento, descricao='', anteriores=None, novos=None):
+        if not produto or not self._is_produto_venda(produto):
+            return
+        user = getattr(self.request, 'user', None)
+        ProdutoVendaHistorico.objects.create(
+            empresa=produto.empresa,
+            produto=produto,
+            tipo_evento=tipo_evento,
+            usuario=user if user and user.is_authenticated else None,
+            descricao=descricao,
+            dados_anteriores=anteriores or {},
+            dados_novos=novos or {},
+        )
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        produto = serializer.instance
+        self._registrar_historico(produto, ProdutoVendaHistorico.CRIACAO, 'Produto Venda criado.', novos=self._snapshot(produto, self.CADASTRAL_FIELDS + self.FISCAL_FIELDS))
+
+    def perform_update(self, serializer):
+        produto = self.get_object()
+        anteriores_cadastrais = self._snapshot(produto, self.CADASTRAL_FIELDS)
+        anteriores_fiscais = self._snapshot(produto, self.FISCAL_FIELDS)
+        super().perform_update(serializer)
+        produto = serializer.instance
+        novos_cadastrais = self._snapshot(produto, self.CADASTRAL_FIELDS)
+        novos_fiscais = self._snapshot(produto, self.FISCAL_FIELDS)
+        alterados_cadastrais = {k: anteriores_cadastrais[k] for k in self.CADASTRAL_FIELDS if anteriores_cadastrais.get(k) != novos_cadastrais.get(k)}
+        alterados_fiscais = {k: anteriores_fiscais[k] for k in self.FISCAL_FIELDS if anteriores_fiscais.get(k) != novos_fiscais.get(k)}
+        if alterados_cadastrais:
+            self._registrar_historico(
+                produto,
+                ProdutoVendaHistorico.ALTERACAO_CADASTRAL,
+                'Alteração cadastral do Produto Venda.',
+                anteriores=alterados_cadastrais,
+                novos={k: novos_cadastrais[k] for k in alterados_cadastrais},
+            )
+        if alterados_fiscais:
+            self._registrar_historico(
+                produto,
+                ProdutoVendaHistorico.ALTERACAO_FISCAL,
+                'Alteração fiscal do Produto Venda.',
+                anteriores=alterados_fiscais,
+                novos={k: novos_fiscais[k] for k in alterados_fiscais},
+            )
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -209,6 +273,22 @@ class ProdutoViewSet(BaseViewSet):
             qs = qs.filter(ativo=True)
         elif ativo in ('false', '0'):
             qs = qs.filter(ativo=False)
+
+        bloqueado = self.request.query_params.get('bloqueado_venda')
+        if bloqueado in ('true', '1'):
+            qs = qs.filter(bloqueado_venda=True)
+        elif bloqueado in ('false', '0'):
+            qs = qs.filter(bloqueado_venda=False)
+
+        grupo = self.request.query_params.get('grupo')
+        colecao = self.request.query_params.get('colecao')
+        subgrupo = self.request.query_params.get('subgrupo')
+        if grupo:
+            qs = qs.filter(grupo_id=grupo)
+        if colecao:
+            qs = qs.filter(colecao_id=colecao)
+        if subgrupo:
+            qs = qs.filter(subgrupo_id=subgrupo)
 
         search = (self.request.query_params.get('search') or '').strip()
       #  if search:
@@ -232,6 +312,17 @@ class ProdutoViewSet(BaseViewSet):
 
         return qs
 
+    def _sku_info(self, sku):
+        return {
+            'sku_id': sku.pk,
+            'cor': getattr(sku.idcor, 'Descricao', None),
+            'cor_id': sku.idcor_id,
+            'tamanho': getattr(sku.idtamanho, 'Tamanho', None),
+            'tamanho_id': sku.idtamanho_id,
+            'ean13': sku.ean13,
+            'codigo_item_ref': sku.codigo_item_ref,
+        }
+
     @action(detail=True, methods=['post'], url_path='gerar-skus')
     def gerar_skus(self, request, pk=None):
         """
@@ -249,8 +340,12 @@ class ProdutoViewSet(BaseViewSet):
             return Response({'detail': 'Produto sem grade.'}, status=status.HTTP_400_BAD_REQUEST)
 
         cores = request.data.get('cores') or []
-        if not isinstance(cores, list) or not cores:
+        if not isinstance(cores, list):
             return Response({'detail': 'Informe "cores" como lista de Idcor.'}, status=status.HTTP_400_BAD_REQUEST)
+        cores_ids = {int(cor_id) for cor_id in cores if str(cor_id).isdigit()}
+        cores_validas = set(Cor.objects.filter(pk__in=cores_ids).values_list('pk', flat=True))
+        if cores_ids != cores_validas:
+            return Response({'detail': 'Uma ou mais cores informadas não existem.'}, status=status.HTTP_400_BAD_REQUEST)
 
         tamanho_ids = request.data.get('tamanhos')
         if tamanho_ids:
@@ -258,24 +353,82 @@ class ProdutoViewSet(BaseViewSet):
         else:
             tamanhos = list(Tamanho.objects.filter(idgrade_id=produto.grade_id))
 
-        created, skipped = [], []
+        created, reactivated, inactivated, unchanged = [], [], [], []
 
-        for cor_id in cores:
-            for tam in tamanhos:
-                if ProdutoDetalhe.objects.filter(produto_id=produto.pk, idcor_id=cor_id, idtamanho_id=tam.pk).exists():
-                    skipped.append({'idcor': cor_id, 'idtamanho': tam.pk})
-                    continue
-                payload = {'produto': produto.pk, 'idcor': cor_id, 'idtamanho': tam.pk}
-                ser = ProdutoDetalheSerializer(data=payload)
-                ser.is_valid(raise_exception=True)
-                ser.save()  # gera config_ean + codigo_item_ref + ean13 automaticamente
-                created.append(ser.data)
+        with transaction.atomic():
+            atuais = ProdutoDetalhe.objects.select_for_update().select_related('idcor', 'idtamanho').filter(produto=produto)
+            atuais_map = {(sku.idcor_id, sku.idtamanho_id): sku for sku in atuais}
+
+            for cor_id in cores_ids:
+                for tam in tamanhos:
+                    sku = atuais_map.get((cor_id, tam.pk))
+                    if sku is None:
+                        payload = {'produto': produto.pk, 'idcor': cor_id, 'idtamanho': tam.pk}
+                        ser = ProdutoDetalheSerializer(data=payload, context={'request': request})
+                        ser.is_valid(raise_exception=True)
+                        sku = ser.save()
+                        sku = ProdutoDetalhe.objects.select_related('idcor', 'idtamanho').get(pk=sku.pk)
+                        created.append(ProdutoDetalheSerializer(sku, context={'request': request}).data)
+                        self._registrar_historico(produto, ProdutoVendaHistorico.SKU_CRIADO, 'SKU criado pela sincronização de cores.', novos=self._sku_info(sku))
+                    elif not sku.ativo:
+                        sku.ativo = True
+                        sku.save(update_fields=['ativo'])
+                        reactivated.append(self._sku_info(sku))
+                        self._registrar_historico(produto, ProdutoVendaHistorico.SKU_REATIVADO, 'SKU reativado pela sincronização de cores.', novos=self._sku_info(sku))
+                    else:
+                        unchanged.append(self._sku_info(sku))
+
+            for sku in atuais:
+                if sku.idcor_id not in cores_ids and sku.ativo:
+                    antes = self._sku_info(sku)
+                    sku.ativo = False
+                    sku.save(update_fields=['ativo'])
+                    inactivated.append(antes)
+                    self._registrar_historico(produto, ProdutoVendaHistorico.SKU_INATIVADO, 'SKU inativado pela sincronização de cores.', anteriores=antes)
 
         return Response({
-            'counts': {'created': len(created), 'skipped': len(skipped)},
+            'counts': {'created': len(created), 'reactivated': len(reactivated), 'inactivated': len(inactivated), 'unchanged': len(unchanged)},
             'created': created,
-            'skipped': skipped
+            'reactivated': reactivated,
+            'inactivated': inactivated,
+            'unchanged': unchanged,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='historico')
+    def historico(self, request, pk=None):
+        produto = self.get_object()
+        qs = produto.historico_venda.all().order_by('-data_evento', '-id')
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            ser = ProdutoVendaHistoricoSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(ser.data)
+        ser = ProdutoVendaHistoricoSerializer(qs, many=True, context={'request': request})
+        return Response(ser.data)
+
+    def destroy(self, request, *args, **kwargs):
+        produto = self.get_object()
+        bloqueios = []
+        for rel in produto._meta.related_objects:
+            accessor = rel.get_accessor_name()
+            if accessor in {'skus', 'precos', 'historico_venda', 'imagens', 'promocoes'}:
+                continue
+            if rel.related_model._meta.app_label == 'auditoria':
+                continue
+            manager = getattr(produto, accessor, None)
+            if manager is not None and hasattr(manager, 'exists') and manager.exists():
+                bloqueios.append(rel.related_model._meta.verbose_name_plural or rel.related_model.__name__)
+        eans = list(produto.skus.values_list('ean13', flat=True))
+        if eans and (
+            EstoqueMovimentacao.objects.filter(CodigodeBarra__in=eans).exists()
+            or InventarioEstoqueItem.objects.filter(CodigodeBarra__in=eans).exists()
+        ):
+            bloqueios.append('movimentações de estoque')
+        if bloqueios:
+            return Response(
+                {'detail': 'Produto possui utilização/movimentação operacional e deve ser inativado ou bloqueado em vez de excluído.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='inicializar-estoque')
     def inicializar_estoque(self, request, pk=None):
@@ -351,6 +504,7 @@ class ProdutoViewSet(BaseViewSet):
             obj.data_inativo = None
             obj.save(update_fields=['ativo', 'data_inativo'])
             _audit('produto', obj.pk, {'ativo': [before, True]}, request, action="custom")
+            self._registrar_historico(obj, ProdutoVendaHistorico.ATIVACAO, 'Produto Venda ativado.', anteriores={'ativo': before}, novos={'ativo': True})
         ser = self.get_serializer(obj)
         return Response(ser.data)
 
@@ -373,6 +527,7 @@ class ProdutoViewSet(BaseViewSet):
             obj.save(update_fields=['ativo', 'data_inativo'])
             changes = {'ativo': [before, False], 'motivo': motivo}
             _audit('produto', obj.pk, changes, request, action="custom")
+            self._registrar_historico(obj, ProdutoVendaHistorico.INATIVACAO, 'Produto Venda inativado.', anteriores={'ativo': before}, novos={'ativo': False, 'motivo': motivo})
         ser = self.get_serializer(obj)
         return Response(ser.data)
 
@@ -393,6 +548,7 @@ class ProdutoViewSet(BaseViewSet):
             obj.bloqueado_venda = True
             obj.save(update_fields=['bloqueado_venda'])
             _audit('produto', obj.pk, {'bloqueado_venda': [before, True], 'motivo': motivo}, request, action="custom")
+            self._registrar_historico(obj, ProdutoVendaHistorico.BLOQUEIO_VENDA, 'Produto Venda bloqueado para venda.', anteriores={'bloqueado_venda': before}, novos={'bloqueado_venda': True, 'motivo': motivo})
         ser = self.get_serializer(obj)
         return Response(ser.data)
 
@@ -404,8 +560,107 @@ class ProdutoViewSet(BaseViewSet):
             obj.bloqueado_venda = False
             obj.save(update_fields=['bloqueado_venda'])
             _audit('produto', obj.pk, {'bloqueado_venda': [before, False]}, request, action="custom")
+            self._registrar_historico(obj, ProdutoVendaHistorico.DESBLOQUEIO_VENDA, 'Produto Venda desbloqueado para venda.', anteriores={'bloqueado_venda': before}, novos={'bloqueado_venda': False})
         ser = self.get_serializer(obj)
         return Response(ser.data)
+
+
+class ProdutoImagemViewSet(BaseViewSet):
+    queryset = ProdutoImagem.objects.select_related('produto', 'produto__empresa').all()
+    serializer_class = ProdutoImagemSerializer
+
+    def get_queryset(self):
+        qs = ProdutoImagem.objects.select_related('produto', 'produto__empresa').order_by('produto_id', 'ordem', 'id')
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(produto__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        produto_id = self.request.query_params.get('produto')
+        if produto_id:
+            qs = qs.filter(produto_id=produto_id)
+        return qs
+
+    def _registrar_historico_imagem(self, imagem, tipo_evento, descricao, anteriores=None, novos=None):
+        produto = imagem.produto
+        if produto.tipo_produto not in ('1', '3'):
+            return
+        user = getattr(self.request, 'user', None)
+        ProdutoVendaHistorico.objects.create(
+            empresa=produto.empresa,
+            produto=produto,
+            tipo_evento=tipo_evento,
+            usuario=user if user and user.is_authenticated else None,
+            descricao=descricao,
+            dados_anteriores=anteriores or {},
+            dados_novos=novos or {},
+        )
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        principal = serializer.validated_data.get('principal') is True
+        produto = serializer.validated_data.get('produto')
+        if principal:
+            ProdutoImagem.objects.select_for_update().filter(produto=produto, principal=True).update(principal=False)
+        imagem = serializer.save()
+        self._registrar_historico_imagem(
+            imagem,
+            ProdutoVendaHistorico.IMAGEM_INCLUIDA,
+            'Imagem incluída no Produto Venda.',
+            novos={'imagem_id': imagem.pk, 'principal': imagem.principal, 'ordem': imagem.ordem},
+        )
+        if principal:
+            self._registrar_historico_imagem(
+                imagem,
+                ProdutoVendaHistorico.IMAGEM_PRINCIPAL,
+                'Imagem marcada como principal.',
+                novos={'imagem_id': imagem.pk},
+            )
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        imagem = self.get_object()
+        principal_antes = imagem.principal
+        principal_novo = serializer.validated_data.get('principal', principal_antes)
+        if principal_novo:
+            ProdutoImagem.objects.select_for_update().filter(produto=imagem.produto, principal=True).exclude(pk=imagem.pk).update(principal=False)
+        imagem = serializer.save()
+        if principal_novo and not principal_antes:
+            self._registrar_historico_imagem(
+                imagem,
+                ProdutoVendaHistorico.IMAGEM_PRINCIPAL,
+                'Imagem marcada como principal.',
+                anteriores={'imagem_id': imagem.pk, 'principal': principal_antes},
+                novos={'imagem_id': imagem.pk, 'principal': True},
+            )
+
+    @action(detail=True, methods=['post'], url_path='marcar-principal')
+    @transaction.atomic
+    def marcar_principal(self, request, pk=None):
+        imagem = self.get_object()
+        ProdutoImagem.objects.select_for_update().filter(produto=imagem.produto, principal=True).exclude(pk=imagem.pk).update(principal=False)
+        if not imagem.principal:
+            imagem.principal = True
+            imagem.save(update_fields=['principal'])
+            self._registrar_historico_imagem(
+                imagem,
+                ProdutoVendaHistorico.IMAGEM_PRINCIPAL,
+                'Imagem marcada como principal.',
+                novos={'imagem_id': imagem.pk, 'principal': True},
+            )
+        return Response(self.get_serializer(imagem).data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        imagem = self.get_object()
+        historico_payload = {'imagem_id': imagem.pk, 'principal': imagem.principal, 'ordem': imagem.ordem}
+        self._registrar_historico_imagem(
+            imagem,
+            ProdutoVendaHistorico.IMAGEM_REMOVIDA,
+            'Imagem removida do Produto Venda.',
+            anteriores=historico_payload,
+        )
+        return super().destroy(request, *args, **kwargs)
 
 
 class ProdutoDetalheViewSet(BaseViewSet):
