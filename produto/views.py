@@ -47,6 +47,22 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str):
     )
 
 
+def _audit_produto_update(model_name: str, obj_id: str, anteriores: dict, novos: dict, request, action: str):
+    AuditService.success(
+        AuditAction.OBJECT_UPDATED,
+        category=AuditCategory.PRODUCT,
+        request=request,
+        user=getattr(request, "user", None),
+        app_label="produto",
+        model=model_name,
+        object_id=obj_id,
+        before=anteriores,
+        after=novos,
+        changed_fields=list(novos.keys()),
+        metadata={"legacy_action": action},
+    )
+
+
 def _money(value):
     return Decimal(value or 0).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
@@ -243,21 +259,25 @@ class ProdutoViewSet(BaseViewSet):
         alterados_cadastrais = {k: anteriores_cadastrais[k] for k in self.CADASTRAL_FIELDS if anteriores_cadastrais.get(k) != novos_cadastrais.get(k)}
         alterados_fiscais = {k: anteriores_fiscais[k] for k in self.FISCAL_FIELDS if anteriores_fiscais.get(k) != novos_fiscais.get(k)}
         if alterados_cadastrais:
+            novos_alterados = {k: novos_cadastrais[k] for k in alterados_cadastrais}
             self._registrar_historico(
                 produto,
                 ProdutoVendaHistorico.ALTERACAO_CADASTRAL,
                 'Alteração cadastral do Produto Venda.',
                 anteriores=alterados_cadastrais,
-                novos={k: novos_cadastrais[k] for k in alterados_cadastrais},
+                novos=novos_alterados,
             )
+            _audit_produto_update('produto', produto.pk, alterados_cadastrais, novos_alterados, self.request, action='update_cadastral')
         if alterados_fiscais:
+            novos_alterados = {k: novos_fiscais[k] for k in alterados_fiscais}
             self._registrar_historico(
                 produto,
                 ProdutoVendaHistorico.ALTERACAO_FISCAL,
                 'Alteração fiscal do Produto Venda.',
                 anteriores=alterados_fiscais,
-                novos={k: novos_fiscais[k] for k in alterados_fiscais},
+                novos=novos_alterados,
             )
+            _audit_produto_update('produto', produto.pk, alterados_fiscais, novos_alterados, self.request, action='update_fiscal')
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -291,6 +311,8 @@ class ProdutoViewSet(BaseViewSet):
             qs = qs.filter(subgrupo_id=subgrupo)
 
         search = (self.request.query_params.get('search') or '').strip()
+        referencia = (self.request.query_params.get('referencia') or '').strip()
+        codigo = (self.request.query_params.get('codigo') or '').strip()
       #  if search:
       #      qs = qs.filter(
       #          Q(descricao__icontains=search)
@@ -308,6 +330,10 @@ class ProdutoViewSet(BaseViewSet):
             | Q(skus__ean13__iexact=search)
             | Q(skus__codigo_item_ref__iexact=search)
             ).distinct()
+        if referencia:
+            qs = qs.filter(referencia__icontains=referencia)
+        if codigo:
+            qs = qs.filter(descricao_reduzida__icontains=codigo)
         # fim do bloco
 
         return qs
@@ -428,6 +454,13 @@ class ProdutoViewSet(BaseViewSet):
                 {'detail': 'Produto possui utilização/movimentação operacional e deve ser inativado ou bloqueado em vez de excluído.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if eans:
+            Estoque.objects.filter(
+                CodigodeBarra__in=eans,
+            ).filter(
+                Q(Estoque=0) | Q(Estoque__isnull=True),
+                Q(reserva=0) | Q(reserva__isnull=True),
+            ).delete()
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='inicializar-estoque')
