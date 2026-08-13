@@ -272,6 +272,8 @@ class ProdutoViewSet(BaseViewSet):
         anteriores_fiscais = self._snapshot(produto, self.FISCAL_FIELDS)
         super().perform_update(serializer)
         produto = serializer.instance
+        produto.refresh_from_db()
+        serializer.instance = produto
         novos_cadastrais = self._snapshot(produto, self.CADASTRAL_FIELDS)
         novos_fiscais = self._snapshot(produto, self.FISCAL_FIELDS)
         alterados_cadastrais = {k: anteriores_cadastrais[k] for k in self.CADASTRAL_FIELDS if anteriores_cadastrais.get(k) != novos_cadastrais.get(k)}

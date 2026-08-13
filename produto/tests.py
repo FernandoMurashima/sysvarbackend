@@ -117,6 +117,66 @@ class ProdutoVendaApiTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.data["referencia"], "USO-000001")
 
+    def test_edicao_uso_consumo_persiste_no_banco_get_e_historico_diferencas(self):
+        outra_unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Pacote", Codigo="PCT")
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="2",
+            descricao="Papel A4",
+            descricao_reduzida="PAPEL",
+            unidade=self.unidade,
+            observacoes="Observação original",
+            ncm=self.ncm.ncm,
+        )
+
+        payload = {
+            "tipo_produto": "2",
+            "descricao": "Papel A4 75g",
+            "descricao_reduzida": "PAPEL A4",
+            "unidade": outra_unidade.pk,
+            "observacoes": "Observação alterada",
+            "ncm": self.ncm2.ncm,
+        }
+        resp = self.client.patch(f"/api/produto/produto/{produto.pk}/", payload, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["descricao"], "Papel A4 75g")
+        self.assertEqual(resp.data["descricao_reduzida"], "PAPEL A4")
+        self.assertEqual(resp.data["unidade"], outra_unidade.pk)
+        self.assertEqual(resp.data["observacoes"], "Observação alterada")
+        self.assertEqual(resp.data["ncm"], self.ncm2.ncm)
+
+        produto_banco = Produto.objects.get(pk=produto.pk)
+        produto_banco.refresh_from_db()
+        self.assertEqual(produto_banco.descricao, "Papel A4 75g")
+        self.assertEqual(produto_banco.descricao_reduzida, "PAPEL A4")
+        self.assertEqual(produto_banco.unidade_id, outra_unidade.pk)
+        self.assertEqual(produto_banco.observacoes, "Observação alterada")
+        self.assertEqual(produto_banco.ncm, self.ncm2.ncm)
+
+        get_resp = self.client.get(f"/api/produto/produto/{produto.pk}/")
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertEqual(get_resp.data["descricao"], "Papel A4 75g")
+        self.assertEqual(get_resp.data["descricao_reduzida"], "PAPEL A4")
+        self.assertEqual(get_resp.data["unidade"], outra_unidade.pk)
+        self.assertEqual(get_resp.data["observacoes"], "Observação alterada")
+        self.assertEqual(get_resp.data["ncm"], self.ncm2.ncm)
+
+        cadastral = ProdutoUsoConsumoHistorico.objects.get(produto=produto, tipo_evento=ProdutoUsoConsumoHistorico.ALTERACAO_CADASTRAL)
+        self.assertEqual(set(cadastral.dados_anteriores.keys()), {"descricao", "descricao_reduzida", "unidade", "observacoes"})
+        self.assertEqual(cadastral.dados_anteriores["descricao"], "Papel A4")
+        self.assertEqual(cadastral.dados_novos["descricao"], "Papel A4 75g")
+        self.assertEqual(cadastral.dados_anteriores["descricao_reduzida"], "PAPEL")
+        self.assertEqual(cadastral.dados_novos["descricao_reduzida"], "PAPEL A4")
+        self.assertEqual(cadastral.dados_anteriores["unidade"], self.unidade.pk)
+        self.assertEqual(cadastral.dados_novos["unidade"], outra_unidade.pk)
+        self.assertEqual(cadastral.dados_anteriores["observacoes"], "Observação original")
+        self.assertEqual(cadastral.dados_novos["observacoes"], "Observação alterada")
+
+        fiscal = ProdutoUsoConsumoHistorico.objects.get(produto=produto, tipo_evento=ProdutoUsoConsumoHistorico.ALTERACAO_FISCAL)
+        self.assertEqual(set(fiscal.dados_anteriores.keys()), {"ncm"})
+        self.assertEqual(fiscal.dados_anteriores["ncm"], self.ncm.ncm)
+        self.assertEqual(fiscal.dados_novos["ncm"], self.ncm2.ncm)
+
     def sync_cores(self, produto, cores):
         return self.client.post(f"/api/produto/produto/{produto.pk}/gerar-skus/", {"cores": cores}, format="json")
 
