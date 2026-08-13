@@ -227,8 +227,6 @@ class InventarioEstoqueSerializer(serializers.ModelSerializer):
 class ProdutoSerializer(serializers.ModelSerializer):
     referencia = serializers.CharField(read_only=True)
     cadastro_fiscal_incompleto = serializers.SerializerMethodField()
-    saldo_uso_consumo = serializers.SerializerMethodField()
-    matriz_uso_consumo = serializers.SerializerMethodField()
 
     class Meta:
         model = Produto
@@ -236,18 +234,6 @@ class ProdutoSerializer(serializers.ModelSerializer):
 
     def get_cadastro_fiscal_incompleto(self, obj):
         return obj.tipo_produto == '2' and not bool(obj.ncm)
-
-    def get_saldo_uso_consumo(self, obj):
-        if obj.tipo_produto != '2' or not obj.controla_estoque:
-            return None
-        estoque = obj.estoques_uso_consumo.order_by('loja_matriz_id').first()
-        return str(estoque.saldo) if estoque else '0.000'
-
-    def get_matriz_uso_consumo(self, obj):
-        if obj.tipo_produto != '2':
-            return None
-        estoque = obj.estoques_uso_consumo.select_related('loja_matriz').order_by('loja_matriz_id').first()
-        return getattr(estoque.loja_matriz, 'nome_loja', None) if estoque else None
 
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
@@ -318,7 +304,6 @@ class ProdutoSerializer(serializers.ModelSerializer):
             if tipo == '4':
                 attrs['grupo'] = None
                 attrs['subgrupo'] = None
-                attrs['controla_estoque'] = False
             if ncm_raw:
                 ncm_fmt = _normalize_ncm_dotted(ncm_raw)
                 ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
@@ -475,23 +460,30 @@ class ProdutoUsoConsumoHistoricoSerializer(ProdutoVendaHistoricoSerializer):
 class ProdutoUsoConsumoEstoqueSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
     produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
-    loja_matriz_nome = serializers.CharField(source='loja_matriz.nome_loja', read_only=True)
+    loja_nome = serializers.CharField(source='loja.nome_loja', read_only=True)
 
     class Meta:
         model = ProdutoUsoConsumoEstoque
         fields = '__all__'
-        read_only_fields = ('empresa', 'loja_matriz', 'saldo', 'atualizado_em')
+        read_only_fields = ('empresa', 'saldo', 'atualizado_em')
 
 
 class ProdutoUsoConsumoMovimentacaoSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
     produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
-    loja_matriz_nome = serializers.CharField(source='loja_matriz.nome_loja', read_only=True)
+    loja_nome = serializers.CharField(source='loja.nome_loja', read_only=True)
+    usuario_nome = serializers.SerializerMethodField()
 
     class Meta:
         model = ProdutoUsoConsumoMovimentacao
         fields = '__all__'
-        read_only_fields = ('empresa', 'loja_matriz', 'saldo_anterior', 'saldo_posterior', 'data_movimento', 'usuario')
+        read_only_fields = ('empresa', 'saldo_anterior', 'saldo_posterior', 'data_movimento', 'usuario')
+
+    def get_usuario_nome(self, obj):
+        user = obj.usuario
+        if not user:
+            return None
+        return getattr(user, 'get_full_name', lambda: '')() or getattr(user, 'username', None) or str(user)
 
 
 class ProdutoImagemSerializer(serializers.ModelSerializer):

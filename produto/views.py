@@ -264,7 +264,7 @@ class ProdutoViewSet(BaseViewSet):
         super().perform_create(serializer)
         produto = serializer.instance
         self._registrar_historico(produto, ProdutoVendaHistorico.CRIACAO, 'Produto Venda criado.', novos=self._snapshot(produto, self.CADASTRAL_FIELDS + self.FISCAL_FIELDS))
-        self._registrar_historico_uso(produto, ProdutoUsoConsumoHistorico.CRIACAO, 'Produto Uso/Consumo criado.', novos=self._snapshot(produto, self.CADASTRAL_FIELDS + self.FISCAL_FIELDS + ['controla_estoque']))
+        self._registrar_historico_uso(produto, ProdutoUsoConsumoHistorico.CRIACAO, 'Produto Uso/Consumo criado.', novos=self._snapshot(produto, self.CADASTRAL_FIELDS + self.FISCAL_FIELDS))
 
     def perform_update(self, serializer):
         produto = self.get_object()
@@ -319,12 +319,6 @@ class ProdutoViewSet(BaseViewSet):
             qs = qs.filter(bloqueado_venda=True)
         elif bloqueado in ('false', '0'):
             qs = qs.filter(bloqueado_venda=False)
-
-        controla_estoque = self.request.query_params.get('controla_estoque')
-        if controla_estoque in ('true', '1'):
-            qs = qs.filter(controla_estoque=True)
-        elif controla_estoque in ('false', '0'):
-            qs = qs.filter(controla_estoque=False)
 
         fiscal_incompleto = self.request.query_params.get('cadastro_fiscal_incompleto')
         if fiscal_incompleto in ('true', '1'):
@@ -383,7 +377,6 @@ class ProdutoViewSet(BaseViewSet):
             'total': qs.count(),
             'ativos': qs.filter(ativo=True).count(),
             'inativos': qs.filter(ativo=False).count(),
-            'controlados_estoque': qs.filter(controla_estoque=True).count(),
             'cadastro_fiscal_incompleto': qs.filter(Q(ncm__isnull=True) | Q(ncm='')).count(),
         })
 
@@ -662,38 +655,28 @@ class ProdutoViewSet(BaseViewSet):
         ser = self.get_serializer(obj)
         return Response(ser.data)
 
-    def _matriz_unica_ativa(self, empresa):
-        qs = Loja.objects.filter(empresa=empresa, tipo_unidade=Loja.TIPO_MATRIZ, ativo=True)
-        total = qs.count()
-        if total == 0:
-            raise ValidationError({'loja_matriz': 'Empresa não possui Matriz ativa para controlar estoque de Uso/Consumo.'})
-        if total > 1:
-            raise ValidationError({'loja_matriz': 'Empresa possui mais de uma Matriz ativa. Corrija o cadastro de lojas.'})
-        return qs.get()
-
-    def _movimenta_uso_consumo(self, produto, tipo, quantidade, motivo='', destino='', documento='', origem=''):
+    def _movimenta_uso_consumo(self, produto, tipo, quantidade, loja_id, motivo='', destino='', documento='', origem=''):
         if produto.tipo_produto != '2':
             raise ValidationError({'produto': 'Operação exclusiva para Produto Uso/Consumo.'})
         quantidade = Decimal(str(quantidade or 0))
         if quantidade <= 0:
             raise ValidationError({'quantidade': 'Informe quantidade maior que zero.'})
-        matriz = self._matriz_unica_ativa(produto.empresa)
+        loja = Loja.objects.filter(pk=loja_id, empresa=produto.empresa, ativo=True).first()
+        if not loja:
+            raise ValidationError({'loja': 'Informe uma loja/unidade ativa da mesma empresa para a movimentação.'})
         with transaction.atomic():
-            saldo_anterior = Decimal('0')
-            saldo_posterior = Decimal('0')
-            if produto.controla_estoque:
-                estoque, _ = ProdutoUsoConsumoEstoque.objects.select_for_update().get_or_create(
-                    empresa=produto.empresa, produto=produto, loja_matriz=matriz, defaults={'saldo': Decimal('0')}
-                )
-                saldo_anterior = Decimal(estoque.saldo or 0)
-                sinal = Decimal('1') if tipo in (ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA, ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_ENTRADA) else Decimal('-1')
-                saldo_posterior = saldo_anterior + (quantidade * sinal)
-                if saldo_posterior < 0:
-                    raise ValidationError({'quantidade': 'Saldo insuficiente na Matriz para Produto Uso/Consumo.'})
-                estoque.saldo = saldo_posterior
-                estoque.save(update_fields=['saldo'])
+            estoque, _ = ProdutoUsoConsumoEstoque.objects.select_for_update().get_or_create(
+                empresa=produto.empresa, produto=produto, loja=loja, defaults={'saldo': Decimal('0')}
+            )
+            saldo_anterior = Decimal(estoque.saldo or 0)
+            sinal = Decimal('1') if tipo in (ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA, ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_ENTRADA) else Decimal('-1')
+            saldo_posterior = saldo_anterior + (quantidade * sinal)
+            if saldo_posterior < 0:
+                raise ValidationError({'quantidade': 'Saldo insuficiente na unidade informada para Produto Uso/Consumo.'})
+            estoque.saldo = saldo_posterior
+            estoque.save(update_fields=['saldo'])
             movimento = ProdutoUsoConsumoMovimentacao.objects.create(
-                empresa=produto.empresa, produto=produto, loja_matriz=matriz, tipo=tipo, quantidade=quantidade,
+                empresa=produto.empresa, produto=produto, loja=loja, tipo=tipo, quantidade=quantidade,
                 saldo_anterior=saldo_anterior, saldo_posterior=saldo_posterior,
                 usuario=self.request.user if self.request.user.is_authenticated else None,
                 motivo=motivo or '', destino=destino or '', documento=documento or '', origem=origem or '',
@@ -708,7 +691,7 @@ class ProdutoViewSet(BaseViewSet):
     def entrada_uso_consumo(self, request, pk=None):
         produto = self.get_object()
         try:
-            mov = self._movimenta_uso_consumo(produto, ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA, request.data.get('quantidade'), request.data.get('motivo') or '', request.data.get('destino') or '', request.data.get('documento') or '', request.data.get('origem') or 'MANUAL')
+            mov = self._movimenta_uso_consumo(produto, ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA, request.data.get('quantidade'), request.data.get('loja'), request.data.get('motivo') or '', request.data.get('destino') or '', request.data.get('documento') or '', request.data.get('origem') or 'MANUAL')
         except ValidationError as exc:
             return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
         return Response(ProdutoUsoConsumoMovimentacaoSerializer(mov, context={'request': request}).data)
@@ -721,10 +704,23 @@ class ProdutoViewSet(BaseViewSet):
         if not motivo or not destino:
             return Response({'detail': 'Informe motivo e destino do consumo interno.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            mov = self._movimenta_uso_consumo(produto, ProdutoUsoConsumoMovimentacao.TIPO_CONSUMO_INTERNO, request.data.get('quantidade'), motivo, destino, request.data.get('documento') or '', request.data.get('origem') or 'CONSUMO_INTERNO')
+            mov = self._movimenta_uso_consumo(produto, ProdutoUsoConsumoMovimentacao.TIPO_CONSUMO_INTERNO, request.data.get('quantidade'), request.data.get('loja'), motivo, destino, request.data.get('documento') or '', request.data.get('origem') or 'CONSUMO_INTERNO')
         except ValidationError as exc:
             return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
         return Response(ProdutoUsoConsumoMovimentacaoSerializer(mov, context={'request': request}).data)
+
+    @action(detail=True, methods=['get'], url_path='movimentacoes-uso-consumo')
+    def movimentacoes_uso_consumo(self, request, pk=None):
+        produto = self.get_object()
+        if produto.tipo_produto != '2':
+            return Response({'detail': 'Movimentações de Uso/Consumo são exclusivas para tipo 2.'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = produto.movimentacoes_uso_consumo.select_related('loja', 'usuario').order_by('-data_movimento', '-id')
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            ser = ProdutoUsoConsumoMovimentacaoSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(ser.data)
+        ser = ProdutoUsoConsumoMovimentacaoSerializer(qs, many=True, context={'request': request})
+        return Response(ser.data)
 
 
 class ProdutoImagemViewSet(BaseViewSet):

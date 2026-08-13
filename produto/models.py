@@ -319,7 +319,6 @@ class Produto(models.Model):
     custo_original = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     custo_ultima_compra = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     custo_medio = models.DecimalField(max_digits=12, decimal_places=4, default=0)
-    controla_estoque = models.BooleanField(default=False)
 
     def _gerar_referencia(self) -> str:
         # Regras: AA-BB-CCDDD
@@ -374,8 +373,6 @@ class Produto(models.Model):
             self.referencia = self._gerar_referencia_uso_consumo()
         elif self.tipo_produto == '4' and not self.referencia:
             self.referencia = self._gerar_referencia_insumo()
-        if self.tipo_produto != '2':
-            self.controla_estoque = False
         if self.tipo_produto == '2':
             self.grupo = None
             self.subgrupo = None
@@ -394,7 +391,6 @@ class Produto(models.Model):
             # >>> ADDED
             models.Index(fields=['ativo']),
             models.Index(fields=['bloqueado_venda']),
-            models.Index(fields=['controla_estoque']),
             # <<< ADDED
         ]
 
@@ -1066,18 +1062,18 @@ class Estoque(models.Model):
 class ProdutoUsoConsumoEstoque(models.Model):
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='estoques_produto_uso_consumo', db_index=True)
     produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='estoques_uso_consumo')
-    loja_matriz = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, related_name='estoques_produto_uso_consumo')
+    loja = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, related_name='estoques_produto_uso_consumo')
     saldo = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'produto_uso_consumo_estoque'
         constraints = [
-            models.UniqueConstraint(fields=['empresa', 'produto', 'loja_matriz'], name='uq_uso_consumo_estoque_empresa_produto_matriz'),
+            models.UniqueConstraint(fields=['empresa', 'produto', 'loja'], name='uq_uso_estoque_emp_prod_loja'),
         ]
         indexes = [
             models.Index(fields=['empresa', 'produto']),
-            models.Index(fields=['loja_matriz']),
+            models.Index(fields=['loja']),
         ]
 
 
@@ -1095,7 +1091,7 @@ class ProdutoUsoConsumoMovimentacao(models.Model):
 
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='movimentacoes_produto_uso_consumo', db_index=True)
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='movimentacoes_uso_consumo')
-    loja_matriz = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, related_name='movimentacoes_produto_uso_consumo')
+    loja = models.ForeignKey('cadastros.Loja', on_delete=models.PROTECT, related_name='movimentacoes_produto_uso_consumo')
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
     quantidade = models.DecimalField(max_digits=14, decimal_places=3)
     saldo_anterior = models.DecimalField(max_digits=14, decimal_places=3, default=0)

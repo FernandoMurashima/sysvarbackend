@@ -18,6 +18,7 @@ from .models import (
     Produto,
     ProdutoDetalhe,
     ProdutoImagem,
+    ProdutoUsoConsumoHistorico,
     ProdutoVendaHistorico,
     Subgrupo,
     Tamanho,
@@ -87,6 +88,34 @@ class ProdutoVendaApiTests(TestCase):
         }
         defaults.update(kwargs)
         return Produto.objects.create(**defaults)
+
+    def test_produto_uso_consumo_nao_depende_de_matriz_e_nao_expoe_controla_estoque(self):
+        Loja.objects.filter(empresa=self.empresa).delete()
+        resp = self.client.post("/api/produto/produto/", {
+            "tipo_produto": "2",
+            "descricao": "Papel A4",
+            "descricao_reduzida": "PAPEL A4",
+            "unidade": self.unidade.pk,
+            "controla_estoque": True,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        produto = Produto.objects.get(pk=resp.data["Idproduto"])
+        self.assertEqual(produto.referencia, "USO-000001")
+        self.assertFalse(hasattr(produto, "controla_estoque"))
+        self.assertNotIn("controla_estoque", resp.data)
+        self.assertTrue(ProdutoUsoConsumoHistorico.objects.filter(produto=produto, tipo_evento=ProdutoUsoConsumoHistorico.CRIACAO).exists())
+
+    def test_produto_uso_consumo_multiplas_matrizes_nao_bloqueiam_cadastro(self):
+        Loja.objects.create(empresa=self.empresa, nome_loja="Matriz A", apelido_loja="MA", cnpj="11222333000183", tipo_unidade=Loja.TIPO_MATRIZ)
+        Loja.objects.create(empresa=self.empresa, nome_loja="Matriz B", apelido_loja="MB", cnpj="11222333000184", tipo_unidade=Loja.TIPO_MATRIZ)
+        resp = self.client.post("/api/produto/produto/", {
+            "tipo_produto": "2",
+            "descricao": "Toner",
+            "descricao_reduzida": "TONER",
+            "unidade": self.unidade.pk,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["referencia"], "USO-000001")
 
     def sync_cores(self, produto, cores):
         return self.client.post(f"/api/produto/produto/{produto.pk}/gerar-skus/", {"cores": cores}, format="json")
