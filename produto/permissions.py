@@ -1,13 +1,10 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+from accounts.services.effective_access import EDIT, EffectiveAccessService
 
 class CanToggleProductFlags(BasePermission):
     """
     Permite GET para autenticados; para ações sensíveis (POST nas rotas customizadas),
-    exige usuário autenticado E (is_staff OU permissão 'change' do respectivo model).
-
-    Observação: a View deve expor o atributo `model_perm_codename`, ex.:
-      - 'produto.change_produto'
-      - 'produto.change_produtodetalhe'
+    exige permissão funcional EDIT no módulo de produtos.
     """
 
     def has_permission(self, request, view):
@@ -15,14 +12,7 @@ class CanToggleProductFlags(BasePermission):
         if request.method in SAFE_METHODS:
             return bool(request.user and request.user.is_authenticated)
 
-        # Para POST/ações customizadas: staff OU permissão de change no model informado
-        model_perm = getattr(view, "model_perm_codename", None)
-        if model_perm:
-            return bool(
-                request.user
-                and request.user.is_authenticated
-                and (request.user.is_staff or request.user.has_perm(model_perm))
-            )
-
-        # fallback: exige apenas autenticado
-        return bool(request.user and request.user.is_authenticated)
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return EffectiveAccessService(user).has_module_access("produtos", EDIT)

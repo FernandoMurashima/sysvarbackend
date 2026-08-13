@@ -3,8 +3,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from accounts.models import UserModulePermission
 from auditoria.models import AuditLog
-from cadastros.models import Empresa, Loja
+from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
 from .models import (
     Colecao,
     ConfigEan,
@@ -37,6 +38,20 @@ class ProdutoVendaApiTests(TestCase):
             empresa=self.empresa,
             type="Admin",
         )
+        self.produtos_modulo, _ = ModuloSistema.objects.get_or_create(
+            chave="produtos",
+            defaults={"nome": "Produtos", "categoria": ModuloSistema.CATEGORIA_BASICO, "basico": True},
+        )
+        EmpresaContrato.objects.update_or_create(
+            empresa=self.empresa,
+            defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": self.user},
+        )
+        EmpresaModulo.objects.update_or_create(
+            empresa=self.empresa,
+            modulo=self.produtos_modulo,
+            defaults={"contratado": True},
+        )
+        UserModulePermission.objects.create(user=self.user, modulo=UserModulePermission.Module.PRODUTOS, acesso=UserModulePermission.Access.EDIT)
         self.client.force_authenticate(self.user)
         self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
         self.colecao = Colecao.objects.create(empresa=self.empresa, Descricao="Colecao", Codigo="26", Estacao="01")
@@ -188,3 +203,66 @@ class ProdutoVendaApiTests(TestCase):
         principal = ProdutoImagem.objects.get(produto=produto, principal=True)
         self.client.delete(f"/api/produto/produto-imagem/{principal.pk}/")
         self.assertFalse(ProdutoImagem.objects.filter(produto=produto, principal=True).exists())
+
+    def test_admin_funcional_pode_alternar_flags_e_usuario_sem_permissao_recebe_403(self):
+        produto = self.produto()
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/inativar/", {"motivo": "Homologacao", "senha": "123"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        produto.refresh_from_db()
+        self.assertFalse(produto.ativo)
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/ativar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        produto.refresh_from_db()
+        self.assertTrue(produto.ativo)
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/bloquear-venda/", {"motivo": "Homologacao", "senha": "123"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        produto.refresh_from_db()
+        self.assertTrue(produto.bloqueado_venda)
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/desbloquear-venda/", {}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        produto.refresh_from_db()
+        self.assertFalse(produto.bloqueado_venda)
+
+        comum = get_user_model().objects.create_user("comum", "comum@example.com", "123", empresa=self.empresa, type="Regular")
+        UserModulePermission.objects.create(user=comum, modulo=UserModulePermission.Module.PRODUTOS, acesso=UserModulePermission.Access.VIEW)
+        self.client.force_authenticate(comum)
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/ativar/", {}, format="json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_senha_invalida_e_motivo_ausente_continuam_rejeitados(self):
+        produto = self.produto()
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/inativar/", {"motivo": "", "senha": "123"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["detail"], "Informe um motivo com pelo menos 3 caracteres.")
+
+        resp = self.client.post(f"/api/produto/produto/{produto.pk}/bloquear-venda/", {"motivo": "Homologacao", "senha": "errada"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["detail"], "Senha inválida.")
+
+    def test_alteracao_campos_fiscais_gera_historico_e_auditoria(self):
+        produto = self.produto()
+        payload = {
+            "origem_mercadoria": 1,
+            "csosn_ou_cst_icms": "102",
+            "aliquota_icms": "18.00",
+            "cfop_venda_dentro": "5102",
+            "cfop_venda_fora": "6102",
+            "cst_pis": "01",
+            "aliq_pis": "1.65",
+            "cst_cofins": "01",
+            "aliq_cofins": "7.60",
+            "ipi_situacao": "50",
+            "aliq_ipi": "5.00",
+        }
+
+        resp = self.client.patch(f"/api/produto/produto/{produto.pk}/", payload, format="json")
+        self.assertEqual(resp.status_code, 200)
+        produto.refresh_from_db()
+        self.assertEqual(produto.cfop_venda_dentro, "5102")
+        self.assertTrue(ProdutoVendaHistorico.objects.filter(produto=produto, tipo_evento=ProdutoVendaHistorico.ALTERACAO_FISCAL).exists())
+        self.assertTrue(AuditLog.objects.filter(model="produto", object_id=str(produto.pk), metadata__legacy_action="update_fiscal").exists())
