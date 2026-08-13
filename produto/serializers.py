@@ -7,9 +7,9 @@ from accounts.permissions import has_field_permission
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    ProdutoVendaHistorico, ProdutoImagem,
+    ProdutoVendaHistorico, ProdutoUsoConsumoHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
-    Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao,
+    Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
 )
 
@@ -226,10 +226,28 @@ class InventarioEstoqueSerializer(serializers.ModelSerializer):
 # ---------- Produto / SKU / Preço ----------
 class ProdutoSerializer(serializers.ModelSerializer):
     referencia = serializers.CharField(read_only=True)
+    cadastro_fiscal_incompleto = serializers.SerializerMethodField()
+    saldo_uso_consumo = serializers.SerializerMethodField()
+    matriz_uso_consumo = serializers.SerializerMethodField()
 
     class Meta:
         model = Produto
         fields = '__all__'
+
+    def get_cadastro_fiscal_incompleto(self, obj):
+        return obj.tipo_produto == '2' and not bool(obj.ncm)
+
+    def get_saldo_uso_consumo(self, obj):
+        if obj.tipo_produto != '2' or not obj.controla_estoque:
+            return None
+        estoque = obj.estoques_uso_consumo.order_by('loja_matriz_id').first()
+        return str(estoque.saldo) if estoque else '0.000'
+
+    def get_matriz_uso_consumo(self, obj):
+        if obj.tipo_produto != '2':
+            return None
+        estoque = obj.estoques_uso_consumo.select_related('loja_matriz').order_by('loja_matriz_id').first()
+        return getattr(estoque.loja_matriz, 'nome_loja', None) if estoque else None
 
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
@@ -289,9 +307,18 @@ class ProdutoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'referencia': 'Não deve ser informada para este tipo de produto.'})
             if grade is not None:
                 raise serializers.ValidationError({'grade': 'Não deve ser informada para este tipo de produto.'})
+            if tipo == '2':
+                if not descricao_reduzida or not str(descricao_reduzida).strip():
+                    raise serializers.ValidationError({'descricao_reduzida': 'Descrição reduzida é obrigatória para Produto Uso/Consumo.'})
+                attrs['grupo'] = None
+                attrs['subgrupo'] = None
+                attrs['material'] = None
+                attrs['grade'] = None
+                attrs['colecao'] = None
             if tipo == '4':
                 attrs['grupo'] = None
                 attrs['subgrupo'] = None
+                attrs['controla_estoque'] = False
             if ncm_raw:
                 ncm_fmt = _normalize_ncm_dotted(ncm_raw)
                 ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
@@ -435,6 +462,38 @@ class ProdutoVendaHistoricoSerializer(serializers.ModelSerializer):
         return getattr(user, 'get_full_name', lambda: '')() or getattr(user, 'username', None) or str(user)
 
 
+class ProdutoUsoConsumoHistoricoSerializer(ProdutoVendaHistoricoSerializer):
+    class Meta:
+        model = ProdutoUsoConsumoHistorico
+        fields = (
+            'id', 'empresa', 'produto', 'data_evento', 'tipo_evento', 'usuario',
+            'usuario_nome', 'descricao', 'dados_anteriores', 'dados_novos',
+        )
+        read_only_fields = fields
+
+
+class ProdutoUsoConsumoEstoqueSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
+    loja_matriz_nome = serializers.CharField(source='loja_matriz.nome_loja', read_only=True)
+
+    class Meta:
+        model = ProdutoUsoConsumoEstoque
+        fields = '__all__'
+        read_only_fields = ('empresa', 'loja_matriz', 'saldo', 'atualizado_em')
+
+
+class ProdutoUsoConsumoMovimentacaoSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
+    loja_matriz_nome = serializers.CharField(source='loja_matriz.nome_loja', read_only=True)
+
+    class Meta:
+        model = ProdutoUsoConsumoMovimentacao
+        fields = '__all__'
+        read_only_fields = ('empresa', 'loja_matriz', 'saldo_anterior', 'saldo_posterior', 'data_movimento', 'usuario')
+
+
 class ProdutoImagemSerializer(serializers.ModelSerializer):
     imagem_url = serializers.SerializerMethodField()
     imagem_reduzida_url = serializers.SerializerMethodField()
@@ -539,8 +598,8 @@ class FichaTecnicaItemSerializer(serializers.ModelSerializer):
         if produto:
             if produto.empresa_id != empresa_id:
                 raise serializers.ValidationError({'produto': 'O produto selecionado pertence a outra empresa.'})
-            if produto.tipo_produto not in ('2', '4'):
-                raise serializers.ValidationError({'produto': 'Use produtos de uso/consumo ou insumos de produção na ficha.'})
+            if produto.tipo_produto != '4':
+                raise serializers.ValidationError({'produto': 'Use somente Insumo de Produção na ficha técnica.'})
             if not unidade:
                 attrs['unidade'] = produto.unidade
                 unidade = produto.unidade
