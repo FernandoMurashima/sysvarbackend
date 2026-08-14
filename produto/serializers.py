@@ -3,6 +3,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 from decimal import Decimal
+import re
 from accounts.permissions import has_field_permission
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
@@ -65,6 +66,37 @@ def _pode_ver_custo(serializer):
     user = getattr(request, 'user', None)
     return has_field_permission(user, 'produto.custo', default_roles=['Admin', 'Diretor', 'Gerente'])
 
+STATUS_ATIVO_INATIVO = {'ATIVO', 'INATIVO'}
+
+def _norm_text(value):
+    return value.strip() if isinstance(value, str) else value
+
+def _norm_upper(value):
+    value = _norm_text(value)
+    return value.upper() if isinstance(value, str) else value
+
+def _empresa_do_serializer(serializer):
+    return serializer.initial_data.get('empresa') if getattr(serializer, 'initial_data', None) else None
+
+def _unique_empresa(serializer, model, field, value, empresa, message, extra=None):
+    if value in (None, '') or not empresa:
+        return
+    qs = model.objects.filter(**{field: value, 'empresa': empresa})
+    if extra:
+        qs = qs.filter(**extra)
+    if serializer.instance:
+        qs = qs.exclude(pk=serializer.instance.pk)
+    if qs.exists():
+        raise serializers.ValidationError({field: message})
+
+def _normalize_status(attrs, field='Status'):
+    if field in attrs:
+        status = _norm_upper(attrs.get(field) or 'ATIVO')
+        if status not in STATUS_ATIVO_INATIVO:
+            raise serializers.ValidationError({field: 'Status deve ser ATIVO ou INATIVO.'})
+        attrs[field] = status
+    return attrs
+
 # ---------- Cadastros mestres ----------
 class ConfigEanSerializer(serializers.ModelSerializer):
     class Meta:
@@ -81,6 +113,12 @@ class GradeSerializer(serializers.ModelSerializer):
         model = Grade
         fields = '__all__'
 
+    def validate(self, attrs):
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        return _normalize_status(attrs)
+
 class TamanhoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tamanho
@@ -89,10 +127,21 @@ class TamanhoSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
         grade = attrs.get('idgrade', getattr(self.instance, 'idgrade', None))
+        attrs['Tamanho'] = _norm_upper(attrs.get('Tamanho', getattr(self.instance, 'Tamanho', '')))
+        if not grade:
+            raise serializers.ValidationError({'idgrade': 'Grade é obrigatória.'})
+        if not attrs['Tamanho']:
+            raise serializers.ValidationError({'Tamanho': 'Tamanho é obrigatório.'})
         if grade and empresa and grade.empresa_id and grade.empresa_id != empresa.id:
             raise serializers.ValidationError({'idgrade': 'A grade selecionada pertence a outra empresa.'})
         if grade and not attrs.get('empresa') and not empresa:
             attrs['empresa'] = grade.empresa
+        qs = Tamanho.objects.filter(idgrade=grade, Tamanho=attrs['Tamanho'])
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({'Tamanho': 'Tamanho já cadastrado nesta grade.'})
+        _normalize_status(attrs)
         return attrs
 
 class CorSerializer(serializers.ModelSerializer):
@@ -100,25 +149,89 @@ class CorSerializer(serializers.ModelSerializer):
         model = Cor
         fields = '__all__'
 
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        attrs['Cor'] = _norm_text(attrs.get('Cor', getattr(self.instance, 'Cor', '')))
+        if 'Codigo' in attrs:
+            attrs['Codigo'] = _norm_upper(attrs.get('Codigo'))
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        if not attrs['Cor']:
+            raise serializers.ValidationError({'Cor': 'Cor é obrigatória.'})
+        _unique_empresa(self, Cor, 'Codigo', attrs.get('Codigo'), empresa, 'Código já cadastrado nesta empresa.')
+        return _normalize_status(attrs)
+
 class MaterialSerializer(serializers.ModelSerializer):
     class Meta:
         model = Material
         fields = '__all__'
 
+    def validate(self, attrs):
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        if 'Codigo' in attrs:
+            attrs['Codigo'] = _norm_upper(attrs.get('Codigo'))
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        return _normalize_status(attrs)
+
 class ColecaoSerializer(serializers.ModelSerializer):
+    Contador = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Colecao
         fields = '__all__'
+
+    def validate(self, attrs):
+        codigo = _norm_text(attrs.get('Codigo', getattr(self.instance, 'Codigo', '')))
+        estacao = attrs.get('Estacao', getattr(self.instance, 'Estacao', None))
+        status = attrs.get('Status', getattr(self.instance, 'Status', None))
+        if not re.fullmatch(r'\d{2}', codigo or ''):
+            raise serializers.ValidationError({'Codigo': 'Código deve ter exatamente 2 dígitos.'})
+        if estacao not in dict(Colecao.ESTACOES_CHOICES):
+            raise serializers.ValidationError({'Estacao': 'Estação inválida.'})
+        if status not in dict(Colecao.STATUS_CHOICES):
+            raise serializers.ValidationError({'Status': 'Status inválido.'})
+        attrs['Codigo'] = codigo
+        return attrs
 
 class UnidadeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Unidade
         fields = '__all__'
 
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        attrs['Codigo'] = _norm_upper(attrs.get('Codigo', getattr(self.instance, 'Codigo', '')))
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        if not attrs['Codigo']:
+            raise serializers.ValidationError({'Codigo': 'Código é obrigatório.'})
+        _unique_empresa(self, Unidade, 'Codigo', attrs['Codigo'], empresa, 'Código já cadastrado nesta empresa.')
+        return attrs
+
 class GrupoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Grupo
         fields = '__all__'
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
+        attrs['Codigo'] = _norm_upper(attrs.get('Codigo', getattr(self.instance, 'Codigo', '')))
+        attrs['CodigoRef'] = _norm_text(attrs.get('CodigoRef', getattr(self.instance, 'CodigoRef', '')))
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        if not attrs['Codigo']:
+            raise serializers.ValidationError({'Codigo': 'Código é obrigatório.'})
+        if not re.fullmatch(r'\d{2}', attrs['CodigoRef'] or ''):
+            raise serializers.ValidationError({'CodigoRef': 'Código de referência deve ter exatamente 2 dígitos numéricos.'})
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        if attrs.get('Margem', getattr(self.instance, 'Margem', 0)) is None or Decimal(str(attrs.get('Margem', getattr(self.instance, 'Margem', 0)))) < 0:
+            raise serializers.ValidationError({'Margem': 'Margem deve ser maior ou igual a zero.'})
+        _unique_empresa(self, Grupo, 'Codigo', attrs['Codigo'], empresa, 'Código já cadastrado nesta empresa.')
+        _unique_empresa(self, Grupo, 'CodigoRef', attrs['CodigoRef'], empresa, 'Código de referência já cadastrado nesta empresa.')
+        return attrs
 
 class SubgrupoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -128,10 +241,22 @@ class SubgrupoSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
         grupo = attrs.get('Idgrupo', getattr(self.instance, 'Idgrupo', None))
+        attrs['Descricao'] = _norm_text(attrs.get('Descricao', getattr(self.instance, 'Descricao', '')))
+        if not grupo:
+            raise serializers.ValidationError({'Idgrupo': 'Grupo é obrigatório.'})
+        if not attrs['Descricao']:
+            raise serializers.ValidationError({'Descricao': 'Descrição é obrigatória.'})
+        if attrs.get('Margem', getattr(self.instance, 'Margem', 0)) is not None and Decimal(str(attrs.get('Margem', getattr(self.instance, 'Margem', 0)))) < 0:
+            raise serializers.ValidationError({'Margem': 'Margem deve ser maior ou igual a zero.'})
         if grupo and empresa and grupo.empresa_id and grupo.empresa_id != empresa.id:
             raise serializers.ValidationError({'Idgrupo': 'O grupo selecionado pertence a outra empresa.'})
         if grupo and not attrs.get('empresa') and not empresa:
             attrs['empresa'] = grupo.empresa
+        qs = Subgrupo.objects.filter(Idgrupo=grupo, Descricao=attrs['Descricao'])
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({'Descricao': 'Subgrupo já cadastrado neste grupo.'})
         return attrs
 
 class TabelaprecoSerializer(serializers.ModelSerializer):
@@ -152,6 +277,11 @@ class PackSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         grade = attrs.get('grade') or getattr(self.instance, 'grade', None)
         empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        attrs['nome'] = _norm_text(attrs.get('nome', getattr(self.instance, 'nome', '')))
+        if not attrs['nome']:
+            raise serializers.ValidationError({'nome': 'Nome é obrigatório.'})
+        if not grade:
+            raise serializers.ValidationError({'grade': 'Grade é obrigatória.'})
         if grade and empresa and grade.empresa_id and grade.empresa_id != empresa.id:
             raise serializers.ValidationError({'grade': 'A grade selecionada pertence a outra empresa.'})
         return attrs
@@ -164,12 +294,24 @@ class PackItemSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         pack = attrs.get('pack') or getattr(self.instance, 'pack', None)
         tamanho = attrs.get('tamanho') or getattr(self.instance, 'tamanho', None)
+        qtd = attrs.get('qtd', getattr(self.instance, 'qtd', None))
 
+        if not pack:
+            raise serializers.ValidationError({'pack': 'Pack é obrigatório.'})
+        if not tamanho:
+            raise serializers.ValidationError({'tamanho': 'Tamanho é obrigatório.'})
+        if qtd is None or int(qtd) <= 0:
+            raise serializers.ValidationError({'qtd': 'Quantidade deve ser maior que zero.'})
         if pack and tamanho:
             if pack.empresa_id and tamanho.empresa_id and pack.empresa_id != tamanho.empresa_id:
                 raise serializers.ValidationError({'tamanho': 'O tamanho selecionado pertence a outra empresa.'})
             if pack.grade_id and tamanho.idgrade_id != pack.grade_id:
                 raise serializers.ValidationError({'tamanho': 'O tamanho selecionado não pertence à grade do pack.'})
+            qs = PackItem.objects.filter(pack=pack, tamanho=tamanho)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'tamanho': 'Tamanho já informado neste pack.'})
         return attrs
 
 class EstoqueSerializer(serializers.ModelSerializer):

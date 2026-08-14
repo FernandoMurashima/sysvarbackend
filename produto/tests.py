@@ -21,6 +21,8 @@ from .models import (
     ProdutoInsumoHistorico,
     ProdutoUsoConsumoHistorico,
     ProdutoVendaHistorico,
+    Pack,
+    PackItem,
     Subgrupo,
     Tamanho,
     Unidade,
@@ -158,6 +160,78 @@ class ProdutoVendaApiTests(TestCase):
 
         produto = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Linha", descricao_reduzida="LINHA", unidade=self.unidade)
         resp = self.client.patch(f"/api/produto/produto/{produto.pk}/", {"tipo_produto": "2"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_auxiliares_grupo_validacoes_multiempresa_e_auditoria(self):
+        resp = self.client.post("/api/produto/grupo/", {"Codigo": "10", "CodigoRef": "1", "Descricao": "Jeans", "Margem": 10}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/grupo/", {"Codigo": "10", "CodigoRef": "AA", "Descricao": "Jeans", "Margem": 10}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/grupo/", {"Codigo": "10", "CodigoRef": "10", "Descricao": "Jeans", "Margem": 10}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        resp = self.client.post("/api/produto/grupo/", {"Codigo": "10", "CodigoRef": "11", "Descricao": "Malha", "Margem": 10}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/grupo/", {"Codigo": "11", "CodigoRef": "10", "Descricao": "Malha", "Margem": 10}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertTrue(AuditLog.objects.filter(model="grupo").exists())
+
+    def test_auxiliares_subgrupo_grade_tamanho_packitem(self):
+        grupo_b = Grupo.objects.create(empresa=self.outra_empresa, Codigo="20", CodigoRef="20", Descricao="Outra", Margem=0)
+        resp = self.client.post("/api/produto/subgrupo/", {"Idgrupo": grupo_b.pk, "Descricao": "Skinny", "Margem": 0}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/subgrupo/", {"Idgrupo": self.grupo.pk, "Descricao": "Skinny", "Margem": 0}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        resp = self.client.post("/api/produto/subgrupo/", {"Idgrupo": self.grupo.pk, "Descricao": "Skinny", "Margem": 1}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+        resp = self.client.post("/api/produto/grade/", {"Descricao": "Adulto", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        grade_id = resp.data["Idgrade"]
+        resp = self.client.post("/api/produto/tamanho/", {"idgrade": grade_id, "Tamanho": "M", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        tamanho_id = resp.data["Idtamanho"]
+        resp = self.client.post("/api/produto/tamanho/", {"idgrade": grade_id, "Tamanho": "M", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        grade_outra = Grade.objects.create(empresa=self.outra_empresa, Descricao="Outra", Status="ATIVO")
+        resp = self.client.post("/api/produto/tamanho/", {"idgrade": grade_outra.pk, "Tamanho": "P", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+        resp = self.client.post("/api/produto/pack/", {"nome": "", "grade": grade_id, "ativo": True}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/pack/", {"nome": "Pack Adulto", "grade": grade_id, "ativo": True}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        pack_id = resp.data["id"]
+        resp = self.client.post("/api/produto/pack-item/", {"pack": pack_id, "tamanho": tamanho_id, "qtd": 0}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/pack-item/", {"pack": pack_id, "tamanho": tamanho_id, "qtd": 2}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        resp = self.client.post("/api/produto/pack-item/", {"pack": pack_id, "tamanho": tamanho_id, "qtd": 1}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_auxiliares_colecao_unidade_cor_material_e_exclusao_protegida(self):
+        resp = self.client.post("/api/produto/colecao/", {"Codigo": "2", "Estacao": "01", "Status": "AT", "Descricao": "Verão", "Contador": 99}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/colecao/", {"Codigo": "27", "Estacao": "09", "Status": "AT", "Descricao": "Verão"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/colecao/", {"Codigo": "27", "Estacao": "01", "Status": "AT", "Descricao": "Verão", "Contador": 99}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["Contador"], 0)
+
+        resp = self.client.post("/api/produto/unidade/", {"Codigo": "kg", "Descricao": "Quilo", "permite_decimal": True}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["Codigo"], "KG")
+        resp = self.client.post("/api/produto/unidade/", {"Codigo": "KG", "Descricao": "Quilograma", "permite_decimal": True}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/cor/", {"Descricao": "Azul Royal", "Codigo": "AZR", "Cor": "Azul", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        resp = self.client.post("/api/produto/cor/", {"Descricao": "Azul Repetida", "Codigo": "AZR", "Cor": "Azul", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/api/produto/material/", {"Descricao": "Algodão", "Codigo": "alg", "Status": "ATIVO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["Codigo"], "ALG")
+
+        produto = self.produto(grupo=self.grupo)
+        resp = self.client.delete(f"/api/produto/grupo/{self.grupo.pk}/")
         self.assertEqual(resp.status_code, 400)
 
     def test_edicao_uso_consumo_persiste_no_banco_get_e_historico_diferencas(self):
@@ -398,3 +472,4 @@ class ProdutoVendaApiTests(TestCase):
         self.assertEqual(produto.cfop_venda_dentro, "5102")
         self.assertTrue(ProdutoVendaHistorico.objects.filter(produto=produto, tipo_evento=ProdutoVendaHistorico.ALTERACAO_FISCAL).exists())
         self.assertTrue(AuditLog.objects.filter(model="produto", object_id=str(produto.pk), metadata__legacy_action="update_fiscal").exists())
+

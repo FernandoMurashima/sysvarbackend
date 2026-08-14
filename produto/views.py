@@ -76,6 +76,19 @@ class BaseViewSet(viewsets.ModelViewSet):
     required_module = "produtos"
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "Auxiliar", "Assistente", "Regular"]
     write_roles = ["Admin", "Diretor", "Gerente"]
+    aux_filter_fields = {
+        'Grupo': {'search': ['Codigo', 'CodigoRef', 'Descricao'], 'codigo': 'Codigo__icontains', 'Codigo': 'Codigo__icontains', 'CodigoRef': 'CodigoRef__icontains', 'descricao': 'Descricao__icontains'},
+        'Subgrupo': {'search': ['Descricao'], 'Idgrupo': 'Idgrupo_id', 'grupo': 'Idgrupo_id', 'descricao': 'Descricao__icontains'},
+        'Grade': {'search': ['Descricao'], 'descricao': 'Descricao__icontains', 'Status': 'Status', 'status': 'Status'},
+        'Tamanho': {'search': ['Tamanho', 'Descricao'], 'idgrade': 'idgrade_id', 'grade': 'idgrade_id', 'Tamanho': 'Tamanho__icontains', 'status': 'Status', 'Status': 'Status'},
+        'Colecao': {'search': ['Codigo', 'Descricao', 'Estacao'], 'codigo': 'Codigo__icontains', 'Codigo': 'Codigo__icontains', 'estacao': 'Estacao', 'Estacao': 'Estacao', 'status': 'Status', 'Status': 'Status'},
+        'Cor': {'search': ['Codigo', 'Descricao', 'Cor'], 'codigo': 'Codigo__icontains', 'Codigo': 'Codigo__icontains', 'descricao': 'Descricao__icontains', 'cor': 'Cor__icontains', 'status': 'Status', 'Status': 'Status'},
+        'Unidade': {'search': ['Codigo', 'Descricao'], 'codigo': 'Codigo__icontains', 'Codigo': 'Codigo__icontains', 'descricao': 'Descricao__icontains', 'permite_decimal': 'permite_decimal'},
+        'Material': {'search': ['Codigo', 'Descricao'], 'codigo': 'Codigo__icontains', 'Codigo': 'Codigo__icontains', 'descricao': 'Descricao__icontains', 'status': 'Status', 'Status': 'Status'},
+        'Pack': {'search': ['nome'], 'nome': 'nome__icontains', 'grade': 'grade_id', 'ativo': 'ativo'},
+        'PackItem': {'pack': 'pack_id', 'tamanho': 'tamanho_id'},
+    }
+    aux_audit_models = {'Grupo', 'Subgrupo', 'Grade', 'Tamanho', 'Colecao', 'Cor', 'Unidade', 'Material', 'Pack', 'PackItem'}
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -83,20 +96,46 @@ class BaseViewSet(viewsets.ModelViewSet):
         empresa = self.request.query_params.get("empresa")
         if user.is_superuser:
             if empresa and self._model_has_field(qs.model, "empresa"):
-                return qs.filter(empresa_id=empresa)
-            return qs
+                return self._apply_aux_filters(qs.filter(empresa_id=empresa))
+            return self._apply_aux_filters(qs)
         empresa_id = getattr(user, "empresa_id", None)
         if empresa_id and self._model_has_field(qs.model, "empresa"):
-            return qs.filter(empresa_id=empresa_id)
+            return self._apply_aux_filters(qs.filter(empresa_id=empresa_id))
         if self._model_has_field(qs.model, "empresa"):
             return qs.none()
-        return qs
+        return self._apply_aux_filters(qs)
 
     def perform_create(self, serializer):
         self._save_with_empresa_scope(serializer)
+        if serializer.Meta.model.__name__ in self.aux_audit_models:
+            _audit(serializer.Meta.model.__name__, serializer.instance.pk, {'created': True}, self.request, 'create')
 
     def perform_update(self, serializer):
+        before = {field: getattr(serializer.instance, field, None) for field in serializer.validated_data.keys()}
         self._save_with_empresa_scope(serializer)
+        after = {field: getattr(serializer.instance, field, None) for field in serializer.validated_data.keys()}
+        if serializer.Meta.model.__name__ in self.aux_audit_models:
+            _audit(serializer.Meta.model.__name__, serializer.instance.pk, {'before': before, 'after': after}, self.request, 'update')
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.__class__.__name__ not in self.aux_audit_models:
+            return super().destroy(request, *args, **kwargs)
+        bloqueios = []
+        for rel in instance._meta.related_objects:
+            accessor = rel.get_accessor_name()
+            manager = getattr(instance, accessor, None)
+            if manager is not None and hasattr(manager, 'exists') and manager.exists():
+                bloqueios.append(rel.related_model._meta.verbose_name_plural or rel.related_model.__name__)
+        if bloqueios:
+            return Response(
+                {'detail': 'Cadastro possui vínculos e não pode ser excluído. Inative o registro quando houver lifecycle.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        pk = instance.pk
+        response = super().destroy(request, *args, **kwargs)
+        _audit(instance.__class__.__name__, pk, {'deleted': True}, request, 'delete')
+        return response
 
     def _save_with_empresa_scope(self, serializer):
         model = serializer.Meta.model
@@ -128,6 +167,42 @@ class BaseViewSet(viewsets.ModelViewSet):
             return True
         except Exception:
             return False
+
+    def _apply_aux_filters(self, qs):
+        mapping = self.aux_filter_fields.get(qs.model.__name__)
+        if not mapping:
+            return qs
+        params = self.request.query_params
+        search = (params.get('search') or '').strip()
+        if search and mapping.get('search'):
+            query = Q()
+            for field in mapping['search']:
+                query |= Q(**{f'{field}__icontains': search})
+            qs = qs.filter(query)
+        for param, lookup in mapping.items():
+            if param == 'search':
+                continue
+            value = params.get(param)
+            if value in (None, ''):
+                continue
+            if lookup in ('Status',) and isinstance(value, str):
+                value = value.upper()
+            if lookup == 'ativo':
+                if str(value).lower() in ('true', '1'):
+                    value = True
+                elif str(value).lower() in ('false', '0'):
+                    value = False
+                else:
+                    continue
+            if lookup == 'permite_decimal':
+                if str(value).lower() in ('true', '1'):
+                    value = True
+                elif str(value).lower() in ('false', '0'):
+                    value = False
+                else:
+                    continue
+            qs = qs.filter(**{lookup: value})
+        return qs
 
 
 class ConfigEanViewSet(BaseViewSet):

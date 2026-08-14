@@ -95,6 +95,11 @@ class Grade(models.Model):  # HAD
     Status = models.CharField(max_length=10, null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'Descricao'], name='uq_empresa_grade_descricao_aux'),
+        ]
+
     def __str__(self):
         return self.Descricao
 
@@ -107,6 +112,11 @@ class Tamanho(models.Model):
     Descricao = models.CharField(max_length=100, default="Tamanho")
     Status = models.CharField(max_length=10, null=True, blank=True)
     data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'idgrade', 'Tamanho'], name='uq_empresa_grade_tamanho_aux'),
+        ]
 
     def __str__(self):
         return self.Tamanho or self.Descricao
@@ -183,6 +193,11 @@ class Unidade(models.Model):
     permite_decimal = models.BooleanField(default=False)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'Codigo'], name='uq_empresa_unidade_codigo_aux'),
+        ]
+
     def __str__(self):
         return self.Descricao
 
@@ -197,6 +212,9 @@ class Grupo(models.Model):
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'Codigo'], name='uq_empresa_grupo_codigo_aux'),
+        ]
         indexes = [
             models.Index(fields=['Codigo']),
         ]
@@ -212,6 +230,11 @@ class Subgrupo(models.Model):
     Descricao = models.CharField(max_length=100)
     Margem = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(0)])
     data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'Idgrupo', 'Descricao'], name='uq_empresa_grupo_subgrupo_desc_aux'),
+        ]
 
     def __str__(self):
         return self.Descricao
@@ -1254,3 +1277,4 @@ class InventarioEstoqueItem(models.Model):
 
     def __str__(self):
         return f'{self.inventario_id} - {self.CodigodeBarra}'
+
