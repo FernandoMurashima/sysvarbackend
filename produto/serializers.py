@@ -7,7 +7,7 @@ from accounts.permissions import has_field_permission
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
-    ProdutoVendaHistorico, ProdutoUsoConsumoHistorico, ProdutoImagem,
+    ProdutoVendaHistorico, ProdutoUsoConsumoHistorico, ProdutoInsumoHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
     Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao,
     InventarioEstoque, InventarioEstoqueItem
@@ -233,7 +233,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_cadastro_fiscal_incompleto(self, obj):
-        return obj.tipo_produto == '2' and not bool(obj.ncm)
+        return obj.tipo_produto in ('2', '4') and not bool(obj.ncm)
 
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None)) or _empresa_request(self)
@@ -302,8 +302,12 @@ class ProdutoSerializer(serializers.ModelSerializer):
                 attrs['grade'] = None
                 attrs['colecao'] = None
             if tipo == '4':
+                if not descricao_reduzida or not str(descricao_reduzida).strip():
+                    raise serializers.ValidationError({'descricao_reduzida': 'Descrição reduzida é obrigatória para Insumo.'})
                 attrs['grupo'] = None
                 attrs['subgrupo'] = None
+                attrs['grade'] = None
+                attrs['colecao'] = None
             if ncm_raw:
                 ncm_fmt = _normalize_ncm_dotted(ncm_raw)
                 ncm_qs = Ncm.objects.filter(ncm=ncm_fmt)
@@ -450,6 +454,16 @@ class ProdutoVendaHistoricoSerializer(serializers.ModelSerializer):
 class ProdutoUsoConsumoHistoricoSerializer(ProdutoVendaHistoricoSerializer):
     class Meta:
         model = ProdutoUsoConsumoHistorico
+        fields = (
+            'id', 'empresa', 'produto', 'data_evento', 'tipo_evento', 'usuario',
+            'usuario_nome', 'descricao', 'dados_anteriores', 'dados_novos',
+        )
+        read_only_fields = fields
+
+
+class ProdutoInsumoHistoricoSerializer(ProdutoVendaHistoricoSerializer):
+    class Meta:
+        model = ProdutoInsumoHistorico
         fields = (
             'id', 'empresa', 'produto', 'data_evento', 'tipo_evento', 'usuario',
             'usuario_nome', 'descricao', 'dados_anteriores', 'dados_novos',

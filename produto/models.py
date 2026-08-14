@@ -379,6 +379,11 @@ class Produto(models.Model):
             self.material = None
             self.grade = None
             self.colecao = None
+        elif self.tipo_produto == '4':
+            self.grupo = None
+            self.subgrupo = None
+            self.grade = None
+            self.colecao = None
         super().save(*args, **kwargs)
 
     class Meta:
@@ -570,6 +575,39 @@ class ProdutoUsoConsumoHistorico(models.Model):
     data_evento = models.DateTimeField(default=timezone.now, db_index=True)
     tipo_evento = models.CharField(max_length=30, choices=TIPO_EVENTO_CHOICES, db_index=True)
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='historicos_produto_uso_consumo')
+    descricao = models.TextField(blank=True, default='')
+    dados_anteriores = models.JSONField(default=dict, blank=True)
+    dados_novos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-data_evento', '-id']
+        indexes = [
+            models.Index(fields=['empresa', 'produto', '-data_evento']),
+            models.Index(fields=['produto', 'tipo_evento']),
+        ]
+
+
+class ProdutoInsumoHistorico(models.Model):
+    CRIACAO = 'CRIACAO'
+    ALTERACAO_CADASTRAL = 'ALTERACAO_CADASTRAL'
+    ALTERACAO_FISCAL = 'ALTERACAO_FISCAL'
+    ATIVACAO = 'ATIVACAO'
+    INATIVACAO = 'INATIVACAO'
+    EXCLUSAO = 'EXCLUSAO'
+    TIPO_EVENTO_CHOICES = (
+        (CRIACAO, 'Criação'),
+        (ALTERACAO_CADASTRAL, 'Alteração cadastral'),
+        (ALTERACAO_FISCAL, 'Alteração fiscal'),
+        (ATIVACAO, 'Ativação'),
+        (INATIVACAO, 'Inativação'),
+        (EXCLUSAO, 'Exclusão'),
+    )
+
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='historicos_produto_insumo', db_index=True)
+    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='historico_insumo')
+    data_evento = models.DateTimeField(default=timezone.now, db_index=True)
+    tipo_evento = models.CharField(max_length=30, choices=TIPO_EVENTO_CHOICES, db_index=True)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='historicos_produto_insumo')
     descricao = models.TextField(blank=True, default='')
     dados_anteriores = models.JSONField(default=dict, blank=True)
     dados_novos = models.JSONField(default=dict, blank=True)

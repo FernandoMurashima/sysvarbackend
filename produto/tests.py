@@ -18,11 +18,13 @@ from .models import (
     Produto,
     ProdutoDetalhe,
     ProdutoImagem,
+    ProdutoInsumoHistorico,
     ProdutoUsoConsumoHistorico,
     ProdutoVendaHistorico,
     Subgrupo,
     Tamanho,
     Unidade,
+    Material,
 )
 
 
@@ -116,6 +118,47 @@ class ProdutoVendaApiTests(TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.data["referencia"], "USO-000001")
+
+    def test_insumo_cria_codigo_ins_material_fiscal_e_historico_proprio(self):
+        material = Material.objects.create(empresa=self.empresa, Descricao="Algodão", Codigo="ALG")
+        resp = self.client.post("/api/produto/produto/", {
+            "tipo_produto": "4",
+            "descricao": "Tecido Algodão",
+            "descricao_reduzida": "TEC ALG",
+            "unidade": self.unidade.pk,
+            "material": material.pk,
+            "ncm": self.ncm.ncm,
+            "grade": None,
+            "colecao": None,
+            "grupo": None,
+            "subgrupo": None,
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        produto = Produto.objects.get(pk=resp.data["Idproduto"])
+        self.assertEqual(produto.tipo_produto, "4")
+        self.assertEqual(produto.referencia, "INS-001")
+        self.assertEqual(produto.material_id, material.pk)
+        self.assertIsNone(produto.grade_id)
+        self.assertIsNone(produto.colecao_id)
+        self.assertIsNone(produto.grupo_id)
+        self.assertIsNone(produto.subgrupo_id)
+        self.assertFalse(resp.data["cadastro_fiscal_incompleto"])
+        self.assertTrue(ProdutoInsumoHistorico.objects.filter(produto=produto, tipo_evento=ProdutoInsumoHistorico.CRIACAO).exists())
+
+    def test_insumo_rejeita_material_de_outra_empresa_e_tipo_imutavel(self):
+        material_outra = Material.objects.create(empresa=self.outra_empresa, Descricao="Metal", Codigo="MET")
+        resp = self.client.post("/api/produto/produto/", {
+            "tipo_produto": "4",
+            "descricao": "Botão",
+            "descricao_reduzida": "BOTAO",
+            "unidade": self.unidade.pk,
+            "material": material_outra.pk,
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+        produto = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Linha", descricao_reduzida="LINHA", unidade=self.unidade)
+        resp = self.client.patch(f"/api/produto/produto/{produto.pk}/", {"tipo_produto": "2"}, format="json")
+        self.assertEqual(resp.status_code, 400)
 
     def test_edicao_uso_consumo_persiste_no_banco_get_e_historico_diferencas(self):
         outra_unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Pacote", Codigo="PCT")
