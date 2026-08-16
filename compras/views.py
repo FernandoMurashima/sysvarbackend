@@ -61,6 +61,64 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "
         AuditService.success(**payload)
 
 
+def _parcelas_configuradas(pedido: PedidoCompra):
+    if not FIN_OK or not pedido.forma_pagamento:
+        return None, None, []
+    forma = (
+        FormaPagamento.objects
+        .filter(Q(empresa=pedido.empresa) | Q(empresa__isnull=True), codigo=pedido.forma_pagamento, ativo=True)
+        .first()
+    )
+    prazo = pedido.prazo_pagamento
+    if prazo:
+        cfg = list(PrazoPagamentoParcela.objects.filter(prazo=prazo).order_by("ordem"))
+    elif forma:
+        prazo = forma.prazo_pagamento
+        cfg = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
+    else:
+        cfg = []
+    return forma, prazo, cfg
+
+
+def _sincronizar_parcelas_planejadas(pedido: PedidoCompra, request=None, motivo="sync_total"):
+    if not FIN_OK or not pedido.forma_pagamento:
+        return
+    forma, prazo, cfg = _parcelas_configuradas(pedido)
+    if not forma or not cfg:
+        raise ValidationError({"parcelas": "Não foi possível regenerar as parcelas planejadas."})
+
+    total = Decimal(pedido.total_pedido or 0).quantize(Decimal("0.01"))
+    emissao = pedido.emissao
+    PedidoCompraParcela.objects.filter(pedido=pedido, status="PLAN").delete()
+    restante = total
+    n = len(cfg)
+    vals = []
+    for i, par in enumerate(cfg, start=1):
+        if par.percentual is not None:
+            perc = Decimal(str(par.percentual))
+            if perc > 1:
+                perc = perc / Decimal("100")
+            val = (total * perc).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        elif i < n:
+            val = (total / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            val = restante.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        restante -= val
+        vencto = emissao + timedelta(days=int(par.dias))
+        PedidoCompraParcela.objects.create(
+            pedido=pedido,
+            parcela_n=i,
+            vencimento=vencto,
+            valor=val,
+            percentual=par.percentual,
+            origem="FORMA",
+            status="PLAN",
+        )
+        vals.append({"parcela_n": i, "vencimento": vencto.isoformat(), "valor": float(val)})
+    if request:
+        _audit("pedidocompra", pedido.pk, {"parcelas_regeneradas": vals, "motivo": motivo}, request, action="sync_parcelas")
+
+
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
     required_module = "compras"
@@ -90,7 +148,7 @@ class PedidoCompraViewSet(BaseViewSet):
             qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        if tipo in ("1", "2"):
+        if tipo in ("1", "2", "4"):
             qs = qs.filter(tipo=tipo)
         if status_q:
             qs = qs.filter(status=status_q)
@@ -131,7 +189,15 @@ class PedidoCompraViewSet(BaseViewSet):
             raise ValidationError({"fornecedor": "Fornecedor inativo não pode ser utilizado em novo pedido."})
         if serializer.instance.status == "AB" and fornecedor.bloqueio:
             raise ValidationError({"fornecedor": "Fornecedor bloqueado não pode ser utilizado em novo pedido."})
-        serializer.save(empresa=loja.empresa)
+        obj = serializer.save(empresa=loja.empresa)
+        obj.recomputa_totais()
+        obj.save(update_fields=["total_itens", "total_desconto", "frete", "total_pedido"])
+        _sincronizar_parcelas_planejadas(obj, self.request, motivo="alteracao_cabecalho")
+
+    def perform_destroy(self, instance):
+        if instance.status != "AB":
+            raise ValidationError({"detail": "Somente pedidos em aberto (AB) podem ser excluídos."})
+        instance.delete()
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
     @transaction.atomic
@@ -181,55 +247,20 @@ class PedidoCompraViewSet(BaseViewSet):
         if not cfg:
             return Response({"detail": "Prazo sem parcelas configuradas"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # atualiza totais
         obj.recomputa_totais()
         obj.save(update_fields=["total_itens", "total_desconto", "frete", "total_pedido"])
-
-        total = Decimal(obj.total_pedido or 0)
-        emissao = obj.emissao
-
-        # remove anteriores PLAN
-        PedidoCompraParcela.objects.filter(pedido=obj, status="PLAN").delete()
-
-        vals = []
-        restante = total
-        n = len(cfg)
-        for i, par in enumerate(cfg, start=1):
-            if par.percentual is not None:
-                # par.percentual pode vir como 33 (33%) ou 0.33
-                perc = Decimal(str(par.percentual))
-                if perc > 1:
-                    perc = (perc / Decimal("100"))
-                val = (total * perc).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            else:
-                if i < n:
-                    val = (total / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                else:
-                    val = restante.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            restante -= val
-
-            vencto = (emissao + timedelta(days=int(par.dias)))
-            p = PedidoCompraParcela.objects.create(
-                pedido=obj,
-                parcela_n=i,
-                vencimento=vencto,
-                valor=val,
-                percentual=par.percentual,
-                origem="FORMA",
-                status="PLAN",
-            )
-            vals.append({"parcela_n": i, "vencimento": vencto.isoformat(), "valor": float(val)})
 
         before = obj.forma_pagamento
         before_prazo = obj.prazo_pagamento_id
         obj.forma_pagamento = forma.codigo
         obj.prazo_pagamento = prazo
         obj.save(update_fields=["forma_pagamento", "prazo_pagamento"])
+        _sincronizar_parcelas_planejadas(obj, request, motivo="set_forma_pagamento")
 
         _audit(
             "pedidocompra",
             obj.pk,
-            {"set_forma": {"before": before, "after": forma.codigo}, "set_prazo": {"before": before_prazo, "after": getattr(prazo, "pk", None)}, "parcelas": vals},
+            {"set_forma": {"before": before, "after": forma.codigo}, "set_prazo": {"before": before_prazo, "after": getattr(prazo, "pk", None)}},
             request,
             action="set_forma_pagto",
         )
@@ -259,6 +290,12 @@ class PedidoCompraViewSet(BaseViewSet):
                 {"detail": "Financeiro indisponível para aprovação."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        if not obj.itens.exists():
+            return Response({"detail": "Inclua ao menos um item antes de aprovar."}, status=status.HTTP_400_BAD_REQUEST)
+        tipos_itens = set(obj.itens.values_list("produto__tipo_produto", flat=True))
+        if len(tipos_itens) != 1 or obj.tipo not in tipos_itens or obj.tipo not in ("1", "2", "4"):
+            return Response({"detail": "Pedido possui tipo indefinido ou itens de tipos diferentes."}, status=status.HTTP_400_BAD_REQUEST)
 
         # 3) Forma de pagamento precisa estar definida
         if not obj.forma_pagamento:
@@ -300,6 +337,8 @@ class PedidoCompraViewSet(BaseViewSet):
         obj.recomputa_totais()
         obj.save(update_fields=["total_itens", "total_desconto", "frete", "total_pedido"])
         total = Decimal(obj.total_pedido or 0).quantize(Decimal("0.01"))
+        if total <= 0:
+            return Response({"detail": "Total do pedido deve ser maior que zero."}, status=status.HTTP_400_BAD_REQUEST)
 
         # 6) Parcelas PLAN obrigatórias
         parcelas_plan = list(
@@ -503,7 +542,8 @@ class PedidoCompraItemViewSet(BaseViewSet):
 
     def perform_create(self, serializer):
         self._validar_item_empresa(serializer.validated_data)
-        serializer.save()
+        item = serializer.save()
+        _sincronizar_parcelas_planejadas(item.pedido, self.request, motivo="alteracao_item")
 
     def perform_update(self, serializer):
         data = {**serializer.validated_data}
@@ -511,7 +551,22 @@ class PedidoCompraItemViewSet(BaseViewSet):
         data.setdefault("produto", serializer.validated_data.get("produto", serializer.instance.produto))
         data.setdefault("pack", serializer.validated_data.get("pack", serializer.instance.pack))
         self._validar_item_empresa(data)
-        serializer.save()
+        item = serializer.save()
+        _sincronizar_parcelas_planejadas(item.pedido, self.request, motivo="alteracao_item")
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        pedido = instance.pedido
+        if pedido.status != "AB":
+            raise ValidationError({"pedido": "Somente pedidos em aberto (AB) permitem exclusão de itens."})
+        instance.delete()
+        pedido.recomputa_totais()
+        update_fields = ["total_itens", "total_desconto", "frete", "total_pedido"]
+        if not pedido.itens.exists() and pedido.tipo:
+            pedido.tipo = ""
+            update_fields.append("tipo")
+        pedido.save(update_fields=update_fields)
+        _sincronizar_parcelas_planejadas(pedido, self.request, motivo="exclusao_item")
 
     def _validar_item_empresa(self, data):
         pedido = data.get("pedido")
@@ -529,6 +584,10 @@ class PedidoCompraItemViewSet(BaseViewSet):
             raise ValidationError({"pack": "Pack pertence a outra empresa."})
         if produto and pack and produto.grade_id and pack.grade_id != produto.grade_id:
             raise ValidationError({"pack": "Pack incompatível com a grade do produto."})
+        if produto and produto.tipo_produto == "3":
+            raise ValidationError({"produto": "Produto de fabricação própria não participa de Compras."})
+        if pedido and pedido.status != "AB":
+            raise ValidationError({"pedido": "Somente pedidos em aberto (AB) permitem alteração de itens."})
 
 
 # ----------------- Entregas -----------------

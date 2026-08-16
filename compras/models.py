@@ -12,8 +12,10 @@ STATUS_PC = (
 )
 
 TIPO_PC = (
+    ('', 'Não definido'),
     ('1', 'Revenda'),
     ('2', 'Uso/Consumo'),
+    ('4', 'Insumo'),
 )
 
 ENTREGA_STATUS = (
@@ -33,7 +35,7 @@ class PedidoCompra(models.Model):
     id = models.BigAutoField(primary_key=True)
 
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='pedidos_compra', db_index=True)
-    tipo = models.CharField(max_length=1, choices=TIPO_PC)
+    tipo = models.CharField(max_length=1, choices=TIPO_PC, blank=True, default='')
     loja = models.ForeignKey(Loja, on_delete=models.PROTECT)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT)
 
@@ -71,6 +73,8 @@ class PedidoCompra(models.Model):
         itens = self.itens.all()
         self.total_itens = sum([i.total_item or 0 for i in itens])
         self.total_pedido = (self.total_itens - (self.total_desconto or 0)) + (self.frete or 0)
+        if self.total_pedido < 0:
+            raise ValueError('Total do pedido não pode ser negativo.')
 
 
 class PedidoCompraItem(models.Model):
