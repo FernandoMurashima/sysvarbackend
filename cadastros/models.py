@@ -720,7 +720,8 @@ class Fornecedor(models.Model):
 
     def save(self, *args, **kwargs):
         self._normalizar_campos()
-        self.cpf = only_digits(self.cpf or "") or None
+        if hasattr(self, "cpf"):
+            self.cpf = only_digits(getattr(self, "cpf", "") or "") or None
         return super().save(*args, **kwargs)
 
     def _normalizar_campos(self):

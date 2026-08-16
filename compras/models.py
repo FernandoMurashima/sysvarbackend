@@ -39,7 +39,7 @@ class PedidoCompra(models.Model):
     loja = models.ForeignKey(Loja, on_delete=models.PROTECT)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT)
 
-    emissao = models.DateField(default=timezone.now)
+    emissao = models.DateField(default=timezone.localdate)
     previsao_entrega = models.DateField(null=True, blank=True)
 
     # snapshot textual do código da forma (ex.: 'AV', '30/60')
