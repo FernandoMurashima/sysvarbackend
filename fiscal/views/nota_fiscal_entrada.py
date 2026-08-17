@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
 from compras.models import PedidoCompraEntrega
@@ -61,6 +62,12 @@ class BaseViewSet(viewsets.ModelViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
 
+    def _empresa_id_usuario(self):
+        user = self.request.user
+        if user.is_superuser:
+            return self.request.query_params.get("empresa")
+        return getattr(user, "empresa_id", None)
+
 
 class NotaFiscalEntradaViewSet(BaseViewSet):
     queryset = (
@@ -73,11 +80,16 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         pedido = self.request.query_params.get("pedido") or self.request.query_params.get("pedido_compra")
         status_q = self.request.query_params.get("status")
         numero = self.request.query_params.get("numero")
         chave = self.request.query_params.get("chave_acesso")
 
+        if empresa_id:
+            qs = qs.filter(pedido_compra__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
         if pedido:
             qs = qs.filter(pedido_compra_id=pedido)
         if status_q:
@@ -87,6 +99,33 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         if chave:
             qs = qs.filter(chave_acesso__icontains=chave)
         return qs
+
+    def perform_create(self, serializer):
+        self._validar_nota_empresa(serializer.validated_data)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        data = {**serializer.validated_data}
+        data.setdefault("pedido_compra", serializer.instance.pedido_compra)
+        self._validar_nota_empresa(data)
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Exclusão física de nota fiscal de entrada não é permitida. Utilize o cancelamento da nota."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def _validar_nota_empresa(self, data):
+        pedido = data.get("pedido_compra")
+        empresa_id = getattr(pedido, "empresa_id", None)
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
+            raise ValidationError({"pedido_compra": "Pedido pertence a outra empresa."})
+        if pedido and pedido.loja_id and pedido.loja.empresa_id and empresa_id and pedido.loja.empresa_id != empresa_id:
+            raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
 
     @action(detail=True, methods=["post"], url_path="fechar")
     @transaction.atomic
@@ -622,10 +661,15 @@ class NotaFiscalEntradaItemViewSet(BaseViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
         nota = self.request.query_params.get("nota")
         pedido = self.request.query_params.get("pedido") or self.request.query_params.get("pedido_compra")
         pedido_item = self.request.query_params.get("pedido_item")
 
+        if empresa_id:
+            qs = qs.filter(nota__pedido_compra__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
         if nota:
             qs = qs.filter(nota_id=nota)
         if pedido:
@@ -633,6 +677,33 @@ class NotaFiscalEntradaItemViewSet(BaseViewSet):
         if pedido_item:
             qs = qs.filter(pedido_item_id=pedido_item)
         return qs
+
+    def perform_create(self, serializer):
+        self._validar_item_empresa(serializer.validated_data)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        data = {**serializer.validated_data}
+        data.setdefault("nota", serializer.instance.nota)
+        data.setdefault("pedido_item", serializer.instance.pedido_item)
+        self._validar_item_empresa(data)
+        serializer.save()
+
+    def _validar_item_empresa(self, data):
+        nota = data.get("nota")
+        pedido_item = data.get("pedido_item")
+        empresa_id = getattr(getattr(nota, "pedido_compra", None), "empresa_id", None)
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
+            raise ValidationError({"nota": "Nota fiscal pertence a outra empresa."})
+        if nota and nota.pedido_compra.loja_id and nota.pedido_compra.loja.empresa_id != nota.pedido_compra.empresa_id:
+            raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
+        if pedido_item and nota and pedido_item.pedido_id != nota.pedido_compra_id:
+            raise ValidationError({"pedido_item": "O item informado não pertence ao pedido de compra da nota."})
+        if pedido_item and empresa_id and pedido_item.pedido.empresa_id != empresa_id:
+            raise ValidationError({"pedido_item": "Item de pedido pertence a outra empresa."})
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
