@@ -1,23 +1,24 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
+from django.db.models import Sum
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
 from compras.models import PedidoCompraEntrega
-from produto.models import Estoque, EstoqueMovimentacao, PackItem, ProdutoDetalhe
+from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe
 
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
 
 FIN_OK = True
 try:
-    from financeiro.models import Pagar, PagarItem
+    from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
 except Exception:
     FIN_OK = False
-    Pagar = PagarItem = None
+    MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaSerializer
@@ -36,16 +37,20 @@ def _q3(valor) -> Decimal:
 
 
 def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "custom"):
-    AuditService.success(
-        AuditAction.OBJECT_UPDATED,
-        category=AuditCategory.FISCAL,
-        request=request,
-        user=getattr(request, "user", None),
-        app_label="fiscal",
-        model=model_name,
-        object_id=obj_id,
-        metadata={"legacy_action": action, "changes": changes},
-    )
+    payload = {
+        "action": AuditAction.OBJECT_UPDATED,
+        "category": AuditCategory.FISCAL,
+        "request": request,
+        "user": getattr(request, "user", None),
+        "app_label": "fiscal",
+        "model": model_name,
+        "object_id": obj_id,
+        "metadata": {"legacy_action": action, "changes": changes},
+    }
+    if transaction.get_connection().in_atomic_block:
+        transaction.on_commit(lambda: AuditService.success(**payload))
+    else:
+        AuditService.success(**payload)
 
 
 def _documento_nota(nota: NotaFiscalEntrada) -> str:
@@ -169,10 +174,16 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         estoque = {"disponivel": True, "movimentos": 0}
         if nota.status == NotaFiscalEntrada.Status.FECHADA:
             try:
+                financeiro = self._cancelar_financeiro_nf(nota)
+                self._validar_estoque_cancelamento(nota)
                 estoque = self._movimentar_estoque_cancelamento(nota)
+                custos = self._recalcular_custos_apos_cancelamento(nota)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            financeiro = {"disponivel": FIN_OK, "titulos_cancelados": 0}
+            custos = {"skus_atualizados": 0, "produtos_atualizados": 0}
 
         nota.status = NotaFiscalEntrada.Status.CANCELADA
         nota.save(update_fields=["status", "atualizado_em"])
@@ -180,6 +191,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="cancelar")
         data = self.get_serializer(nota).data
         data["estoque"] = estoque
+        data["financeiro"] = financeiro
+        data["custos"] = custos
         data["recebimento_pedido"] = recebimento
         return Response(data, status=status.HTTP_200_OK)
 
@@ -241,7 +254,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return Response(payload, status=status.HTTP_200_OK)
 
     def _documento_estoque(self, nota):
-        return str(nota.numero or nota.pk).strip()
+        return f"NFE:{nota.pk}:{str(nota.numero or '').strip()}"[:50]
 
     def _codigo_estoque_produto(self, produto):
         referencia_numerica = ''.join(ch for ch in str(produto.referencia or '') if ch.isdigit())
@@ -353,6 +366,46 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         return {"disponivel": True, "movimentos": movimentos}
 
+    def _validar_estoque_cancelamento(self, nota):
+        for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__pack"):
+            pedido_item = item_nf.pedido_item
+            if nota.pedido_compra.tipo == "1":
+                qtd_pedido = Decimal(pedido_item.qtd or 0)
+                if qtd_pedido <= 0:
+                    raise ValueError("Item do pedido sem quantidade calculada para cancelar a nota.")
+                fator_recebido = Decimal(item_nf.qtd_recebida or 0) / qtd_pedido
+                for pack_item in PackItem.objects.filter(pack_id=pedido_item.pack_id):
+                    qtd = Decimal(pack_item.qtd or 0) * Decimal(pedido_item.n_packs or 0) * fator_recebido
+                    sku = ProdutoDetalhe.objects.select_related("produto").filter(
+                        produto_id=pedido_item.produto_id,
+                        idcor_id=pedido_item.cor_id,
+                        idtamanho_id=pack_item.tamanho_id,
+                    ).first()
+                    if not sku:
+                        raise ValueError("SKU não encontrado para cancelar a nota.")
+                    saldo = Decimal(
+                        Estoque.objects.filter(CodigodeBarra=sku.ean13, Idloja=nota.pedido_compra.loja)
+                        .values_list("Estoque", flat=True)
+                        .first()
+                        or 0
+                    )
+                    if saldo - qtd < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+                        raise ValueError(f"Saldo insuficiente do SKU {sku.ean13} para cancelar a nota.")
+            else:
+                produto = pedido_item.produto if pedido_item else None
+                if not produto:
+                    continue
+                codigo = self._codigo_estoque_produto(produto)
+                saldo = Decimal(
+                    Estoque.objects.filter(CodigodeBarra=codigo, Idloja=nota.pedido_compra.loja)
+                    .values_list("Estoque", flat=True)
+                    .first()
+                    or 0
+                )
+                qtd = Decimal(item_nf.qtd_recebida or 0)
+                if saldo - qtd < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+                    raise ValueError(f"Saldo insuficiente do produto {produto.descricao} para cancelar a nota.")
+
     def _movimentar_item_estoque_nao_revenda(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
         produto = pedido_item.produto if pedido_item else None
@@ -429,6 +482,85 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             atualizados += 1
 
         return {"atualizados": atualizados}
+
+    def _recalcular_custos_apos_cancelamento(self, nota):
+        produtos = set()
+        skus = set()
+        for item_nf in nota.itens.select_related("pedido_item"):
+            pedido_item = item_nf.pedido_item
+            if nota.pedido_compra.tipo == "1" and pedido_item.pack_id:
+                for pack_item in PackItem.objects.filter(pack_id=pedido_item.pack_id):
+                    sku = ProdutoDetalhe.objects.filter(
+                        produto_id=pedido_item.produto_id,
+                        idcor_id=pedido_item.cor_id,
+                        idtamanho_id=pack_item.tamanho_id,
+                    ).first()
+                    if sku:
+                        skus.add(sku.pk)
+            elif pedido_item.produto_id:
+                produtos.add(pedido_item.produto_id)
+
+        for sku in ProdutoDetalhe.objects.filter(pk__in=skus):
+            entradas = self._entradas_validas_sku(sku, excluir_nota=nota)
+            self._aplicar_custos_historicos(sku, entradas)
+
+        for produto_id in produtos:
+            produto = Produto.objects.get(pk=produto_id)
+            entradas = self._entradas_validas_produto(produto, excluir_nota=nota)
+            self._aplicar_custos_historicos(produto, entradas)
+
+        return {"skus_atualizados": len(skus), "produtos_atualizados": len(produtos)}
+
+    def _entradas_validas_produto(self, produto, excluir_nota):
+        rows = (
+            NotaFiscalEntradaItem.objects.select_related("nota")
+            .filter(
+                pedido_item__produto=produto,
+                nota__status=NotaFiscalEntrada.Status.FECHADA,
+            )
+            .exclude(nota=excluir_nota)
+            .order_by("nota__dt_entrada", "nota_id", "id")
+        )
+        return [
+            (Decimal(row.qtd_recebida or 0), _q4((Decimal(row.total_item or 0) / Decimal(row.qtd_recebida or 1)) if Decimal(row.qtd_recebida or 0) else row.preco_unit_nf))
+            for row in rows
+            if Decimal(row.qtd_recebida or 0) > 0
+        ]
+
+    def _entradas_validas_sku(self, sku, excluir_nota):
+        entradas = []
+        rows = (
+            NotaFiscalEntradaItem.objects.select_related("nota", "pedido_item")
+            .filter(
+                pedido_item__produto_id=sku.produto_id,
+                pedido_item__cor_id=sku.idcor_id,
+                pedido_item__pack__isnull=False,
+                nota__status=NotaFiscalEntrada.Status.FECHADA,
+            )
+            .exclude(nota=excluir_nota)
+            .order_by("nota__dt_entrada", "nota_id", "id")
+        )
+        for row in rows:
+            pack_qtd = PackItem.objects.filter(pack_id=row.pedido_item.pack_id, tamanho_id=sku.idtamanho_id).aggregate(total=Sum("qtd"))["total"] or 0
+            if not pack_qtd or not row.pedido_item.qtd:
+                continue
+            qtd = Decimal(pack_qtd) * Decimal(row.pedido_item.n_packs or 0) * (Decimal(row.qtd_recebida or 0) / Decimal(row.pedido_item.qtd or 1))
+            if qtd > 0:
+                entradas.append((qtd, _q4(row.preco_unit_nf or 0)))
+        return entradas
+
+    def _aplicar_custos_historicos(self, obj, entradas):
+        if not entradas:
+            obj.custo_original = Decimal("0.0000")
+            obj.custo_ultima_compra = Decimal("0.0000")
+            obj.custo_medio = Decimal("0.0000")
+        else:
+            qtd_total = sum((qtd for qtd, _ in entradas), Decimal("0"))
+            total = sum((qtd * custo for qtd, custo in entradas), Decimal("0"))
+            obj.custo_original = _q4(entradas[0][1])
+            obj.custo_ultima_compra = _q4(entradas[-1][1])
+            obj.custo_medio = _q4(total / qtd_total) if qtd_total > 0 else obj.custo_ultima_compra
+        obj.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
 
     def _movimentar_item_estoque(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
@@ -610,6 +742,94 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             "parcelas_efetivadas": parcelas_efetivadas,
             "previsoes_ajustadas": previsoes_ajustadas,
         }
+
+    def _cancelar_financeiro_nf(self, nota):
+        if not FIN_OK:
+            return {"disponivel": False, "titulos_cancelados": 0}
+
+        titulos_nf = list(Pagar.objects.select_for_update().filter(nfe_id=nota.pk, pedido_compra=nota.pedido_compra_id))
+        itens_nf = PagarItem.objects.select_for_update().filter(Idpagar__in=titulos_nf)
+        if itens_nf.filter(status=PagarItem.STATUS_BAIXADO).exists() or itens_nf.filter(data_baixa__isnull=False).exists() or itens_nf.filter(valor_baixa__gt=0).exists():
+            raise ValueError("Não é possível cancelar a NF porque há parcelas do contas a pagar já baixadas.")
+        if MovimentacaoFinanceira.objects.filter(pagar_item__in=itens_nf).exclude(status=MovimentacaoFinanceira.STATUS_CANCELADA).exists():
+            raise ValueError("Não é possível cancelar a NF porque há movimentações financeiras vinculadas às parcelas.")
+
+        modelo_previsao = None
+        for titulo in titulos_nf:
+            if modelo_previsao is None:
+                modelo_previsao = titulo
+            titulo.delete()
+
+        self._recalcular_previsao_financeira_pedido(nota, modelo_previsao)
+        return {"disponivel": True, "titulos_cancelados": len(titulos_nf)}
+
+    def _recalcular_previsao_financeira_pedido(self, nota, modelo_previsao):
+        pedido = nota.pedido_compra
+        total_fechado = _money(
+            NotaFiscalEntrada.objects.filter(
+                pedido_compra=pedido,
+                status=NotaFiscalEntrada.Status.FECHADA,
+            )
+            .exclude(pk=nota.pk)
+            .aggregate(total=Sum("valor_total"))["total"]
+            or 0
+        )
+        saldo = _money(Decimal(pedido.total_pedido or 0) - total_fechado)
+        if saldo < 0:
+            raise ValueError("Saldo financeiro do pedido ficaria negativo após o cancelamento.")
+
+        previsoes = list(Pagar.objects.select_for_update().filter(pedido_compra=pedido.pk, nfe_id__isnull=True, Previsao=True).order_by("Idpagar"))
+        previsao = previsoes[0] if previsoes else None
+        for extra in previsoes[1:]:
+            extra.delete()
+
+        if saldo <= 0:
+            if previsao:
+                previsao.delete()
+            return
+
+        base = previsao or modelo_previsao or Pagar.objects.filter(pedido_compra=pedido.pk).order_by("Idpagar").first()
+        if not base:
+            return
+        if not previsao:
+            previsao = Pagar.objects.create(
+                empresa=pedido.empresa,
+                idloja=pedido.loja,
+                idfornecedor=pedido.fornecedor,
+                Titulo=f"PC {pedido.pk} - saldo"[:60],
+                Documento=None,
+                Data_emissao=pedido.emissao,
+                Valor_total=saldo,
+                Previsao=True,
+                FormaPagamento=base.FormaPagamento,
+                Idnatureza=base.Idnatureza,
+                conta_contabil=base.conta_contabil,
+                pedido_compra=pedido.pk,
+                nfe_id=None,
+            )
+            base_itens = list(PagarItem.objects.filter(Idpagar=base).order_by("parcela_n")) if base.pk != previsao.pk else []
+            if base_itens:
+                self._criar_parcelas_proporcionais(previsao, base_itens, sum(Decimal(i.valor_parcela or 0) for i in base_itens), saldo)
+            else:
+                PagarItem.objects.create(
+                    Idpagar=previsao,
+                    parcela_n=1,
+                    status=PagarItem.STATUS_PREVISTO,
+                    Data_vencimento=pedido.previsao_entrega or pedido.emissao,
+                    valor_parcela=saldo,
+                    FormaPagamento=base.FormaPagamento,
+                    Previsao=True,
+                    Idnatureza=base.Idnatureza,
+                )
+        else:
+            itens = list(PagarItem.objects.select_for_update().filter(Idpagar=previsao).order_by("parcela_n"))
+            self._redistribuir_parcelas(itens, saldo)
+            PagarItem.objects.filter(Idpagar=previsao).update(status=PagarItem.STATUS_PREVISTO, Previsao=True, data_baixa=None, valor_baixa=None)
+            previsao.Valor_total = saldo
+            previsao.Titulo = f"PC {pedido.pk} - saldo"[:60]
+            previsao.Previsao = True
+            previsao.nfe_id = None
+            previsao.save(update_fields=["Valor_total", "Titulo", "Previsao", "nfe_id"])
 
     def _criar_parcelas_proporcionais(self, titulo, parcelas_base, total_base, total_destino, efetivo=False):
         restante = _money(total_destino)
