@@ -401,7 +401,7 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         self.cancelar(nota)
         self.cancelar(nota)
         self.assertEqual(Pagar.objects.filter(pedido_compra=pedido.pk, Previsao=True).count(), 1)
-        self.assertEqual(EstoqueMovimentacao.objects.filter(documento__contains=f"NFE:{nota.pk}:906:CANCEL").count(), 1)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").count(), 1)
 
     def test_uso_consumo_estorna_estoque_e_recalcula_custos(self):
         produto = self.criar_produto()
@@ -547,3 +547,167 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         self.assertEqual(produto.custo_medio, Decimal("10.0000"))
         pedido.refresh_from_db()
         self.assertEqual(pedido.status, "AT")
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa B3", documento="44444444000191", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa B3 Outra", documento="55555555000191", plano_completo=True)
+        self.user = get_user_model().objects.create_superuser("nf-ident", "nf-ident@sysvar.test", "test")
+        self.client.force_authenticate(self.user)
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja B3", apelido_loja="Loja B3", cnpj="44444444000100", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja B3B", apelido_loja="Loja B3B", cnpj="55555555000100", estado="SP")
+        self.fornecedor = self.criar_fornecedor(self.empresa, "Fornecedor 1", "44445678000195")
+        self.fornecedor_2 = self.criar_fornecedor(self.empresa, "Fornecedor 2", "44445678000276")
+        self.fornecedor_b = self.criar_fornecedor(self.empresa_b, "Fornecedor B", "55545678000195")
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade B3", Codigo="U3")
+        self.unidade_b = Unidade.objects.create(empresa=self.empresa_b, Descricao="Unidade B3B", Codigo="U4")
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Produto B3", unidade=self.unidade)
+        self.produto_b = Produto.objects.create(empresa=self.empresa_b, tipo_produto="2", descricao="Produto B3B", unidade=self.unidade_b)
+
+    def chave_valida(self, sequencia=1):
+        base = f"35{timezone.localdate():%y%m}4444444400019155001000000{sequencia:03d}12345678"
+        base = base[:43].ljust(43, "0")
+        pesos = [2, 3, 4, 5, 6, 7, 8, 9]
+        soma = sum(int(digito) * pesos[index % len(pesos)] for index, digito in enumerate(reversed(base)))
+        dv = 11 - (soma % 11)
+        if dv >= 10:
+            dv = 0
+        return f"{base}{dv}"
+
+    def criar_fornecedor(self, empresa, nome, documento):
+        return Fornecedor.objects.create(
+            empresa=empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=documento,
+            cnpj=documento,
+            nome_fornecedor=nome,
+            categoria="USO_CONSUMO",
+        )
+
+    def criar_pedido(self, fornecedor=None, empresa=None, loja=None, produto=None, total=Decimal("10.00")):
+        empresa = empresa or self.empresa
+        loja = loja or self.loja
+        fornecedor = fornecedor or self.fornecedor
+        produto = produto or self.produto
+        pedido = PedidoCompra.objects.create(empresa=empresa, tipo="2", loja=loja, fornecedor=fornecedor, status="AP", total_pedido=total)
+        item = PedidoCompraItem.objects.create(pedido=pedido, produto=produto, qtd=Decimal("1.000"), preco_unit=total, total_item=total)
+        return pedido, item
+
+    def payload_nota(self, pedido, numero="123", serie="1", chave=None):
+        payload = {
+            "pedido_compra": pedido.pk,
+            "modelo": "55",
+            "serie": serie,
+            "numero": numero,
+            "dt_emissao": timezone.localdate().isoformat(),
+            "dt_entrada": timezone.localdate().isoformat(),
+        }
+        if chave is not None:
+            payload["chave_acesso"] = chave
+        return payload
+
+    def criar_nota_api(self, pedido, numero="123", serie="1", chave=None, status_code=201):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={pedido.empresa_id}",
+            self.payload_nota(pedido, numero=numero, serie=serie, chave=chave),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return NotaFiscalEntrada.objects.get(pk=resp.data["id"]) if status_code == 201 else resp
+
+    def criar_item(self, nota, item):
+        NotaFiscalEntradaItem.objects.create(
+            nota=nota,
+            pedido_item=item,
+            qtd_recebida=Decimal("1.000"),
+            preco_unit_nf=item.preco_unit,
+            total_item=item.total_item,
+        )
+        nota.recalcular_totais()
+
+    def fechar(self, nota):
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def cancelar(self, nota):
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def test_identidade_documental_bloqueia_mesmo_fornecedor_empresa_modelo_serie_numero(self):
+        pedido1, _ = self.criar_pedido()
+        pedido2, _ = self.criar_pedido()
+        self.criar_nota_api(pedido1, numero="100", serie="1")
+        self.criar_nota_api(pedido2, numero="100", serie="1", status_code=400)
+
+    def test_mesmo_numero_fornecedor_diferente_serie_diferente_empresa_diferente_e_pedido_igual_permitidos(self):
+        pedido1, _ = self.criar_pedido()
+        pedido_fornecedor_2, _ = self.criar_pedido(fornecedor=self.fornecedor_2)
+        pedido_empresa_b, _ = self.criar_pedido(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, produto=self.produto_b)
+        self.criar_nota_api(pedido1, numero="101", serie="1")
+        self.criar_nota_api(pedido_fornecedor_2, numero="101", serie="1")
+        self.criar_nota_api(pedido1, numero="101", serie="2")
+        self.criar_nota_api(pedido_empresa_b, numero="101", serie="1")
+        self.criar_nota_api(pedido1, numero="102", serie="1")
+
+    def test_edicao_propria_permitida_e_colisao_bloqueada(self):
+        pedido1, _ = self.criar_pedido()
+        pedido2, _ = self.criar_pedido()
+        nota1 = self.criar_nota_api(pedido1, numero="103")
+        self.criar_nota_api(pedido2, numero="104")
+        resp = self.client.patch(f"/api/fiscal/notas-entrada/{nota1.pk}/?empresa={self.empresa.pk}", {"observacoes": "ok"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.patch(f"/api/fiscal/notas-entrada/{nota1.pk}/?empresa={self.empresa.pk}", {"numero": "104"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_validacao_e_duplicidade_da_chave_de_acesso(self):
+        pedido1, _ = self.criar_pedido()
+        pedido2, _ = self.criar_pedido()
+        chave = self.chave_valida(1)
+        nota = self.criar_nota_api(pedido1, numero="105", chave=chave)
+        self.assertEqual(nota.chave_acesso, chave)
+
+        for chave_invalida in ("123", "1" * 45, "1" * 43 + "A", chave[:-1] + str((int(chave[-1]) + 1) % 10)):
+            self.criar_nota_api(pedido2, numero=f"20{len(chave_invalida)}", chave=chave_invalida, status_code=400)
+
+        self.criar_nota_api(pedido2, numero="106", chave=chave, status_code=400)
+        resp = self.client.patch(f"/api/fiscal/notas-entrada/{nota.pk}/?empresa={self.empresa.pk}", {"chave_acesso": chave}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        NotaFiscalEntrada.objects.filter(pk=nota.pk).update(status=NotaFiscalEntrada.Status.CANCELADA)
+        self.criar_nota_api(pedido2, numero="107", chave=chave, status_code=400)
+
+    def test_estoque_identifica_movimentos_por_id_da_nf_e_nao_por_numero(self):
+        pedido1, item1 = self.criar_pedido()
+        pedido2, item2 = self.criar_pedido(fornecedor=self.fornecedor_2)
+        nota1 = self.criar_nota_api(pedido1, numero="108", serie="1")
+        nota2 = self.criar_nota_api(pedido2, numero="108", serie="1")
+        self.criar_item(nota1, item1)
+        self.criar_item(nota2, item2)
+        self.fechar(nota1)
+        self.fechar(nota2)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota1.pk}/fechar/?empresa={self.empresa.pk}", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:ENTRADA").count(), 1)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:ENTRADA").count(), 1)
+
+        self.cancelar(nota1)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
+
+    def test_series_e_empresas_iguais_no_numero_movimentam_sem_interferencia(self):
+        pedido1, item1 = self.criar_pedido()
+        pedido2, item2 = self.criar_pedido()
+        pedido_b, item_b = self.criar_pedido(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, produto=self.produto_b)
+        nota1 = self.criar_nota_api(pedido1, numero="109", serie="1")
+        nota2 = self.criar_nota_api(pedido2, numero="109", serie="2")
+        nota_b = self.criar_nota_api(pedido_b, numero="109", serie="1")
+        for nota, item in ((nota1, item1), (nota2, item2), (nota_b, item_b)):
+            self.criar_item(nota, item)
+            self.fechar(nota)
+            self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").count(), 1)

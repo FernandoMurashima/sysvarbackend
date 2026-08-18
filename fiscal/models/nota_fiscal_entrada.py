@@ -27,7 +27,7 @@ class NotaFiscalEntrada(models.Model):
     modelo = models.CharField(max_length=2, default="55")  # 55 = NFe (MVP)
     serie = models.CharField(max_length=10, blank=True, default="")
     numero = models.CharField(max_length=20)
-    chave_acesso = models.CharField(max_length=60, blank=True, default="")
+    chave_acesso = models.CharField(max_length=44, blank=True, null=True, default=None, unique=True, db_index=True)
 
     dt_emissao = models.DateField()
     dt_entrada = models.DateField()
@@ -60,12 +60,6 @@ class NotaFiscalEntrada(models.Model):
 
     class Meta:
         db_table = "fiscal_nota_fiscal_entrada"
-        constraints = [
-            UniqueConstraint(
-                fields=["pedido_compra", "modelo", "serie", "numero"],
-                name="uq_fiscal_nfe_pedido_modelo_serie_numero",
-            ),
-        ]
         indexes = [
             Index(fields=["pedido_compra", "status"], name="ix_fiscal_nfe_pedido_status"),
             Index(fields=["modelo", "serie", "numero"], name="ix_fiscal_nfe_num"),

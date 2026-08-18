@@ -4,6 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.validators import normalizar_chave_acesso_nfe
 
 
 def _money(value):
@@ -94,10 +95,21 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         pedido = attrs.get("pedido_compra") or getattr(self.instance, "pedido_compra", None)
+        for field in ("modelo", "serie", "numero"):
+            if field in attrs and attrs[field] is not None:
+                attrs[field] = str(attrs[field]).strip()
+
         if pedido and (pedido.status or "").upper() == "CA":
             raise serializers.ValidationError({"pedido_compra": "Não é possível criar nota para pedido cancelado."})
         if pedido and (pedido.status or "").upper() == "AT":
             raise serializers.ValidationError({"pedido_compra": "Este pedido já foi totalmente atendido."})
+
+        chave = attrs.get("chave_acesso")
+        if chave is not None:
+            try:
+                attrs["chave_acesso"] = normalizar_chave_acesso_nfe(chave) or None
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"chave_acesso": exc.detail})
 
         if self.instance and self.instance.status != NotaFiscalEntrada.Status.ABERTA:
             protected = {"pedido_compra", "modelo", "serie", "numero", "chave_acesso", "dt_emissao", "dt_entrada"}

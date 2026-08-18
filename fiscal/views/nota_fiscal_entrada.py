@@ -1,13 +1,13 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
-from compras.models import PedidoCompraEntrega
+from compras.models import PedidoCompra, PedidoCompraEntrega
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe
 
 from auditoria.models import AuditAction, AuditCategory
@@ -105,15 +105,29 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             qs = qs.filter(chave_acesso__icontains=chave)
         return qs
 
+    @transaction.atomic
     def perform_create(self, serializer):
         self._validar_nota_empresa(serializer.validated_data)
-        serializer.save()
+        self._validar_duplicidade_nota(serializer.validated_data)
+        try:
+            serializer.save()
+        except IntegrityError as exc:
+            raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."}) from exc
 
+    @transaction.atomic
     def perform_update(self, serializer):
         data = {**serializer.validated_data}
         data.setdefault("pedido_compra", serializer.instance.pedido_compra)
+        data.setdefault("modelo", serializer.instance.modelo)
+        data.setdefault("serie", serializer.instance.serie)
+        data.setdefault("numero", serializer.instance.numero)
+        data.setdefault("chave_acesso", serializer.instance.chave_acesso)
         self._validar_nota_empresa(data)
-        serializer.save()
+        self._validar_duplicidade_nota(data, instance=serializer.instance)
+        try:
+            serializer.save()
+        except IntegrityError as exc:
+            raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."}) from exc
 
     def destroy(self, request, *args, **kwargs):
         return Response(
@@ -131,6 +145,41 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             raise ValidationError({"pedido_compra": "Pedido pertence a outra empresa."})
         if pedido and pedido.loja_id and pedido.loja.empresa_id and empresa_id and pedido.loja.empresa_id != empresa_id:
             raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
+
+    def _validar_duplicidade_nota(self, data, instance=None):
+        pedido = data.get("pedido_compra")
+        if not pedido:
+            return
+        modelo = str(data.get("modelo") or "55").strip()
+        serie = str(data.get("serie") or "").strip()
+        numero = str(data.get("numero") or "").strip()
+        chave = data.get("chave_acesso")
+
+        PedidoCompra.objects.select_for_update().filter(
+            empresa_id=pedido.empresa_id,
+            fornecedor_id=pedido.fornecedor_id,
+        ).exists()
+
+        duplicadas = NotaFiscalEntrada.objects.select_for_update().filter(
+            pedido_compra__empresa_id=pedido.empresa_id,
+            pedido_compra__fornecedor_id=pedido.fornecedor_id,
+            modelo=modelo,
+            serie=serie,
+            numero=numero,
+        )
+        if instance:
+            duplicadas = duplicadas.exclude(pk=instance.pk)
+        if duplicadas.exists():
+            raise ValidationError(
+                {"numero": "Nota fiscal de entrada já cadastrada para esta empresa, fornecedor, modelo, série e número."}
+            )
+
+        if chave:
+            chave_duplicada = NotaFiscalEntrada.objects.select_for_update().filter(chave_acesso=chave)
+            if instance:
+                chave_duplicada = chave_duplicada.exclude(pk=instance.pk)
+            if chave_duplicada.exists():
+                raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."})
 
     @action(detail=True, methods=["post"], url_path="fechar")
     @transaction.atomic
@@ -253,8 +302,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         return Response(payload, status=status.HTTP_200_OK)
 
-    def _documento_estoque(self, nota):
-        return f"NFE:{nota.pk}:{str(nota.numero or '').strip()}"[:50]
+    def _documento_estoque(self, nota, operacao):
+        return f"NFE:{nota.pk}:{operacao}"[:50]
 
     def _codigo_estoque_produto(self, produto):
         referencia_numerica = ''.join(ch for ch in str(produto.referencia or '') if ch.isdigit())
@@ -315,7 +364,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         }
 
     def _movimentar_estoque_entrada(self, nota):
-        documento = self._documento_estoque(nota)
+        documento = self._documento_estoque(nota, "ENTRADA")
         if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists():
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
 
@@ -341,7 +390,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return {"disponivel": True, "movimentos": movimentos}
 
     def _movimentar_estoque_cancelamento(self, nota):
-        documento = f"{self._documento_estoque(nota)}:CANCEL"
+        documento = self._documento_estoque(nota, "CANCEL")
         if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists():
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
 
