@@ -38,6 +38,9 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"preco_unit_nf": "Informe um preço maior ou igual a zero."})
         if Decimal(desconto_item or 0) < 0:
             raise serializers.ValidationError({"desconto_item": "Informe um desconto maior ou igual a zero."})
+        valor_bruto = Decimal(qtd_recebida or 0) * Decimal(preco_unit_nf or 0)
+        if Decimal(desconto_item or 0) > valor_bruto:
+            raise serializers.ValidationError({"desconto_item": "Desconto do item não pode ser maior que o valor bruto."})
 
         if pedido_item and nota:
             recebidos = NotaFiscalEntradaItem.objects.filter(
@@ -58,6 +61,8 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
     def _apply_totals(self, instance):
         bruto = Decimal(instance.qtd_recebida or 0) * Decimal(instance.preco_unit_nf or 0)
         instance.total_item = _money(bruto - Decimal(instance.desconto_item or 0))
+        if instance.total_item < 0:
+            raise serializers.ValidationError({"total_item": "Total do item não pode ser negativo."})
 
     @transaction.atomic
     def create(self, validated_data):
@@ -119,6 +124,10 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
         valor_frete = attrs.get("valor_frete", getattr(self.instance, "valor_frete", 0))
         if Decimal(valor_frete or 0) < 0:
             raise serializers.ValidationError({"valor_frete": "Informe um frete maior ou igual a zero."})
+        dt_emissao = attrs.get("dt_emissao", getattr(self.instance, "dt_emissao", None))
+        dt_entrada = attrs.get("dt_entrada", getattr(self.instance, "dt_entrada", None))
+        if dt_emissao and dt_entrada and dt_entrada < dt_emissao:
+            raise serializers.ValidationError({"dt_entrada": "Data de entrada não pode ser anterior à data de emissão."})
 
         return attrs
 
@@ -130,5 +139,8 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         obj = super().update(instance, validated_data)
-        obj.recalcular_totais()
+        try:
+            obj.recalcular_totais()
+        except ValueError as exc:
+            raise serializers.ValidationError({"valor_total": str(exc)}) from exc
         return obj

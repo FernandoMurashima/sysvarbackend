@@ -544,6 +544,149 @@ class NotaFiscalEntradaPaginacaoFiltrosBloco5Tests(TestCase):
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaValidacoesBloco7Tests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Bloco 7", documento="88888888000191", plano_completo=True)
+        self.user = get_user_model().objects.create_superuser(
+            "nf-b7",
+            "nf-b7@sysvar.test",
+            "test",
+            type="Gerente",
+            empresa=self.empresa,
+        )
+        self.client.force_authenticate(self.user)
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja B7", apelido_loja="B7", cnpj="88888888000100", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="88845678000195",
+            cnpj="88845678000195",
+            nome_fornecedor="Fornecedor B7",
+            categoria="USO_CONSUMO",
+        )
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso B7", unidade=self.unidade)
+        self.pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=self.loja, fornecedor=self.fornecedor, status="AP")
+        self.pedido_item = PedidoCompraItem.objects.create(
+            pedido=self.pedido,
+            produto=self.produto,
+            qtd=Decimal("10.000"),
+            preco_unit=Decimal("5.00"),
+            total_item=Decimal("50.00"),
+        )
+        self.nota = NotaFiscalEntrada.objects.create(
+            pedido_compra=self.pedido,
+            numero="7001",
+            dt_emissao="2026-08-10",
+            dt_entrada="2026-08-10",
+        )
+
+    def item_payload(self, desconto="0.00", qtd="10.000", preco="5.0000"):
+        return {
+            "nota": self.nota.id,
+            "pedido_item": self.pedido_item.id,
+            "qtd_recebida": qtd,
+            "preco_unit_nf": preco,
+            "desconto_item": desconto,
+        }
+
+    def nota_payload(self, emissao, entrada, numero="7002"):
+        return {
+            "pedido_compra": self.pedido.id,
+            "modelo": "55",
+            "serie": "1",
+            "numero": numero,
+            "dt_emissao": emissao,
+            "dt_entrada": entrada,
+        }
+
+    def test_desconto_igual_ao_bruto_e_permitido_e_total_item_zero(self):
+        resp = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(desconto="50.00"), format="json")
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        item = NotaFiscalEntradaItem.objects.get(pk=resp.data["id"])
+        self.assertEqual(item.total_item, Decimal("0.00"))
+        self.nota.refresh_from_db()
+        self.assertEqual(self.nota.valor_total, Decimal("0.00"))
+
+    def test_desconto_maior_que_bruto_e_desconto_negativo_sao_rejeitados(self):
+        maior = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(desconto="50.01"), format="json")
+        negativo = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(desconto="-0.01"), format="json")
+
+        self.assertEqual(maior.status_code, 400)
+        self.assertIn("desconto_item", maior.data)
+        self.assertEqual(negativo.status_code, 400)
+        self.assertIn("desconto_item", negativo.data)
+        self.assertFalse(NotaFiscalEntradaItem.objects.filter(total_item__lt=0).exists())
+
+    def test_preco_e_quantidade_negativos_continuam_rejeitados(self):
+        preco = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(preco="-1.0000"), format="json")
+        qtd = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(qtd="-1.000"), format="json")
+
+        self.assertEqual(preco.status_code, 400)
+        self.assertIn("preco_unit_nf", preco.data)
+        self.assertEqual(qtd.status_code, 400)
+        self.assertIn("qtd_recebida", qtd.data)
+
+    def test_nf_recalcula_total_valido_e_impede_total_negativo(self):
+        item = NotaFiscalEntradaItem.objects.create(
+            nota=self.nota,
+            pedido_item=self.pedido_item,
+            qtd_recebida=Decimal("10.000"),
+            preco_unit_nf=Decimal("5.0000"),
+            desconto_item=Decimal("10.00"),
+            total_item=Decimal("40.00"),
+        )
+        self.nota.recalcular_totais()
+        self.nota.refresh_from_db()
+        self.assertEqual(self.nota.valor_total, Decimal("40.00"))
+
+        item.desconto_item = Decimal("60.00")
+        item.save(update_fields=["desconto_item"])
+        with self.assertRaises(ValueError):
+            self.nota.recalcular_totais()
+
+    def test_datas_de_emissao_e_entrada_mesmo_dia_ou_entrada_posterior_sao_permitidas(self):
+        mesmo_dia = self.client.post(
+            "/api/fiscal/notas-entrada/",
+            self.nota_payload("2026-08-10", "2026-08-10", "7003"),
+            format="json",
+        )
+        posterior = self.client.post(
+            "/api/fiscal/notas-entrada/",
+            self.nota_payload("2026-08-10", "2026-08-11", "7004"),
+            format="json",
+        )
+
+        self.assertEqual(mesmo_dia.status_code, 201, mesmo_dia.data)
+        self.assertEqual(posterior.status_code, 201, posterior.data)
+
+    def test_data_de_entrada_anterior_a_emissao_e_rejeitada_em_criacao_e_edicao_aberta(self):
+        criacao = self.client.post(
+            "/api/fiscal/notas-entrada/",
+            self.nota_payload("2026-08-11", "2026-08-10", "7005"),
+            format="json",
+        )
+        edicao = self.client.patch(
+            f"/api/fiscal/notas-entrada/{self.nota.id}/",
+            {"dt_emissao": "2026-08-11", "dt_entrada": "2026-08-10"},
+            format="json",
+        )
+
+        self.assertEqual(criacao.status_code, 400)
+        self.assertIn("dt_entrada", criacao.data)
+        self.assertEqual(edicao.status_code, 400)
+        self.assertIn("dt_entrada", edicao.data)
+
+    def test_validacao_de_saldo_permanece_funcionando(self):
+        resp = self.client.post("/api/fiscal/notas-entrada-itens/", self.item_payload(qtd="10.001"), format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("qtd_recebida", resp.data)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
 class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
     def setUp(self):
         self.client = APIClient()

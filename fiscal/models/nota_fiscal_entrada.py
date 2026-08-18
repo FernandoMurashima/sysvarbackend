@@ -75,6 +75,8 @@ class NotaFiscalEntrada(models.Model):
         )
         self.valor_desconto = _money(sum((item.desconto_item or 0) for item in itens))
         self.valor_total = _money((self.valor_produtos or 0) - (self.valor_desconto or 0) + (self.valor_frete or 0))
+        if self.valor_total < 0:
+            raise ValueError("Total da nota fiscal de entrada não pode ser negativo.")
         self.save(update_fields=["valor_produtos", "valor_desconto", "valor_total", "atualizado_em"])
 
 
