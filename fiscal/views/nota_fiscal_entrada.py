@@ -63,7 +63,7 @@ def _documento_nota(nota: NotaFiscalEntrada) -> str:
 
 class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [HasModuleRole]
-    required_modules = ["compras", "fiscal"]
+    required_module = "compras"
     read_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "AssistentePagar"]
 

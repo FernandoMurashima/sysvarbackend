@@ -5,7 +5,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from cadastros.models import Empresa, Fornecedor, Loja, Nat_Lancamento
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraItem
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
@@ -205,6 +206,211 @@ class NotaFiscalEntradaMultiempresaTests(TestCase):
         resp = self.client.delete(f"/api/fiscal/notas-entrada/{self.nota_a.id}/", {"empresa": self.empresa_a.id})
         self.assertEqual(resp.status_code, 405, resp.data)
         self.assertTrue(NotaFiscalEntrada.objects.filter(pk=self.nota_a.pk).exists())
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaPermissoesBloco4Tests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.compras_modulo = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        self.fiscal_modulo = ModuloSistema.objects.update_or_create(
+            chave="fiscal",
+            defaults={"nome": "Fiscal", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        self.empresa = self.criar_empresa("Empresa Permissoes", "44444444000191")
+        self.outra_empresa = self.criar_empresa("Outra Empresa Permissoes", "55555555000191")
+        self.loja = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja Permissoes",
+            apelido_loja="LP",
+            cnpj="44444444000100",
+            estado="SP",
+        )
+        self.outra_loja = Loja.objects.create(
+            empresa=self.outra_empresa,
+            nome_loja="Loja Outra Permissoes",
+            apelido_loja="LOP",
+            cnpj="55555555000100",
+            estado="SP",
+        )
+        self.fornecedor = self.criar_fornecedor(self.empresa, "Fornecedor Permissoes", "44445678000195")
+        self.outra_fornecedor = self.criar_fornecedor(self.outra_empresa, "Fornecedor Outra Permissoes", "55545678000195")
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
+        self.outra_unidade = Unidade.objects.create(empresa=self.outra_empresa, Descricao="Unidade Outra", Codigo="UO")
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso Permissoes", unidade=self.unidade)
+        self.outra_produto = Produto.objects.create(
+            empresa=self.outra_empresa,
+            tipo_produto="2",
+            descricao="Uso Outra Permissoes",
+            unidade=self.outra_unidade,
+        )
+        self.pedido = self.criar_pedido(self.empresa, self.loja, self.fornecedor)
+        self.outra_pedido = self.criar_pedido(self.outra_empresa, self.outra_loja, self.outra_fornecedor)
+        self.pedido_item = self.criar_item(self.pedido, self.produto)
+        self.outra_pedido_item = self.criar_item(self.outra_pedido, self.outra_produto)
+        self.nota = self.criar_nota(self.pedido, "9001")
+        self.outra_nota = self.criar_nota(self.outra_pedido, "9002")
+        self.nota_item = NotaFiscalEntradaItem.objects.create(
+            nota=self.nota,
+            pedido_item=self.pedido_item,
+            qtd_recebida=Decimal("2.000"),
+            preco_unit_nf=Decimal("10.0000"),
+            total_item=Decimal("20.00"),
+        )
+        self.outra_nota_item = NotaFiscalEntradaItem.objects.create(
+            nota=self.outra_nota,
+            pedido_item=self.outra_pedido_item,
+            qtd_recebida=Decimal("1.000"),
+            preco_unit_nf=Decimal("10.0000"),
+            total_item=Decimal("10.00"),
+        )
+        self.user_compras_edit = self.criar_usuario("compras-edit", self.empresa, compras=UserModulePermission.Access.EDIT)
+        self.user_compras_view = self.criar_usuario("compras-view", self.empresa, compras=UserModulePermission.Access.VIEW)
+        self.user_sem_compras = self.criar_usuario("sem-compras", self.empresa)
+        self.user_fiscal_edit = self.criar_usuario("fiscal-edit", self.empresa, fiscal=UserModulePermission.Access.EDIT)
+        self.user_outra_empresa = self.criar_usuario("compras-outra", self.outra_empresa, compras=UserModulePermission.Access.EDIT)
+
+    def criar_empresa(self, nome, documento):
+        empresa = Empresa.objects.create(nome=nome, documento=documento, plano_completo=False, usa_compras=True, usa_fiscal=False)
+        EmpresaContrato.objects.update_or_create(
+            empresa=empresa,
+            defaults={
+                "status": EmpresaContrato.STATUS_ATIVO,
+                "plano_completo": False,
+                "limite_sessoes_simultaneas": 3,
+            },
+        )
+        EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.compras_modulo, defaults={"contratado": True})
+        EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.fiscal_modulo, defaults={"contratado": True})
+        return empresa
+
+    def criar_usuario(self, username, empresa, compras=None, fiscal=None):
+        perfil = PerfilAcesso.objects.create(empresa=empresa, nome=f"Perfil {username}")
+        if compras:
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.compras_modulo, acesso=compras)
+        if fiscal:
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.fiscal_modulo, acesso=fiscal)
+        return get_user_model().objects.create_user(
+            username=username,
+            password="12345678",
+            type="Gerente",
+            empresa=empresa,
+            perfil_principal=perfil,
+        )
+
+    def criar_fornecedor(self, empresa, nome, documento):
+        return Fornecedor.objects.create(
+            empresa=empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=documento,
+            cnpj=documento,
+            nome_fornecedor=nome,
+            categoria="USO_CONSUMO",
+        )
+
+    def criar_pedido(self, empresa, loja, fornecedor):
+        return PedidoCompra.objects.create(
+            empresa=empresa,
+            tipo="2",
+            loja=loja,
+            fornecedor=fornecedor,
+            status="AP",
+            total_pedido=Decimal("20.00"),
+        )
+
+    def criar_item(self, pedido, produto):
+        return PedidoCompraItem.objects.create(
+            pedido=pedido,
+            produto=produto,
+            qtd=Decimal("2.000"),
+            preco_unit=Decimal("10.00"),
+            total_item=Decimal("20.00"),
+        )
+
+    def criar_nota(self, pedido, numero):
+        return NotaFiscalEntrada.objects.create(
+            pedido_compra=pedido,
+            numero=numero,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+        )
+
+    def test_usuario_com_compras_sem_fiscal_lista_abre_itens_e_endpoints_operacionais(self):
+        self.client.force_authenticate(self.user_compras_edit)
+
+        lista = self.client.get("/api/fiscal/notas-entrada/")
+        notas = lista.data.get("results", lista.data) if isinstance(lista.data, dict) else lista.data
+        self.assertEqual(lista.status_code, 200)
+        self.assertIn(self.nota.id, [nota["id"] for nota in notas])
+
+        detalhe = self.client.get(f"/api/fiscal/notas-entrada/{self.nota.id}/")
+        self.assertEqual(detalhe.status_code, 200)
+        self.assertEqual(detalhe.data["id"], self.nota.id)
+
+        itens = self.client.get("/api/fiscal/notas-entrada-itens/", {"nota": self.nota.id})
+        itens_data = itens.data.get("results", itens.data) if isinstance(itens.data, dict) else itens.data
+        self.assertEqual(itens.status_code, 200)
+        self.assertEqual([item["id"] for item in itens_data], [self.nota_item.id])
+
+        itens_pedido = self.client.get(f"/api/fiscal/notas-entrada/{self.nota.id}/itens-pedido/")
+        self.assertEqual(itens_pedido.status_code, 200)
+        self.assertEqual(itens_pedido.data[0]["pedido_item"], self.pedido_item.id)
+
+        fechar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/fechar/", {}, format="json")
+        self.assertEqual(fechar.status_code, 200, fechar.data)
+
+        cancelar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/cancelar/", {}, format="json")
+        self.assertEqual(cancelar.status_code, 200, cancelar.data)
+
+    def test_usuario_sem_compras_e_usuario_apenas_fiscal_sao_bloqueados(self):
+        for user in (self.user_sem_compras, self.user_fiscal_edit):
+            with self.subTest(user=user.username):
+                self.client.force_authenticate(user)
+                lista = self.client.get("/api/fiscal/notas-entrada/")
+                detalhe = self.client.get(f"/api/fiscal/notas-entrada/{self.nota.id}/")
+                itens = self.client.get("/api/fiscal/notas-entrada-itens/", {"nota": self.nota.id})
+                fechar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/fechar/", {}, format="json")
+                self.assertEqual(lista.status_code, 403)
+                self.assertEqual(detalhe.status_code, 403)
+                self.assertEqual(itens.status_code, 403)
+                self.assertEqual(fechar.status_code, 403)
+
+    def test_usuario_de_outra_empresa_com_compras_nao_acessa_registros_alheios(self):
+        self.client.force_authenticate(self.user_outra_empresa)
+
+        lista = self.client.get("/api/fiscal/notas-entrada/")
+        notas = lista.data.get("results", lista.data) if isinstance(lista.data, dict) else lista.data
+        self.assertEqual(lista.status_code, 200)
+        self.assertNotIn(self.nota.id, [nota["id"] for nota in notas])
+        self.assertIn(self.outra_nota.id, [nota["id"] for nota in notas])
+
+        detalhe = self.client.get(f"/api/fiscal/notas-entrada/{self.nota.id}/")
+        item = self.client.get(f"/api/fiscal/notas-entrada-itens/{self.nota_item.id}/")
+        self.assertEqual(detalhe.status_code, 404)
+        self.assertEqual(item.status_code, 404)
+
+    def test_nivel_view_em_compras_mantem_leitura_e_bloqueia_escrita(self):
+        self.client.force_authenticate(self.user_compras_view)
+
+        lista = self.client.get("/api/fiscal/notas-entrada/")
+        criar = self.client.post(
+            "/api/fiscal/notas-entrada/",
+            {
+                "pedido_compra": self.pedido.id,
+                "modelo": "55",
+                "serie": "2",
+                "numero": "9003",
+                "dt_emissao": timezone.localdate().isoformat(),
+                "dt_entrada": timezone.localdate().isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(lista.status_code, 200)
+        self.assertEqual(criar.status_code, 403)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
