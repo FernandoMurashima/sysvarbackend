@@ -414,6 +414,136 @@ class NotaFiscalEntradaPermissoesBloco4Tests(TestCase):
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaPaginacaoFiltrosBloco5Tests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Bloco 5", documento="66666666000191", plano_completo=True)
+        self.outra_empresa = Empresa.objects.create(nome="Outra Empresa Bloco 5", documento="77777777000191", plano_completo=True)
+        self.compras_modulo = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        EmpresaModulo.objects.update_or_create(empresa=self.empresa, modulo=self.compras_modulo, defaults={"contratado": True})
+        perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome="Compras B5")
+        PerfilModuloPermissao.objects.create(
+            perfil=perfil,
+            modulo=self.compras_modulo,
+            acesso=UserModulePermission.Access.EDIT,
+        )
+        self.user = get_user_model().objects.create_user(
+            username="nf-b5",
+            password="test",
+            type="Gerente",
+            empresa=self.empresa,
+            perfil_principal=perfil,
+        )
+        self.client.force_authenticate(self.user)
+        self.loja_a = Loja.objects.create(empresa=self.empresa, nome_loja="Loja B5 A", apelido_loja="B5A", cnpj="66666666000100", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa, nome_loja="Loja B5 B", apelido_loja="B5B", cnpj="66666666000200", estado="SP")
+        self.outra_loja = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja B5 Outra", apelido_loja="B5O", cnpj="77777777000100", estado="SP")
+        self.fornecedor_a = self.criar_fornecedor(self.empresa, "Fornecedor Alpha B5", "66645678000195")
+        self.fornecedor_b = self.criar_fornecedor(self.empresa, "Fornecedor Beta B5", "66645678000276")
+        self.outra_fornecedor = self.criar_fornecedor(self.outra_empresa, "Fornecedor Outra B5", "77745678000195")
+        self.pedido_a = self.criar_pedido(self.empresa, self.loja_a, self.fornecedor_a)
+        self.pedido_b = self.criar_pedido(self.empresa, self.loja_b, self.fornecedor_b)
+        self.outra_pedido = self.criar_pedido(self.outra_empresa, self.outra_loja, self.outra_fornecedor)
+        self.nota_ab = self.criar_nota(self.pedido_a, "1001", "2026-01-01", "2026-01-02", "AB", "100.00", "35140130290862000106550010000000011000000016")
+        self.nota_fe = self.criar_nota(self.pedido_a, "1002", "2026-01-10", "2026-01-11", "FE", "200.00", "35140130290862000106550010000000021000000011")
+        self.nota_ca = self.criar_nota(self.pedido_b, "2001", "2026-02-01", "2026-02-02", "CA", "300.00", "35140130290862000106550010000000031000000006")
+        self.nota_combo = self.criar_nota(self.pedido_b, "2002", "2026-02-10", "2026-02-11", "FE", "400.00", "35140130290862000106550010000000041000000000")
+        self.outra_nota = self.criar_nota(self.outra_pedido, "9999", "2026-03-01", "2026-03-02", "AB", "999.00", "35140130290862000106550010000000051000000005")
+
+    def criar_fornecedor(self, empresa, nome, documento):
+        return Fornecedor.objects.create(
+            empresa=empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=documento,
+            cnpj=documento,
+            nome_fornecedor=nome,
+            categoria="USO_CONSUMO",
+        )
+
+    def criar_pedido(self, empresa, loja, fornecedor):
+        return PedidoCompra.objects.create(empresa=empresa, tipo="2", loja=loja, fornecedor=fornecedor, status="AP")
+
+    def criar_nota(self, pedido, numero, emissao, entrada, status_nf, valor, chave):
+        return NotaFiscalEntrada.objects.create(
+            pedido_compra=pedido,
+            numero=numero,
+            dt_emissao=emissao,
+            dt_entrada=entrada,
+            status=status_nf,
+            valor_total=Decimal(valor),
+            valor_produtos=Decimal(valor),
+            chave_acesso=chave,
+        )
+
+    def results(self, response):
+        self.assertIn(response.status_code, (200,), response.data)
+        return response.data["results"]
+
+    def ids(self, response):
+        return [row["id"] for row in self.results(response)]
+
+    def test_paginacao_retorna_limite_proxima_pagina_count_e_isola_empresa(self):
+        resp1 = self.client.get("/api/fiscal/notas-entrada/", {"page": 1, "page_size": 2})
+        resp2 = self.client.get("/api/fiscal/notas-entrada/", {"page": 2, "page_size": 2})
+
+        self.assertEqual(resp1.data["count"], 4)
+        self.assertEqual(len(resp1.data["results"]), 2)
+        self.assertEqual(len(resp2.data["results"]), 2)
+        self.assertNotEqual(self.ids(resp1), self.ids(resp2))
+        self.assertNotIn(self.outra_nota.id, self.ids(resp1) + self.ids(resp2))
+
+    def test_filtros_status_pedido_fornecedor_loja_numero_chave_e_search(self):
+        checks = [
+            ({"status": "AB"}, [self.nota_ab.id]),
+            ({"status": "FE"}, [self.nota_combo.id, self.nota_fe.id]),
+            ({"status": "CA"}, [self.nota_ca.id]),
+            ({"pedido": self.pedido_a.id}, [self.nota_fe.id, self.nota_ab.id]),
+            ({"fornecedor": self.fornecedor_b.id}, [self.nota_combo.id, self.nota_ca.id]),
+            ({"loja": self.loja_a.id}, [self.nota_fe.id, self.nota_ab.id]),
+            ({"numero": "200"}, [self.nota_combo.id, self.nota_ca.id]),
+            ({"chave_acesso": self.nota_ca.chave_acesso[-8:]}, [self.nota_ca.id]),
+            ({"search": "Alpha"}, [self.nota_fe.id, self.nota_ab.id]),
+        ]
+        for params, expected in checks:
+            with self.subTest(params=params):
+                resp = self.client.get("/api/fiscal/notas-entrada/", params)
+                self.assertEqual(self.ids(resp), expected)
+                self.assertEqual(resp.data["count"], len(expected))
+
+    def test_filtros_periodo_emissao_entrada_valor_e_combinacao_sao_inclusivos(self):
+        checks = [
+            ({"dt_emissao_de": "2026-01-10"}, [self.nota_combo.id, self.nota_ca.id, self.nota_fe.id]),
+            ({"dt_emissao_ate": "2026-02-01"}, [self.nota_ca.id, self.nota_fe.id, self.nota_ab.id]),
+            ({"dt_emissao_de": "2026-01-10", "dt_emissao_ate": "2026-02-01"}, [self.nota_ca.id, self.nota_fe.id]),
+            ({"dt_entrada_de": "2026-01-11", "dt_entrada_ate": "2026-02-02"}, [self.nota_ca.id, self.nota_fe.id]),
+            ({"valor_min": "200.00"}, [self.nota_combo.id, self.nota_ca.id, self.nota_fe.id]),
+            ({"valor_max": "300.00"}, [self.nota_ca.id, self.nota_fe.id, self.nota_ab.id]),
+            ({"fornecedor": self.fornecedor_b.id, "status": "FE", "valor_min": "350.00"}, [self.nota_combo.id]),
+        ]
+        for params, expected in checks:
+            with self.subTest(params=params):
+                resp = self.client.get("/api/fiscal/notas-entrada/", params)
+                self.assertEqual(self.ids(resp), expected)
+                self.assertEqual(resp.data["count"], len(expected))
+
+    def test_indicadores_consideram_conjunto_filtrado_completo_nao_apenas_pagina(self):
+        resp = self.client.get(
+            "/api/fiscal/notas-entrada/indicadores/",
+            {"page": 1, "page_size": 1, "valor_min": "200.00"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["total"], 3)
+        self.assertEqual(resp.data["abertas"], 0)
+        self.assertEqual(resp.data["fechadas"], 2)
+        self.assertEqual(resp.data["canceladas"], 1)
+        self.assertEqual(resp.data["valor_total"], "900.00")
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
 class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
     def setUp(self):
         self.client = APIClient()

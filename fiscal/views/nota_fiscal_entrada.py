@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -90,6 +90,15 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         status_q = self.request.query_params.get("status")
         numero = self.request.query_params.get("numero")
         chave = self.request.query_params.get("chave_acesso")
+        fornecedor = self.request.query_params.get("fornecedor")
+        loja = self.request.query_params.get("loja")
+        dt_emissao_de = self.request.query_params.get("dt_emissao_de")
+        dt_emissao_ate = self.request.query_params.get("dt_emissao_ate")
+        dt_entrada_de = self.request.query_params.get("dt_entrada_de")
+        dt_entrada_ate = self.request.query_params.get("dt_entrada_ate")
+        valor_min = self.request.query_params.get("valor_min")
+        valor_max = self.request.query_params.get("valor_max")
+        search = self.request.query_params.get("search")
 
         if empresa_id:
             qs = qs.filter(pedido_compra__empresa_id=empresa_id)
@@ -103,7 +112,56 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             qs = qs.filter(numero__icontains=numero)
         if chave:
             qs = qs.filter(chave_acesso__icontains=chave)
+        if fornecedor:
+            qs = qs.filter(pedido_compra__fornecedor_id=fornecedor)
+        if loja:
+            qs = qs.filter(pedido_compra__loja_id=loja)
+        if dt_emissao_de:
+            qs = qs.filter(dt_emissao__gte=dt_emissao_de)
+        if dt_emissao_ate:
+            qs = qs.filter(dt_emissao__lte=dt_emissao_ate)
+        if dt_entrada_de:
+            qs = qs.filter(dt_entrada__gte=dt_entrada_de)
+        if dt_entrada_ate:
+            qs = qs.filter(dt_entrada__lte=dt_entrada_ate)
+        if valor_min:
+            qs = qs.filter(valor_total__gte=valor_min)
+        if valor_max:
+            qs = qs.filter(valor_total__lte=valor_max)
+        if search:
+            search_filter = (
+                Q(modelo__icontains=search)
+                | Q(serie__icontains=search)
+                | Q(numero__icontains=search)
+                | Q(chave_acesso__icontains=search)
+                | Q(status__icontains=search)
+                | Q(pedido_compra__fornecedor__nome_fornecedor__icontains=search)
+            )
+            if str(search).isdigit():
+                search_filter |= Q(pedido_compra_id=int(search))
+            qs = qs.filter(search_filter)
         return qs
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        agg = qs.aggregate(
+            total=Count("id"),
+            abertas=Count("id", filter=Q(status=NotaFiscalEntrada.Status.ABERTA)),
+            fechadas=Count("id", filter=Q(status=NotaFiscalEntrada.Status.FECHADA)),
+            canceladas=Count("id", filter=Q(status=NotaFiscalEntrada.Status.CANCELADA)),
+            valor_total=Sum("valor_total"),
+        )
+        return Response(
+            {
+                "total": agg["total"] or 0,
+                "abertas": agg["abertas"] or 0,
+                "fechadas": agg["fechadas"] or 0,
+                "canceladas": agg["canceladas"] or 0,
+                "valor_total": str(_money(agg["valor_total"] or 0)),
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @transaction.atomic
     def perform_create(self, serializer):
