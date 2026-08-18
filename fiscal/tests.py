@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import PedidoCompra, PedidoCompraItem
+from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, Tamanho, Unidade
@@ -1190,3 +1190,321 @@ class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
             self.criar_item(nota, item)
             self.fechar(nota)
             self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").count(), 1)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Bloco 8", documento="88888888000191", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Bloco 8 B", documento="88888888000192", plano_completo=True)
+        self.user = get_user_model().objects.create_superuser("nf-b8", "nf-b8@sysvar.test", "test")
+        self.client.force_authenticate(self.user)
+        self.loja = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja B8",
+            apelido_loja="Loja B8",
+            cnpj="88888888000100",
+            estado="SP",
+            EstoqueNegativo="NAO",
+        )
+        self.loja_b = Loja.objects.create(
+            empresa=self.empresa_b,
+            nome_loja="Loja B8 B",
+            apelido_loja="Loja B8 B",
+            cnpj="88888888000101",
+            estado="SP",
+            EstoqueNegativo="NAO",
+        )
+        self.fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="88845678000195",
+            cnpj="88845678000195",
+            nome_fornecedor="Fornecedor B8",
+            categoria="USO_CONSUMO",
+        )
+        self.fornecedor_b = Fornecedor.objects.create(
+            empresa=self.empresa_b,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="88845678000196",
+            cnpj="88845678000196",
+            nome_fornecedor="Fornecedor B8 B",
+            categoria="USO_CONSUMO",
+        )
+        self.natureza = Nat_Lancamento.objects.create(
+            empresa=self.empresa,
+            codigo="CMPB8",
+            categoria_principal="Compras",
+            subcategoria="NF",
+            descricao="Compra NF B8",
+            tipo="SAIDA",
+            status="ATIVO",
+            tipo_natureza="D",
+        )
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade B8", Codigo="UNB8")
+        self.grupo = Grupo.objects.create(empresa=self.empresa, Codigo="88", CodigoRef="88", Descricao="Grupo B8", Margem=0)
+        self.colecao = Colecao.objects.create(empresa=self.empresa, Descricao="Colecao B8", Codigo="28", Estacao="08", Status="AT")
+        ConfigEan.objects.create(empresa=self.empresa, country_prefix="789", company_prefix="8888", ativo=True)
+
+    def criar_produto(self, tipo="2", descricao="Produto B8", empresa=None):
+        return Produto.objects.create(
+            empresa=empresa or self.empresa,
+            tipo_produto=tipo,
+            descricao=descricao,
+            unidade=self.unidade,
+        )
+
+    def criar_pedido(self, produto, qtd, preco, tipo="2", empresa=None, loja=None, fornecedor=None, cor=None, pack=None, n_packs=0):
+        empresa = empresa or self.empresa
+        loja = loja or self.loja
+        fornecedor = fornecedor or self.fornecedor
+        pedido = PedidoCompra.objects.create(
+            empresa=empresa,
+            tipo=tipo,
+            loja=loja,
+            fornecedor=fornecedor,
+            status="AP",
+            total_pedido=(qtd * preco).quantize(Decimal("0.01")),
+        )
+        item = PedidoCompraItem.objects.create(
+            pedido=pedido,
+            produto=produto,
+            cor=cor,
+            pack=pack,
+            n_packs=n_packs,
+            qtd=qtd,
+            preco_unit=preco,
+            total_item=(qtd * preco).quantize(Decimal("0.01")),
+        )
+        PedidoCompraEntrega.objects.create(item=item, qtd_prevista=qtd, status="PREV")
+        self.criar_previsao(pedido)
+        return pedido, item
+
+    def criar_previsao(self, pedido):
+        titulo = Pagar.objects.create(
+            empresa=pedido.empresa,
+            idloja=pedido.loja,
+            idfornecedor=pedido.fornecedor,
+            Titulo=f"PC B8 {pedido.pk}",
+            Data_emissao=timezone.localdate(),
+            Valor_total=pedido.total_pedido,
+            Previsao=True,
+            FormaPagamento="BOL",
+            Idnatureza=self.natureza,
+            pedido_compra=pedido.pk,
+        )
+        PagarItem.objects.create(
+            Idpagar=titulo,
+            parcela_n=1,
+            status=PagarItem.STATUS_PREVISTO,
+            Data_vencimento=timezone.localdate(),
+            valor_parcela=pedido.total_pedido,
+            FormaPagamento="BOL",
+            Previsao=True,
+            Idnatureza=self.natureza,
+        )
+
+    def criar_nota_api(self, pedido, numero, status_code=201):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={pedido.empresa_id}",
+            {
+                "pedido_compra": pedido.pk,
+                "modelo": "55",
+                "serie": "1",
+                "numero": numero,
+                "dt_emissao": str(timezone.localdate()),
+                "dt_entrada": str(timezone.localdate()),
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return NotaFiscalEntrada.objects.get(pk=resp.data["id"]) if status_code < 400 else None
+
+    def criar_item_api(self, nota, pedido_item, qtd, preco, status_code=201):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada-itens/?empresa={nota.pedido_compra.empresa_id}",
+            {
+                "nota": nota.pk,
+                "pedido_item": pedido_item.pk,
+                "qtd_recebida": str(qtd),
+                "preco_unit_nf": str(preco),
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def estoque_produto(self, produto, loja=None):
+        codigo = f"29{int(produto.pk) % 100000000000:011d}"
+        return Estoque.objects.get(Idloja=loja or self.loja, CodigodeBarra=codigo)
+
+    def fechar(self, nota, status_code=200):
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def cancelar(self, nota, status_code=200):
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def test_multiplas_nfs_mesmo_pedido_cancelamento_parcial_e_reentrada_do_saldo(self):
+        produto = self.criar_produto()
+        pedido, item = self.criar_pedido(produto, Decimal("100.000"), Decimal("10.00"))
+        nota1 = self.criar_nota_api(pedido, "8001")
+        nota2 = self.criar_nota_api(pedido, "8002")
+        self.criar_item_api(nota1, item, Decimal("40.000"), Decimal("10.00"))
+        self.criar_item_api(nota2, item, Decimal("60.000"), Decimal("10.00"))
+
+        self.fechar(nota1)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, "AP")
+        self.fechar(nota2)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, "AT")
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("100.000"))
+
+        self.cancelar(nota1)
+        pedido.refresh_from_db()
+        entrega = item.entregas.get()
+        self.assertEqual(pedido.status, "AP")
+        self.assertEqual(entrega.qtd_recebida, Decimal("60.000"))
+        self.assertEqual(entrega.status, "PARC")
+        self.assertTrue(Pagar.objects.filter(nfe_id=nota2.pk, Previsao=False).exists())
+        self.assertEqual(Pagar.objects.get(pedido_compra=pedido.pk, nfe_id__isnull=True, Previsao=True).Valor_total, Decimal("400.00"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
+
+        nota3 = self.criar_nota_api(pedido, "8003")
+        self.criar_item_api(nota3, item, Decimal("40.000"), Decimal("10.00"))
+        self.fechar(nota3)
+        pedido.refresh_from_db()
+        entrega.refresh_from_db()
+        self.assertEqual(pedido.status, "AT")
+        self.assertEqual(entrega.qtd_recebida, Decimal("100.000"))
+        self.assertEqual(entrega.status, "RECB")
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("100.000"))
+        self.assertEqual(Pagar.objects.filter(nfe_id__in=[nota2.pk, nota3.pk], Previsao=False).count(), 2)
+
+    def test_fluxo_revenda_pack_multitamanho_isolado_por_empresa_e_cancelamento(self):
+        grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade B8")
+        tam_p = Tamanho.objects.create(empresa=self.empresa, Tamanho="P", idgrade=grade)
+        tam_m = Tamanho.objects.create(empresa=self.empresa, Tamanho="M", idgrade=grade)
+        tam_g = Tamanho.objects.create(empresa=self.empresa, Tamanho="G", idgrade=grade)
+        cor = Cor.objects.create(empresa=self.empresa, Descricao="Azul B8")
+        pack = Pack.objects.create(empresa=self.empresa, nome="Pack B8", grade=grade)
+        PackItem.objects.create(pack=pack, tamanho=tam_p, qtd=1)
+        PackItem.objects.create(pack=pack, tamanho=tam_m, qtd=2)
+        PackItem.objects.create(pack=pack, tamanho=tam_g, qtd=1)
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao="Revenda Pack B8",
+            unidade=self.unidade,
+            grade=grade,
+            grupo=self.grupo,
+            colecao=self.colecao,
+        )
+        skus = {
+            "P": ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tam_p),
+            "M": ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tam_m),
+            "G": ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tam_g),
+        }
+        pedido, item = self.criar_pedido(produto, Decimal("8.000"), Decimal("10.00"), tipo="1", cor=cor, pack=pack, n_packs=2)
+        nota = self.criar_nota_api(pedido, "8010")
+        self.criar_item_api(nota, item, Decimal("8.000"), Decimal("10.00"))
+
+        produto_b = Produto.objects.create(empresa=self.empresa_b, tipo_produto="2", descricao="Produto B8 B", unidade=self.unidade)
+        pedido_b, item_b = self.criar_pedido(
+            produto_b,
+            Decimal("5.000"),
+            Decimal("7.00"),
+            empresa=self.empresa_b,
+            loja=self.loja_b,
+            fornecedor=self.fornecedor_b,
+        )
+        nota_b = self.criar_nota_api(pedido_b, "8010")
+        self.criar_item_api(nota_b, item_b, Decimal("5.000"), Decimal("7.00"))
+
+        self.fechar(nota)
+        self.fechar(nota_b)
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=skus["P"].ean13).Estoque, Decimal("2.000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=skus["M"].ean13).Estoque, Decimal("4.000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=skus["G"].ean13).Estoque, Decimal("2.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", Idloja=self.loja).count(), 3)
+        self.assertEqual(self.estoque_produto(produto_b, self.loja_b).Estoque, Decimal("5.000"))
+
+        self.cancelar(nota)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, "AP")
+        for sku in skus.values():
+            self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku.ean13).Estoque, Decimal("0.000"))
+            sku.refresh_from_db()
+            self.assertEqual(sku.custo_medio, Decimal("0.0000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", Idloja=self.loja).count(), 3)
+        self.assertEqual(self.estoque_produto(produto_b, self.loja_b).Estoque, Decimal("5.000"))
+        self.assertTrue(Pagar.objects.filter(nfe_id=nota_b.pk, Previsao=False).exists())
+
+    def test_fluxos_uso_consumo_e_insumo_decimais_financeiro_custo_e_cancelamento(self):
+        for tipo in ("2", "4"):
+            produto = self.criar_produto(tipo=tipo, descricao=f"Produto tipo {tipo} B8")
+            pedido, item = self.criar_pedido(produto, Decimal("3.500"), Decimal("12.00"), tipo=tipo)
+            nota = self.criar_nota_api(pedido, f"802{tipo}")
+            self.criar_item_api(nota, item, Decimal("3.500"), Decimal("12.00"))
+
+            self.fechar(nota)
+            pedido.refresh_from_db()
+            produto.refresh_from_db()
+            self.assertEqual(pedido.status, "AT")
+            self.assertEqual(item.entregas.get().qtd_recebida, Decimal("3.500"))
+            self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("3.500"))
+            self.assertEqual(produto.custo_medio, Decimal("12.0000"))
+            self.assertTrue(Pagar.objects.filter(nfe_id=nota.pk, Previsao=False).exists())
+
+            self.cancelar(nota)
+            pedido.refresh_from_db()
+            produto.refresh_from_db()
+            self.assertEqual(pedido.status, "AP")
+            self.assertEqual(item.entregas.get().qtd_recebida, Decimal("0.000"))
+            self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("0.000"))
+            self.assertEqual(produto.custo_medio, Decimal("0.0000"))
+            self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+            self.assertEqual(Pagar.objects.get(pedido_compra=pedido.pk, Previsao=True).Valor_total, Decimal("42.00"))
+
+    def test_falha_de_pack_invalido_no_fechamento_faz_rollback_integral(self):
+        grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade Rollback B8")
+        tam_p = Tamanho.objects.create(empresa=self.empresa, Tamanho="P", idgrade=grade)
+        tam_m = Tamanho.objects.create(empresa=self.empresa, Tamanho="M", idgrade=grade)
+        cor = Cor.objects.create(empresa=self.empresa, Descricao="Preto B8")
+        pack = Pack.objects.create(empresa=self.empresa, nome="Pack Rollback B8", grade=grade)
+        PackItem.objects.create(pack=pack, tamanho=tam_p, qtd=1)
+        PackItem.objects.create(pack=pack, tamanho=tam_m, qtd=1)
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao="Revenda Rollback B8",
+            unidade=self.unidade,
+            grade=grade,
+            grupo=self.grupo,
+            colecao=self.colecao,
+        )
+        sku_p = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tam_p)
+        sku_m = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tam_m)
+        pedido, item = self.criar_pedido(produto, Decimal("4.000"), Decimal("10.00"), tipo="1", cor=cor, pack=pack, n_packs=2)
+        nota = self.criar_nota_api(pedido, "8030")
+        self.criar_item_api(nota, item, Decimal("3.000"), Decimal("10.00"))
+
+        self.fechar(nota, status_code=400)
+        pedido.refresh_from_db()
+        produto.refresh_from_db()
+        sku_p.refresh_from_db()
+        sku_m.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertEqual(pedido.status, "AP")
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertFalse(Estoque.objects.filter(Idloja=self.loja, CodigodeBarra__in=[sku_p.ean13, sku_m.ean13]).exists())
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+        self.assertEqual(produto.custo_medio, Decimal("0.0000"))
