@@ -272,6 +272,65 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.client.force_authenticate(self.solicitante)
 
+    def test_joao_somente_requisitar_cria_envia_e_nao_ve_todas(self):
+        User = get_user_model()
+        joao = User.objects.create_user("joao-req", "joao@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        UserModulePermission.objects.create(user=joao, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        self.client.force_authenticate(joao)
+        req = self.criar_requisicao(justificativa="Joao requisita")
+        self.item_produto(req)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(req.id, [r["id"] for r in rows])
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_analisar"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertEqual(rows, [])
+        self.client.force_authenticate(self.solicitante)
+
+    def test_paula_com_requisitar_analisar_e_todas_lista_sem_erro(self):
+        User = get_user_model()
+        paula = User.objects.create_user("paula-req", "paula@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        UserModulePermission.objects.create(user=paula, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        UserModulePermission.objects.create(user=paula, modulo="requisicoes_analise", acesso=UserModulePermission.Access.EDIT)
+        UserModulePermission.objects.create(user=paula, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.client.force_authenticate(paula)
+        for visao in ("minhas", "para_analisar", "todas"):
+            resp = self.client.get("/api/compras/requisicoes/", {"visao": visao})
+            self.assertEqual(resp.status_code, 200, resp.data)
+        self.client.force_authenticate(self.solicitante)
+
+    def test_usuario_somente_atender_ve_fila_de_atendimento(self):
+        User = get_user_model()
+        atendente = User.objects.create_user("atendente-req", "atendente@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        UserModulePermission.objects.create(user=atendente, modulo="requisicoes_atendimento", acesso=UserModulePermission.Access.EDIT)
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.client.force_authenticate(self.aprovador)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
+        self.client.force_authenticate(atendente)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_atender"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+        self.client.force_authenticate(self.solicitante)
+
+    def test_gerente_sem_permissao_especifica_nao_ganha_requisicoes_por_tipo(self):
+        User = get_user_model()
+        gerente = User.objects.create_user("gerente-sem-req", "gerentesemreq@test.local", "123", empresa=self.empresa, loja=self.loja, type="Gerente")
+        self.client.force_authenticate(gerente)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        self.assertEqual(resp.status_code, 403, resp.data)
+        self.client.force_authenticate(self.solicitante)
+
     def test_usuario_sem_requisicoes_nao_acessa_endpoints(self):
         User = get_user_model()
         sem_acesso = User.objects.create_user("req-sem-acesso", "reqsa@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")

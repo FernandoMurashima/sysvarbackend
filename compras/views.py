@@ -1029,6 +1029,20 @@ class RequisicaoViewSet(BaseViewSet):
     queryset = Requisicao.objects.select_related("empresa", "loja", "setor", "requisitante", "criado_por").prefetch_related("itens", "historico").all()
     serializer_class = RequisicaoSerializer
     required_modules = ["requisicoes"]
+    action_required_modules = {
+        "list": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+        "retrieve": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+        "create": ["requisicoes"],
+        "partial_update": ["requisicoes"],
+        "update": ["requisicoes"],
+        "enviar": ["requisicoes"],
+        "salvar_enviar": ["requisicoes"],
+        "cancelar": ["requisicoes"],
+        "aprovar": ["requisicoes_analise"],
+        "rejeitar": ["requisicoes_analise"],
+        "devolver": ["requisicoes_analise"],
+    }
+    action_required_modules_any = {"list", "retrieve"}
     action_required_access = {
         "list": VIEW,
         "retrieve": VIEW,
@@ -1234,6 +1248,17 @@ class RequisicaoItemViewSet(BaseViewSet):
     queryset = RequisicaoItem.objects.select_related("requisicao", "produto", "unidade", "categoria_servico", "categoria_material", "finalidade_aquisicao").all()
     serializer_class = RequisicaoItemSerializer
     required_module = "requisicoes"
+    action_required_modules = {
+        "list": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+        "retrieve": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+        "create": ["requisicoes"],
+        "partial_update": ["requisicoes"],
+        "update": ["requisicoes"],
+        "destroy": ["requisicoes"],
+        "atender": ["requisicoes_atendimento"],
+        "aguardar_cotacao": ["requisicoes_atendimento"],
+    }
+    action_required_modules_any = {"list", "retrieve"}
     action_required_access = {
         "list": VIEW,
         "retrieve": VIEW,
@@ -1389,6 +1414,11 @@ class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = RequisicaoHistoricoSerializer
     permission_classes = [HasModuleRole]
     required_module = "requisicoes"
+    action_required_modules = {
+        "list": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+        "retrieve": ["requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas"],
+    }
+    action_required_modules_any = {"list", "retrieve"}
     read_roles = ['Admin', 'Diretor', 'Gerente', 'AssistentePagar']
 
     def _empresa_id_usuario(self):

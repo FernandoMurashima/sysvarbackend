@@ -134,6 +134,13 @@ class HasEffectiveModuleAccess(BasePermission):
     message = "Usuário sem permissão efetiva para acessar este módulo."
 
     def required_modules(self, view, request):
+        action_modules = getattr(view, "action_required_modules", {}) or {}
+        action = getattr(view, "action", None)
+        if action in action_modules:
+            modules = action_modules[action]
+            if isinstance(modules, str):
+                return [modules]
+            return [m for m in modules if m]
         modules = getattr(view, "required_modules", None)
         if modules:
             return [m for m in modules if m]
@@ -157,7 +164,11 @@ class HasEffectiveModuleAccess(BasePermission):
         modules = self.required_modules(view, request)
         if not modules:
             return user.is_superuser
-        return service.has_module_access(modules, self.required_access(view, request))
+        required = self.required_access(view, request)
+        action_any = getattr(view, "action_required_modules_any", set()) or set()
+        if getattr(view, "action", None) in action_any:
+            return any(service.has_module_access(module, required) for module in modules)
+        return service.has_module_access(modules, required)
 
 
 class CanManageCompanyUsers(BasePermission):
