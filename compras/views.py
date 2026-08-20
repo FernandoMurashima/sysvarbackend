@@ -9,7 +9,7 @@ from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
-from accounts.services.effective_access import EDIT, EffectiveAccessService
+from accounts.services.effective_access import EDIT, VIEW, EffectiveAccessService
 
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
@@ -111,21 +111,40 @@ def _historico(requisicao, request, acao, status_anterior="", status_novo="", it
 def _can_manage_requisicao(user):
     if getattr(user, "is_superuser", False):
         return True
-    return EffectiveAccessService(user).has_module_access("compras", EDIT)
+    return EffectiveAccessService(user).has_module_access("requisicoes_atendimento", EDIT)
 
 
 def _can_approve_requisicao(user):
     if getattr(user, "is_superuser", False):
         return True
-    if getattr(user, "type", "") not in {"Admin", "Diretor", "Gerente"}:
-        return False
-    return EffectiveAccessService(user).has_module_access("compras", EDIT)
+    return EffectiveAccessService(user).has_module_access("requisicoes_analise", EDIT)
+
+
+def _can_request_requisicao(user):
+    if getattr(user, "is_superuser", False):
+        return True
+    return EffectiveAccessService(user).has_module_access("requisicoes", EDIT)
+
+
+def _can_view_all_requisicao(user):
+    if getattr(user, "is_superuser", False):
+        return True
+    return EffectiveAccessService(user).has_module_access("requisicoes_todas", VIEW)
 
 
 def _can_edit_requisicao_content(user, requisicao):
     if getattr(user, "is_superuser", False):
         return True
-    return requisicao.requisitante_id == user.id and requisicao.status in {"RASCUNHO", "DEVOLVIDA_CORRECAO"}
+    return _can_request_requisicao(user) and requisicao.requisitante_id == user.id and requisicao.status in {"RASCUNHO", "DEVOLVIDA_CORRECAO"}
+
+
+def _scope_requisicao_queryset(qs, user):
+    if getattr(user, "is_superuser", False):
+        return qs
+    allowed = EffectiveAccessService(user).allowed_store_ids()
+    if allowed is not None:
+        qs = qs.filter(loja_id__in=allowed)
+    return qs
 
 
 def _ensure_default_requisicao_servico_categorias(empresa_id):
@@ -784,6 +803,7 @@ class PedidoCompraParcelaViewSet(BaseViewSet):
 class RequisicaoServicoCategoriaViewSet(BaseViewSet):
     queryset = RequisicaoServicoCategoria.objects.all().order_by("nome")
     serializer_class = RequisicaoServicoCategoriaSerializer
+    required_module = "requisicoes"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -810,6 +830,7 @@ class RequisicaoServicoCategoriaViewSet(BaseViewSet):
 class RequisicaoSetorViewSet(BaseViewSet):
     queryset = RequisicaoSetor.objects.all().order_by("nome")
     serializer_class = RequisicaoSetorSerializer
+    required_module = "requisicoes"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -877,6 +898,7 @@ class RequisicaoSetorViewSet(BaseViewSet):
 class RequisicaoMaterialCategoriaViewSet(BaseViewSet):
     queryset = RequisicaoMaterialCategoria.objects.all().order_by("nome")
     serializer_class = RequisicaoMaterialCategoriaSerializer
+    required_module = "requisicoes"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -941,6 +963,7 @@ class RequisicaoMaterialCategoriaViewSet(BaseViewSet):
 class RequisicaoFinalidadeAquisicaoViewSet(BaseViewSet):
     queryset = RequisicaoFinalidadeAquisicao.objects.all().order_by("nome")
     serializer_class = RequisicaoFinalidadeAquisicaoSerializer
+    required_module = "requisicoes"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1005,6 +1028,20 @@ class RequisicaoFinalidadeAquisicaoViewSet(BaseViewSet):
 class RequisicaoViewSet(BaseViewSet):
     queryset = Requisicao.objects.select_related("empresa", "loja", "setor", "requisitante", "criado_por").prefetch_related("itens", "historico").all()
     serializer_class = RequisicaoSerializer
+    required_modules = ["requisicoes"]
+    action_required_access = {
+        "list": VIEW,
+        "retrieve": VIEW,
+        "create": EDIT,
+        "partial_update": EDIT,
+        "update": EDIT,
+        "enviar": EDIT,
+        "salvar_enviar": EDIT,
+        "cancelar": EDIT,
+        "aprovar": VIEW,
+        "rejeitar": VIEW,
+        "devolver": VIEW,
+    }
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1013,6 +1050,7 @@ class RequisicaoViewSet(BaseViewSet):
             qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        qs = _scope_requisicao_queryset(qs, self.request.user)
         status_q = self.request.query_params.get("status")
         loja = self.request.query_params.get("loja")
         prioridade = self.request.query_params.get("prioridade")
@@ -1039,18 +1077,36 @@ class RequisicaoViewSet(BaseViewSet):
             if not _can_manage_requisicao(self.request.user):
                 return qs.none()
             qs = qs.filter(status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
-        elif visao == "todas" and not _can_approve_requisicao(self.request.user):
-            qs = qs.filter(requisitante=self.request.user)
+        elif visao == "todas":
+            if not _can_view_all_requisicao(self.request.user):
+                return qs.none()
+        elif not self.request.user.is_superuser:
+            allowed = Q()
+            if _can_request_requisicao(self.request.user):
+                allowed |= Q(requisitante=self.request.user)
+            if _can_approve_requisicao(self.request.user):
+                allowed |= Q(status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
+            if _can_manage_requisicao(self.request.user):
+                allowed |= Q(status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+            if _can_view_all_requisicao(self.request.user):
+                allowed |= Q(pk__isnull=False)
+            if not allowed:
+                return qs.none()
+            qs = qs.filter(allowed)
         return qs
 
     @transaction.atomic
     def perform_create(self, serializer):
         loja = serializer.validated_data.get("loja")
+        if not _can_request_requisicao(self.request.user):
+            raise ValidationError({"detail": "Usuário sem permissão para criar requisições."})
         empresa_id = self._empresa_id_usuario()
         if not empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if empresa_id and loja.empresa_id != int(empresa_id):
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        if not EffectiveAccessService(self.request.user).can_access_store(loja):
+            raise ValidationError({"loja": "Usuário sem acesso à loja informada."})
         empresa = loja.empresa
         _ensure_default_requisicao_servico_categorias(empresa.pk)
         _ensure_default_requisicao_setores(empresa.pk)
@@ -1068,6 +1124,8 @@ class RequisicaoViewSet(BaseViewSet):
         loja = serializer.validated_data.get("loja", obj.loja)
         if loja.empresa_id != obj.empresa_id:
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        if not EffectiveAccessService(self.request.user).can_access_store(loja):
+            raise ValidationError({"loja": "Usuário sem acesso à loja informada."})
         before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade}
         updated = serializer.save(empresa=obj.empresa)
         after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade}
@@ -1160,6 +1218,8 @@ class RequisicaoViewSet(BaseViewSet):
     @transaction.atomic
     def cancelar(self, request, pk=None):
         obj = self.get_object()
+        if not _can_edit_requisicao_content(request.user, obj):
+            return Response({"detail": "Somente o requisitante original pode cancelar requisições editáveis."}, status=status.HTTP_403_FORBIDDEN)
         if obj.status in {"CONCLUIDA", "CANCELADA"}:
             return Response({"detail": "Requisição não pode ser cancelada neste status."}, status=status.HTTP_400_BAD_REQUEST)
         before = obj.status
@@ -1173,6 +1233,17 @@ class RequisicaoViewSet(BaseViewSet):
 class RequisicaoItemViewSet(BaseViewSet):
     queryset = RequisicaoItem.objects.select_related("requisicao", "produto", "unidade", "categoria_servico", "categoria_material", "finalidade_aquisicao").all()
     serializer_class = RequisicaoItemSerializer
+    required_module = "requisicoes"
+    action_required_access = {
+        "list": VIEW,
+        "retrieve": VIEW,
+        "create": EDIT,
+        "partial_update": EDIT,
+        "update": EDIT,
+        "destroy": EDIT,
+        "atender": VIEW,
+        "aguardar_cotacao": VIEW,
+    }
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1181,6 +1252,22 @@ class RequisicaoItemViewSet(BaseViewSet):
             qs = qs.filter(requisicao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        if not self.request.user.is_superuser:
+            allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+            if allowed is not None:
+                qs = qs.filter(requisicao__loja_id__in=allowed)
+            visible = Q()
+            if _can_request_requisicao(self.request.user):
+                visible |= Q(requisicao__requisitante=self.request.user)
+            if _can_approve_requisicao(self.request.user):
+                visible |= Q(requisicao__status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
+            if _can_manage_requisicao(self.request.user):
+                visible |= Q(requisicao__status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+            if _can_view_all_requisicao(self.request.user):
+                visible |= Q(pk__isnull=False)
+            if not visible:
+                return qs.none()
+            qs = qs.filter(visible)
         requisicao = self.request.query_params.get("requisicao")
         if requisicao:
             qs = qs.filter(requisicao_id=requisicao)
@@ -1193,6 +1280,8 @@ class RequisicaoItemViewSet(BaseViewSet):
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if user_empresa_id and req and req.empresa_id != int(user_empresa_id):
             raise ValidationError({"requisicao": "Requisição pertence a outra empresa."})
+        if req and not EffectiveAccessService(self.request.user).can_access_store(req.loja):
+            raise ValidationError({"requisicao": "Usuário sem acesso à loja da requisição."})
 
     def perform_create(self, serializer):
         self._validar_empresa(serializer.validated_data)
@@ -1223,6 +1312,8 @@ class RequisicaoItemViewSet(BaseViewSet):
     @action(detail=True, methods=["post"], url_path="aguardar-cotacao")
     @transaction.atomic
     def aguardar_cotacao(self, request, pk=None):
+        if not _can_manage_requisicao(request.user):
+            return Response({"detail": "Usuário sem permissão para encaminhar requisição."}, status=status.HTTP_403_FORBIDDEN)
         item = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
         self.check_object_permissions(request, item)
         req = get_object_or_404(Requisicao.objects.select_for_update(), pk=item.requisicao_id)
@@ -1297,7 +1388,7 @@ class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = RequisicaoHistorico.objects.select_related("requisicao", "item", "usuario").all()
     serializer_class = RequisicaoHistoricoSerializer
     permission_classes = [HasModuleRole]
-    required_module = "compras"
+    required_module = "requisicoes"
     read_roles = ['Admin', 'Diretor', 'Gerente', 'AssistentePagar']
 
     def _empresa_id_usuario(self):
@@ -1313,6 +1404,22 @@ class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(requisicao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        if not self.request.user.is_superuser:
+            allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+            if allowed is not None:
+                qs = qs.filter(requisicao__loja_id__in=allowed)
+            visible = Q()
+            if _can_request_requisicao(self.request.user):
+                visible |= Q(requisicao__requisitante=self.request.user)
+            if _can_approve_requisicao(self.request.user):
+                visible |= Q(requisicao__status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
+            if _can_manage_requisicao(self.request.user):
+                visible |= Q(requisicao__status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+            if _can_view_all_requisicao(self.request.user):
+                visible |= Q(pk__isnull=False)
+            if not visible:
+                return qs.none()
+            qs = qs.filter(visible)
         requisicao = self.request.query_params.get("requisicao")
         if requisicao:
             qs = qs.filter(requisicao_id=requisicao)

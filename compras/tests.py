@@ -153,6 +153,11 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.outro = User.objects.create_user("req-outro", "reqo@test.local", "123", empresa=self.empresa_b, loja=self.loja_b, type="Gerente")
         for user in (self.solicitante, self.aprovador, self.outro_mesma_empresa, self.outro):
             UserModulePermission.objects.create(user=user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
+            UserModulePermission.objects.create(user=user, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        for user in (self.aprovador, self.outro):
+            UserModulePermission.objects.create(user=user, modulo="requisicoes_analise", acesso=UserModulePermission.Access.EDIT)
+            UserModulePermission.objects.create(user=user, modulo="requisicoes_atendimento", acesso=UserModulePermission.Access.EDIT)
+            UserModulePermission.objects.create(user=user, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
         self.unidade = self.un_int
         self.produto = self.prod_uso
         self.categoria = RequisicaoServicoCategoria.objects.create(empresa=self.empresa, nome="Informática")
@@ -224,15 +229,54 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertEqual([r["id"] for r in rows], [req.id])
 
+    def test_usuario_sem_compras_com_requisicoes_acessa_e_cria(self):
+        User = get_user_model()
+        requisitante = User.objects.create_user("req-sem-compras", "reqsc@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        UserModulePermission.objects.create(user=requisitante, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        self.client.force_authenticate(requisitante)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.post("/api/compras/requisicoes/", {
+            "loja": self.loja.id,
+            "setor": self.setor.id,
+            "prioridade": "NORMAL",
+            "justificativa": "Sem compras",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        req_id = resp.data["id"]
+        self.item_produto(Requisicao.objects.get(pk=req_id))
+        resp = self.client.post(f"/api/compras/requisicoes/{req_id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.client.force_authenticate(self.solicitante)
+
+    def test_usuario_sem_requisicoes_nao_acessa_endpoints(self):
+        User = get_user_model()
+        sem_acesso = User.objects.create_user("req-sem-acesso", "reqsa@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        self.client.force_authenticate(sem_acesso)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        self.assertEqual(resp.status_code, 403, resp.data)
+        self.client.force_authenticate(self.solicitante)
+
     def test_usuario_comum_nao_altera_ou_envia_requisicao_de_outro_usuario(self):
         req = Requisicao.objects.create(numero=1, empresa=self.empresa, loja=self.loja, setor=self.setor, requisitante=self.outro_mesma_empresa, criado_por=self.outro_mesma_empresa, justificativa="Colega")
         self.client.force_authenticate(self.outro_mesma_empresa)
         self.item_produto(req)
         self.client.force_authenticate(self.solicitante)
         resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Invadir"}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.status_code, 404, resp.data)
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_requisitante_nao_analisa_e_aprovador_analisa_por_permissao(self):
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
         self.assertEqual(resp.status_code, 403, resp.data)
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.client.force_authenticate(self.solicitante)
 
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {
@@ -666,6 +710,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(livre.status_code, 201, livre.data)
         self.assertEqual(servico.status_code, 201, servico.data)
         self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicao-itens/{livre.data['id']}/atender/", {"quantidade": "1.000"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
         resp = self.client.post(f"/api/compras/requisicao-itens/{servico.data['id']}/atender/", {"quantidade": "1.000"}, format="json")
@@ -675,6 +720,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         req = self.criar_requisicao()
         item_id = self.item_produto(req, "5.000")
         self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "2.000"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(Decimal(resp.data["qtd_pendente"]), Decimal("3.000"))
@@ -690,6 +736,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         req = self.criar_requisicao()
         item_id = self.item_produto(req, "20.000")
         self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "20.000"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/aguardar-cotacao/", {}, format="json")
@@ -701,6 +748,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         item_a = self.item_produto(req, "1.000")
         item_b = self.item_produto(req, "2.000")
         self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
         self.client.post(f"/api/compras/requisicao-itens/{item_a}/atender/", {"quantidade": "1.000"}, format="json")
         self.client.post(f"/api/compras/requisicao-itens/{item_b}/aguardar-cotacao/", {}, format="json")
         statuses = set(Requisicao.objects.get(pk=req.pk).itens.values_list("status", flat=True))
@@ -749,12 +797,12 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
         self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/cancelar/", {"motivo": "Duplicada"}, format="json")
-        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.status_code, 403, resp.data)
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.status_code, 200, resp.data)
         self.client.force_authenticate(self.solicitante)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "1.000"}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.status_code, 403, resp.data)
 
         req2 = self.criar_requisicao()
         item2_id = self.item_produto(req2)
@@ -766,7 +814,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 400, resp.data)
         self.client.force_authenticate(self.solicitante)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item2_id}/atender/", {"quantidade": "1.000"}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.status_code, 403, resp.data)
 
     def test_atendimento_nao_permite_item_cancelado_rejeitado_ou_sem_pendente(self):
         req = self.criar_requisicao()
@@ -774,6 +822,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         rejeitado_id = self.item_produto(req, "1.000")
         atendido_id = self.item_produto(req, "1.000")
         self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
         RequisicaoItem.objects.filter(pk=cancelado_id).update(status="CANCELADO")
         RequisicaoItem.objects.filter(pk=rejeitado_id).update(status="REJEITADO")
         RequisicaoItem.objects.filter(pk=atendido_id).update(status="ATENDIDO", qtd_atendida=Decimal("1.000"), qtd_pendente=Decimal("0.000"))

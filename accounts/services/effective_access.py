@@ -16,7 +16,7 @@ NONE = UserModulePermission.Access.NONE
 VIEW = UserModulePermission.Access.VIEW
 EDIT = UserModulePermission.Access.EDIT
 BASIC_MODULES = {"operacional", "cadastros", "produtos", "configuracoes"}
-COMMERCIAL_MODULES = {"vendas", "compras", "estoque", "financeiro", "fiscal", "producao", "distribuicao", "relatorios"}
+COMMERCIAL_MODULES = {"vendas", "compras", "requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas", "estoque", "financeiro", "fiscal", "producao", "distribuicao", "relatorios"}
 
 
 @dataclass(frozen=True)
