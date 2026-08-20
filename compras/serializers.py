@@ -279,8 +279,8 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
 
         if not requisicao:
             raise serializers.ValidationError({"requisicao": "Informe a requisição."})
-        if requisicao.status not in ("RASCUNHO",):
-            raise serializers.ValidationError({"requisicao": "Somente requisições em rascunho permitem alterar itens."})
+        if requisicao.status not in ("RASCUNHO", "DEVOLVIDA_CORRECAO"):
+            raise serializers.ValidationError({"requisicao": "Somente requisições não enviadas ou devolvidas para correção permitem alterar itens."})
         if tipo not in ("MATERIAL", "SERVICO"):
             raise serializers.ValidationError({"tipo": "Tipo de item inválido."})
 
@@ -403,7 +403,7 @@ class RequisicaoSerializer(serializers.ModelSerializer):
         loja = attrs.get("loja", getattr(self.instance, "loja", None))
         if not loja:
             raise serializers.ValidationError({"loja": "Informe a loja/unidade."})
-        if self.instance and self.instance.status not in ("RASCUNHO",):
+        if self.instance and self.instance.status not in ("RASCUNHO", "DEVOLVIDA_CORRECAO"):
             allowed = {"observacoes"}
             protected = set(attrs.keys()) - allowed
             if protected:

@@ -122,6 +122,12 @@ def _can_approve_requisicao(user):
     return EffectiveAccessService(user).has_module_access("compras", EDIT)
 
 
+def _can_edit_requisicao_content(user, requisicao):
+    if getattr(user, "is_superuser", False):
+        return True
+    return requisicao.requisitante_id == user.id and requisicao.status in {"RASCUNHO", "DEVOLVIDA_CORRECAO"}
+
+
 def _ensure_default_requisicao_servico_categorias(empresa_id):
     if not empresa_id:
         return
@@ -1022,6 +1028,19 @@ class RequisicaoViewSet(BaseViewSet):
             if str(search).isdigit():
                 f |= Q(numero=int(search))
             qs = qs.filter(f)
+        visao = self.request.query_params.get("visao") or self.request.query_params.get("view")
+        if visao == "minhas":
+            qs = qs.filter(requisitante=self.request.user)
+        elif visao == "para_analisar":
+            if not _can_approve_requisicao(self.request.user):
+                return qs.none()
+            qs = qs.filter(status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
+        elif visao == "para_atender":
+            if not _can_manage_requisicao(self.request.user):
+                return qs.none()
+            qs = qs.filter(status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+        elif visao == "todas" and not _can_approve_requisicao(self.request.user):
+            qs = qs.filter(requisitante=self.request.user)
         return qs
 
     @transaction.atomic
@@ -1044,8 +1063,8 @@ class RequisicaoViewSet(BaseViewSet):
     @transaction.atomic
     def perform_update(self, serializer):
         obj = serializer.instance
-        if obj.status != "RASCUNHO":
-            raise ValidationError({"status": "Somente rascunhos podem ser editados."})
+        if not _can_edit_requisicao_content(self.request.user, obj):
+            raise ValidationError({"status": "Somente o requisitante original pode editar requisições não enviadas ou devolvidas para correção."})
         loja = serializer.validated_data.get("loja", obj.loja)
         if loja.empresa_id != obj.empresa_id:
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
@@ -1061,8 +1080,8 @@ class RequisicaoViewSet(BaseViewSet):
     @transaction.atomic
     def enviar(self, request, pk=None):
         obj = self.get_object()
-        if obj.status != "RASCUNHO":
-            return Response({"detail": "Somente rascunhos podem ser enviados."}, status=status.HTTP_400_BAD_REQUEST)
+        if not _can_edit_requisicao_content(request.user, obj):
+            return Response({"detail": "Somente o requisitante original pode enviar requisições não enviadas ou devolvidas para correção."}, status=status.HTTP_403_FORBIDDEN)
         if not obj.itens.exists():
             return Response({"detail": "Inclua ao menos um item antes de enviar."}, status=status.HTTP_400_BAD_REQUEST)
         before = obj.status
@@ -1075,8 +1094,8 @@ class RequisicaoViewSet(BaseViewSet):
     @transaction.atomic
     def salvar_enviar(self, request, pk=None):
         obj = Requisicao.objects.select_for_update().get(pk=self.get_object().pk)
-        if obj.status != "RASCUNHO":
-            return Response({"detail": "Somente rascunhos podem ser salvos e enviados."}, status=status.HTTP_400_BAD_REQUEST)
+        if not _can_edit_requisicao_content(request.user, obj):
+            return Response({"detail": "Somente o requisitante original pode enviar requisições não enviadas ou devolvidas para correção."}, status=status.HTTP_403_FORBIDDEN)
         dados = request.data.get("requisicao")
         if isinstance(dados, dict):
             serializer = self.get_serializer(obj, data=dados, partial=True)
@@ -1132,7 +1151,7 @@ class RequisicaoViewSet(BaseViewSet):
         if obj.status not in {"AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"}:
             return Response({"detail": "Requisição não pode ser devolvida neste status."}, status=status.HTTP_400_BAD_REQUEST)
         before = obj.status
-        obj.status = "RASCUNHO"
+        obj.status = "DEVOLVIDA_CORRECAO"
         obj.save(update_fields=["status", "atualizado_em"])
         _historico(obj, request, "DEVOLUCAO", before, obj.status, observacao=request.data.get("motivo", ""))
         return Response(self.get_serializer(obj).data)
@@ -1177,6 +1196,9 @@ class RequisicaoItemViewSet(BaseViewSet):
 
     def perform_create(self, serializer):
         self._validar_empresa(serializer.validated_data)
+        req = serializer.validated_data.get("requisicao")
+        if req and not _can_edit_requisicao_content(self.request.user, req):
+            raise ValidationError({"requisicao": "Somente o requisitante original pode alterar itens de requisições não enviadas ou devolvidas para correção."})
         item = serializer.save()
         _historico(item.requisicao, self.request, "EDICAO", item.requisicao.status, item.requisicao.status, item=item, valor_novo={"item": item.pk}, observacao="Item incluído.")
 
@@ -1184,12 +1206,15 @@ class RequisicaoItemViewSet(BaseViewSet):
         data = {**serializer.validated_data}
         data.setdefault("requisicao", serializer.instance.requisicao)
         self._validar_empresa(data)
+        req = data.get("requisicao")
+        if req and not _can_edit_requisicao_content(self.request.user, req):
+            raise ValidationError({"requisicao": "Somente o requisitante original pode alterar itens de requisições não enviadas ou devolvidas para correção."})
         item = serializer.save()
         _historico(item.requisicao, self.request, "EDICAO", item.requisicao.status, item.requisicao.status, item=item, observacao="Item editado.")
 
     def perform_destroy(self, instance):
-        if instance.requisicao.status != "RASCUNHO":
-            raise ValidationError({"requisicao": "Somente rascunhos permitem excluir itens."})
+        if not _can_edit_requisicao_content(self.request.user, instance.requisicao):
+            raise ValidationError({"requisicao": "Somente o requisitante original pode excluir itens de requisições não enviadas ou devolvidas para correção."})
         req = instance.requisicao
         item_id = instance.pk
         instance.delete()

@@ -149,8 +149,9 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         EmpresaContrato.objects.update_or_create(empresa=self.empresa_b, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "limite_sessoes_simultaneas": 5})
         self.solicitante = User.objects.create_user("req-assistente", "reqa@test.local", "123", empresa=self.empresa, loja=self.loja, type="AssistentePagar")
         self.aprovador = User.objects.create_user("req-gerente", "reqg@test.local", "123", empresa=self.empresa, loja=self.loja, type="Gerente")
+        self.outro_mesma_empresa = User.objects.create_user("req-colega", "reqc@test.local", "123", empresa=self.empresa, loja=self.loja, type="AssistentePagar")
         self.outro = User.objects.create_user("req-outro", "reqo@test.local", "123", empresa=self.empresa_b, loja=self.loja_b, type="Gerente")
-        for user in (self.solicitante, self.aprovador, self.outro):
+        for user in (self.solicitante, self.aprovador, self.outro_mesma_empresa, self.outro):
             UserModulePermission.objects.create(user=user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
         self.unidade = self.un_int
         self.produto = self.prod_uso
@@ -214,6 +215,24 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertNotIn(req_b.id, [r["id"] for r in rows])
         resp = self.client.get(f"/api/compras/requisicoes/{req_b.id}/")
         self.assertEqual(resp.status_code, 404)
+
+    def test_usuario_ve_suas_proprias_requisicoes_na_visao_minhas(self):
+        req = self.criar_requisicao()
+        Requisicao.objects.create(numero=2, empresa=self.empresa, loja=self.loja, setor=self.setor, requisitante=self.outro_mesma_empresa, criado_por=self.outro_mesma_empresa, justificativa="Colega")
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertEqual([r["id"] for r in rows], [req.id])
+
+    def test_usuario_comum_nao_altera_ou_envia_requisicao_de_outro_usuario(self):
+        req = Requisicao.objects.create(numero=1, empresa=self.empresa, loja=self.loja, setor=self.setor, requisitante=self.outro_mesma_empresa, criado_por=self.outro_mesma_empresa, justificativa="Colega")
+        self.client.force_authenticate(self.outro_mesma_empresa)
+        self.item_produto(req)
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Invadir"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 403, resp.data)
 
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {
@@ -593,6 +612,28 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["status"], "AGUARDANDO_APROVACAO")
 
+    def test_enviada_nao_pode_ser_editada_pelo_requisitante(self):
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Alterar"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_devolvida_para_correcao_permite_edicao_e_reenvio_do_requisitante(self):
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/devolver/", {"motivo": "Ajustar motivo"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "DEVOLVIDA_CORRECAO")
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Ajustado"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "AGUARDANDO_APROVACAO")
+
     def test_salvar_enviar_sem_item_falha_sem_alterar_status(self):
         req = self.criar_requisicao()
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/salvar-enviar/", {}, format="json")
@@ -673,13 +714,29 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/devolver/", {"motivo": "Ajustar"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(resp.data["status"], "RASCUNHO")
+        self.assertEqual(resp.data["status"], "DEVOLVIDA_CORRECAO")
         self.client.force_authenticate(self.solicitante)
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
         self.client.force_authenticate(self.aprovador)
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/rejeitar/", {"motivo": "Sem necessidade"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["status"], "REJEITADA")
+
+    def test_aprovador_analisa_sem_editar_conteudo_e_atendente_ve_fila(self):
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_analisar"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Aprovador editou"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_atender"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
 
     def test_transicoes_invalidas_e_patch_status_sao_bloqueados_no_backend(self):
         req = self.criar_requisicao()

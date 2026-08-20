@@ -39,10 +39,11 @@ PRIORIDADE_REQUISICAO = (
 )
 
 STATUS_REQUISICAO = (
-    ('RASCUNHO', 'Rascunho'),
+    ('RASCUNHO', 'Não enviada'),
     ('SOLICITADA', 'Solicitada'),
     ('EM_ANALISE', 'Em análise'),
     ('AGUARDANDO_APROVACAO', 'Aguardando aprovação'),
+    ('DEVOLVIDA_CORRECAO', 'Devolvida para correção'),
     ('APROVADA', 'Aprovada'),
     ('EM_ATENDIMENTO', 'Em atendimento'),
     ('ATENDIDA_PARCIALMENTE', 'Atendida parcialmente'),
