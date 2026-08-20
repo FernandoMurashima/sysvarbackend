@@ -181,6 +181,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "PRODUTO",
             "produto": self.produto.Idproduto,
             "unidade": self.unidade.Idunidade,
+            "finalidade": "USO_CONSUMO",
             "qtd_solicitada": qtd,
             "observacoes": "Papel",
         }, format="json")
@@ -303,6 +304,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "SERVICO",
             "origem": "SERVICO",
             "titulo_servico": "Manutenção",
+            "descricao_servico": "Serviço corretivo",
             "categoria_servico": categoria_b.id,
             "tipo_servico": "CORRETIVA",
         }, format="json")
@@ -317,6 +319,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "LIVRE",
             "descricao": "Notebook administrativo",
             "categoria": "Equipamento",
+            "finalidade": "IMOBILIZADO",
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
             "especificacao_tecnica": "16 GB RAM, SSD 512 GB",
@@ -342,6 +345,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "PRODUTO",
             "produto": self.prod_uso_dec.Idproduto,
             "unidade": self.un_int.Idunidade,
+            "finalidade": "ALMOXARIFADO",
             "qtd_solicitada": "1.500",
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -352,6 +356,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
             "produto": self.prod_revenda.Idproduto,
+            "finalidade": "USO_CONSUMO",
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -363,6 +368,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Item livre",
+            "finalidade": "OUTRO",
             "unidade": self.un_dec.Idunidade,
             "qtd_solicitada": "1.500",
         }
@@ -375,12 +381,96 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             self.assertEqual(resp.status_code, 400, resp.data)
             self.assertIn("qtd_solicitada", resp.data)
 
+    def test_material_exige_finalidade_e_aceita_imobilizado_e_almoxarifado(self):
+        req = self.criar_requisicao()
+        base = {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "LIVRE",
+            "descricao": "Computador Dell",
+            "categoria": "Informática",
+            "unidade": self.unidade.Idunidade,
+            "qtd_solicitada": "1.000",
+            "especificacao_tecnica": "Intel i5, 8 GB RAM, SSD 500 GB",
+        }
+        resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("finalidade", resp.data)
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "finalidade": "IMOBILIZADO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["categoria"], "Informática")
+        self.assertEqual(resp.data["finalidade"], "IMOBILIZADO")
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "PRODUTO",
+            "produto": self.produto.Idproduto,
+            "finalidade": "ALMOXARIFADO",
+            "qtd_solicitada": "1.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["finalidade"], "ALMOXARIFADO")
+
+    def test_finalidade_invalida_e_servico_com_finalidade_sao_rejeitados(self):
+        req = self.criar_requisicao()
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "PRODUTO",
+            "produto": self.produto.Idproduto,
+            "finalidade": "PATRIMONIO",
+            "qtd_solicitada": "1.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("finalidade", resp.data)
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "SERVICO",
+            "origem": "SERVICO",
+            "titulo_servico": "Manutenção",
+            "descricao_servico": "Equipamento não está refrigerando.",
+            "categoria_servico": self.categoria.id,
+            "tipo_servico": "CORRETIVA",
+            "finalidade": "USO_CONSUMO",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("finalidade", resp.data)
+
+    def test_servico_exige_descricao_e_nao_precisa_campos_de_material(self):
+        req = self.criar_requisicao()
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "SERVICO",
+            "origem": "SERVICO",
+            "titulo_servico": "Manutenção de ar-condicionado",
+            "categoria_servico": self.categoria.id,
+            "tipo_servico": "CORRETIVA",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("descricao_servico", resp.data)
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "SERVICO",
+            "origem": "SERVICO",
+            "titulo_servico": "Manutenção de ar-condicionado",
+            "descricao_servico": "Equipamento da área de vendas não está refrigerando.",
+            "categoria_servico": self.categoria.id,
+            "tipo_servico": "CORRETIVA",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["finalidade"], "")
+
     def test_erros_de_item_retornam_mensagens_especificas(self):
         req = self.criar_requisicao()
         resp = self.client.post("/api/compras/requisicao-itens/", {
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
+            "finalidade": "USO_CONSUMO",
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -390,6 +480,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "LIVRE",
+            "finalidade": "USO_CONSUMO",
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
@@ -401,6 +492,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Livre sem unidade",
+            "finalidade": "USO_CONSUMO",
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -431,6 +523,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Item livre",
+            "finalidade": "USO_CONSUMO",
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
@@ -439,6 +532,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "SERVICO",
             "origem": "SERVICO",
             "titulo_servico": "Serviço",
+            "descricao_servico": "Serviço corretivo",
             "categoria_servico": self.categoria.id,
             "tipo_servico": "CORRETIVA",
         }, format="json")

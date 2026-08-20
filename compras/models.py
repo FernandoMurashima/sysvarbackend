@@ -90,6 +90,13 @@ TIPO_SERVICO_REQUISICAO = (
     ('OUTRO', 'Outro'),
 )
 
+FINALIDADE_ITEM_REQUISICAO = (
+    ('USO_CONSUMO', 'Uso e Consumo'),
+    ('ALMOXARIFADO', 'Estoque/Almoxarifado'),
+    ('IMOBILIZADO', 'Imobilizado'),
+    ('OUTRO', 'Outro'),
+)
+
 ACAO_HISTORICO_REQUISICAO = (
     ('CRIACAO', 'Criação'),
     ('EDICAO', 'Edição'),
@@ -180,6 +187,7 @@ class RequisicaoItem(models.Model):
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_requisicao')
     descricao = models.CharField(max_length=200, blank=True, default='')
     categoria = models.CharField(max_length=80, blank=True, default='')
+    finalidade = models.CharField(max_length=20, choices=FINALIDADE_ITEM_REQUISICAO, blank=True, default='')
     unidade = models.ForeignKey('produto.Unidade', on_delete=models.PROTECT, null=True, blank=True, related_name='itens_requisicao')
     especificacao_tecnica = models.TextField(blank=True, default='')
     titulo_servico = models.CharField(max_length=160, blank=True, default='')

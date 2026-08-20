@@ -239,6 +239,7 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
         produto = attrs.get("produto", getattr(self.instance, "produto", None))
         unidade = attrs.get("unidade", getattr(self.instance, "unidade", None))
         categoria_servico = attrs.get("categoria_servico", getattr(self.instance, "categoria_servico", None))
+        finalidade = attrs.get("finalidade", getattr(self.instance, "finalidade", ""))
         qtd = Decimal(attrs.get("qtd_solicitada", getattr(self.instance, "qtd_solicitada", 0)) or 0)
 
         if not requisicao:
@@ -259,6 +260,8 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
         if tipo == "MATERIAL":
             if origem not in ("PRODUTO", "LIVRE"):
                 raise serializers.ValidationError({"origem": "Material deve ser cadastrado ou livre."})
+            if not finalidade:
+                raise serializers.ValidationError({"finalidade": "Informe a finalidade da aquisição."})
             if origem == "PRODUTO" and not produto:
                 raise serializers.ValidationError({"produto": "Informe o produto do material cadastrado."})
             if origem == "PRODUTO":
@@ -279,10 +282,14 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
         else:
             if origem != "SERVICO":
                 raise serializers.ValidationError({"origem": "Serviço deve usar origem SERVICO."})
+            if finalidade:
+                raise serializers.ValidationError({"finalidade": "Serviço não utiliza finalidade de material."})
             if produto:
                 raise serializers.ValidationError({"produto": "Serviço não utiliza produto."})
             if not (attrs.get("titulo_servico", getattr(self.instance, "titulo_servico", "")) or "").strip():
                 raise serializers.ValidationError({"titulo_servico": "Informe o título do serviço."})
+            if not (attrs.get("descricao_servico", getattr(self.instance, "descricao_servico", "")) or "").strip():
+                raise serializers.ValidationError({"descricao_servico": "Informe a descrição do serviço."})
             if not categoria_servico:
                 raise serializers.ValidationError({"categoria_servico": "Informe a categoria do serviço."})
             if not attrs.get("tipo_servico", getattr(self.instance, "tipo_servico", "")):
