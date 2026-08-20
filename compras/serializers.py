@@ -7,6 +7,11 @@ from .models import (
     PedidoCompraItem,
     PedidoCompraEntrega,
     PedidoCompraParcela,
+    Requisicao,
+    RequisicaoHistorico,
+    RequisicaoItem,
+    RequisicaoServicoCategoria,
+    RequisicaoSetor,
 )
 
 try:
@@ -172,3 +177,174 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
         if not natureza:
             return None
         return f"{natureza.codigo} - {natureza.descricao}"
+
+
+class RequisicaoServicoCategoriaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RequisicaoServicoCategoria
+        fields = "__all__"
+        read_only_fields = ("empresa", "data_cadastro")
+
+
+class RequisicaoSetorSerializer(serializers.ModelSerializer):
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+
+    class Meta:
+        model = RequisicaoSetor
+        fields = "__all__"
+        read_only_fields = ("empresa", "data_cadastro")
+
+    def validate_nome(self, value):
+        if not (value or "").strip():
+            raise serializers.ValidationError("Nome do setor é obrigatório.")
+        return value.strip()
+
+
+class RequisicaoHistoricoSerializer(serializers.ModelSerializer):
+    usuario_nome = serializers.CharField(source="usuario.username", read_only=True)
+
+    class Meta:
+        model = RequisicaoHistorico
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "requisicao",
+            "item",
+            "usuario",
+            "data_hora",
+            "acao",
+            "status_anterior",
+            "status_novo",
+            "valor_anterior",
+            "valor_novo",
+            "observacao",
+        )
+
+
+class RequisicaoItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
+    categoria_servico_nome = serializers.CharField(source="categoria_servico.nome", read_only=True)
+
+    class Meta:
+        model = RequisicaoItem
+        fields = "__all__"
+        read_only_fields = ("qtd_atendida", "qtd_pendente", "status", "criado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        requisicao = attrs.get("requisicao") or getattr(self.instance, "requisicao", None)
+        tipo = attrs.get("tipo", getattr(self.instance, "tipo", None))
+        origem = attrs.get("origem", getattr(self.instance, "origem", None))
+        produto = attrs.get("produto", getattr(self.instance, "produto", None))
+        unidade = attrs.get("unidade", getattr(self.instance, "unidade", None))
+        categoria_servico = attrs.get("categoria_servico", getattr(self.instance, "categoria_servico", None))
+        qtd = Decimal(attrs.get("qtd_solicitada", getattr(self.instance, "qtd_solicitada", 0)) or 0)
+
+        if not requisicao:
+            raise serializers.ValidationError({"requisicao": "Informe a requisição."})
+        if requisicao.status not in ("RASCUNHO",):
+            raise serializers.ValidationError({"requisicao": "Somente requisições em rascunho permitem alterar itens."})
+        if tipo not in ("MATERIAL", "SERVICO"):
+            raise serializers.ValidationError({"tipo": "Tipo de item inválido."})
+
+        empresa_id = requisicao.empresa_id
+        if produto and produto.empresa_id and produto.empresa_id != empresa_id:
+            raise serializers.ValidationError({"produto": "Produto pertence a outra empresa."})
+        if unidade and unidade.empresa_id and unidade.empresa_id != empresa_id:
+            raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
+        if categoria_servico and categoria_servico.empresa_id != empresa_id:
+            raise serializers.ValidationError({"categoria_servico": "Categoria de serviço pertence a outra empresa."})
+
+        if tipo == "MATERIAL":
+            if origem not in ("PRODUTO", "LIVRE"):
+                raise serializers.ValidationError({"origem": "Material deve ser cadastrado ou livre."})
+            if origem == "PRODUTO" and not produto:
+                raise serializers.ValidationError({"produto": "Informe o produto do material cadastrado."})
+            if origem == "PRODUTO":
+                if produto.tipo_produto != "2":
+                    raise serializers.ValidationError({"produto": "Use somente Produto de Uso e Consumo."})
+                if not getattr(produto, "ativo", True):
+                    raise serializers.ValidationError({"produto": "Produto inativo não pode ser requisitado."})
+                attrs["unidade"] = produto.unidade
+                unidade = produto.unidade
+            if origem == "LIVRE" and not (attrs.get("descricao", getattr(self.instance, "descricao", "")) or "").strip():
+                raise serializers.ValidationError({"descricao": "Informe a descrição do item livre."})
+            if origem == "LIVRE" and not unidade:
+                raise serializers.ValidationError({"unidade": "Informe a unidade do item livre."})
+            if qtd <= 0:
+                raise serializers.ValidationError({"qtd_solicitada": "Informe uma quantidade maior que zero."})
+            if unidade and not unidade.permite_decimal and qtd != qtd.to_integral_value():
+                raise serializers.ValidationError({"qtd_solicitada": f"A unidade {unidade.Descricao} não aceita quantidade decimal."})
+        else:
+            if origem != "SERVICO":
+                raise serializers.ValidationError({"origem": "Serviço deve usar origem SERVICO."})
+            if produto:
+                raise serializers.ValidationError({"produto": "Serviço não utiliza produto."})
+            if not (attrs.get("titulo_servico", getattr(self.instance, "titulo_servico", "")) or "").strip():
+                raise serializers.ValidationError({"titulo_servico": "Informe o título do serviço."})
+            if not categoria_servico:
+                raise serializers.ValidationError({"categoria_servico": "Informe a categoria do serviço."})
+            if not attrs.get("tipo_servico", getattr(self.instance, "tipo_servico", "")):
+                raise serializers.ValidationError({"tipo_servico": "Informe o tipo do serviço."})
+            attrs["qtd_solicitada"] = Decimal("1.000")
+
+        return attrs
+
+    def _sync_quantities(self, obj):
+        obj.qtd_atendida = Decimal(obj.qtd_atendida or 0)
+        obj.qtd_pendente = max(Decimal(obj.qtd_solicitada or 0) - obj.qtd_atendida, Decimal("0"))
+
+    def create(self, validated_data):
+        obj = RequisicaoItem(**validated_data)
+        self._sync_quantities(obj)
+        obj.save()
+        return obj
+
+    def update(self, instance, validated_data):
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        self._sync_quantities(instance)
+        instance.save()
+        return instance
+
+
+class RequisicaoSerializer(serializers.ModelSerializer):
+    itens = RequisicaoItemSerializer(many=True, read_only=True)
+    historico = RequisicaoHistoricoSerializer(many=True, read_only=True)
+    requisitante_nome = serializers.CharField(source="requisitante.username", read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    setor_nome = serializers.CharField(source="setor.nome", read_only=True)
+
+    class Meta:
+        model = Requisicao
+        fields = "__all__"
+        read_only_fields = (
+            "numero",
+            "empresa",
+            "requisitante",
+            "status",
+            "criado_por",
+            "aprovado_por",
+            "aprovado_em",
+            "criado_em",
+            "atualizado_em",
+        )
+
+    def validate(self, attrs):
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        if not loja:
+            raise serializers.ValidationError({"loja": "Informe a loja/unidade."})
+        if self.instance and self.instance.status not in ("RASCUNHO",):
+            allowed = {"observacoes"}
+            protected = set(attrs.keys()) - allowed
+            if protected:
+                raise serializers.ValidationError("Somente rascunhos podem alterar campos protegidos da requisição.")
+        setor = attrs.get("setor", getattr(self.instance, "setor", None))
+        if not setor:
+            raise serializers.ValidationError({"setor": "Informe o setor."})
+        if loja and setor and setor.empresa_id != loja.empresa_id:
+            raise serializers.ValidationError({"setor": "Setor pertence a outra empresa."})
+        if setor and (not setor.ativo or not setor.pode_fazer_requisicao):
+            raise serializers.ValidationError({"setor": "Setor inativo ou não habilitado para requisições."})
+        return attrs

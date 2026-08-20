@@ -3,10 +3,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
+from accounts.services.effective_access import EDIT, EffectiveAccessService
 
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
@@ -16,12 +19,22 @@ from .models import (
     PedidoCompraItem,
     PedidoCompraEntrega,
     PedidoCompraParcela,
+    Requisicao,
+    RequisicaoHistorico,
+    RequisicaoItem,
+    RequisicaoServicoCategoria,
+    RequisicaoSetor,
 )
 from .serializers import (
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
     PedidoCompraEntregaSerializer,
     PedidoCompraParcelaSerializer,
+    RequisicaoHistoricoSerializer,
+    RequisicaoItemSerializer,
+    RequisicaoSerializer,
+    RequisicaoServicoCategoriaSerializer,
+    RequisicaoSetorSerializer,
 )
 
 # Integração Financeiro
@@ -41,6 +54,7 @@ except Exception:
 
 # Natureza para aprovar
 from cadastros.models import Nat_Lancamento
+from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
 
 
 # ----------------- Auditoria robusta -----------------
@@ -59,6 +73,103 @@ def _audit(model_name: str, obj_id: str, changes: dict, request, action: str = "
         transaction.on_commit(lambda: AuditService.success(**payload))
     else:
         AuditService.success(**payload)
+
+
+def _historico(requisicao, request, acao, status_anterior="", status_novo="", item=None, valor_anterior=None, valor_novo=None, observacao=""):
+    hist = RequisicaoHistorico.objects.create(
+        requisicao=requisicao,
+        item=item,
+        usuario=getattr(request, "user", None),
+        acao=acao,
+        status_anterior=status_anterior or "",
+        status_novo=status_novo or "",
+        valor_anterior=valor_anterior,
+        valor_novo=valor_novo,
+        observacao=observacao or "",
+    )
+    _audit(
+        "requisicao",
+        requisicao.pk,
+        {
+            "acao": acao,
+            "item": getattr(item, "pk", None),
+            "status": [status_anterior, status_novo],
+            "valor_anterior": valor_anterior,
+            "valor_novo": valor_novo,
+            "observacao": observacao,
+        },
+        request,
+        action=acao.lower(),
+    )
+    return hist
+
+
+def _can_manage_requisicao(user):
+    if getattr(user, "is_superuser", False):
+        return True
+    return EffectiveAccessService(user).has_module_access("compras", EDIT)
+
+
+def _can_approve_requisicao(user):
+    if getattr(user, "is_superuser", False):
+        return True
+    if getattr(user, "type", "") not in {"Admin", "Diretor", "Gerente"}:
+        return False
+    return EffectiveAccessService(user).has_module_access("compras", EDIT)
+
+
+def _ensure_default_requisicao_servico_categorias(empresa_id):
+    if not empresa_id:
+        return
+    nomes = [
+        "Ar-condicionado",
+        "Eletrica",
+        "Hidraulica",
+        "Informatica",
+        "Impressoras",
+        "Moveis",
+        "Equipamentos",
+        "Seguranca",
+        "Limpeza",
+        "Pintura",
+        "Outros",
+    ]
+    for nome in nomes:
+        RequisicaoServicoCategoria.objects.get_or_create(empresa_id=empresa_id, nome=nome)
+
+
+def _ensure_default_requisicao_setores(empresa_id):
+    if not empresa_id:
+        return
+    nomes = [
+        "Administrativo",
+        "Financeiro",
+        "TI",
+        "Almoxarifado",
+        "Estoque",
+        "Vendas",
+        "Diretoria",
+        "Manutencao",
+    ]
+    for nome in nomes:
+        defaults = {}
+        if nome in {"Almoxarifado", "Estoque"}:
+            defaults["controla_estoque_uso_consumo"] = True
+        RequisicaoSetor.objects.get_or_create(empresa_id=empresa_id, nome=nome, defaults=defaults)
+
+
+def _recalcular_status_requisicao(req):
+    itens = list(req.itens.all())
+    if not itens or req.status in {"RASCUNHO", "SOLICITADA", "AGUARDANDO_APROVACAO", "REJEITADA", "CANCELADA"}:
+        return req.status
+    statuses = {i.status for i in itens}
+    if statuses and statuses <= {"ATENDIDO", "SERVICO_CONCLUIDO", "RECEBIDO"}:
+        return "CONCLUIDA"
+    if any(i.qtd_atendida and i.qtd_atendida > 0 for i in itens):
+        return "ATENDIDA_PARCIALMENTE"
+    if statuses & {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}:
+        return "EM_PROCESSO_COMPRA"
+    return "EM_ATENDIMENTO" if req.status == "APROVADA" else req.status
 
 
 def _parcelas_configuradas(pedido: PedidoCompra):
@@ -626,4 +737,393 @@ class PedidoCompraParcelaViewSet(BaseViewSet):
         status_q = self.request.query_params.get("status")
         if status_q:
             qs = qs.filter(status=status_q)
+        return qs
+
+
+class RequisicaoServicoCategoriaViewSet(BaseViewSet):
+    queryset = RequisicaoServicoCategoria.objects.all().order_by("nome")
+    serializer_class = RequisicaoServicoCategoriaSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            _ensure_default_requisicao_servico_categorias(empresa_id)
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        ativo = self.request.query_params.get("ativo")
+        if ativo is not None:
+            qs = qs.filter(ativo=str(ativo).lower() in {"1", "true", "sim"})
+        return qs
+
+    def perform_create(self, serializer):
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa = self.request.user.empresa if empresa_id else serializer.validated_data.get("empresa")
+        obj = serializer.save(empresa=empresa)
+        _audit("requisicaoservicocategoria", obj.pk, {"created": True}, self.request, action="create")
+
+
+class RequisicaoSetorViewSet(BaseViewSet):
+    queryset = RequisicaoSetor.objects.all().order_by("nome")
+    serializer_class = RequisicaoSetorSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            _ensure_default_requisicao_setores(empresa_id)
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        search = self.request.query_params.get("search")
+        empresa = self.request.query_params.get("empresa")
+        if self.request.user.is_superuser and empresa:
+            qs = qs.filter(empresa_id=empresa)
+        if search:
+            qs = qs.filter(Q(nome__icontains=search) | Q(descricao__icontains=search))
+        ativo = self.request.query_params.get("ativo")
+        if ativo is not None:
+            qs = qs.filter(ativo=str(ativo).lower() in {"1", "true", "sim"})
+        pode_fazer = self.request.query_params.get("pode_fazer_requisicao")
+        if pode_fazer is not None:
+            qs = qs.filter(pode_fazer_requisicao=str(pode_fazer).lower() in {"1", "true", "sim"})
+        return qs
+
+    def perform_create(self, serializer):
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa_payload = self.request.data.get("empresa")
+        if empresa_id and empresa_payload and int(empresa_payload) != int(empresa_id):
+            raise ValidationError({"empresa": "Usuário não pode criar setor para outra empresa."})
+        empresa = self.request.user.empresa if empresa_id else serializer.validated_data.get("empresa")
+        obj = serializer.save(empresa=empresa)
+        _audit("requisicaosetor", obj.pk, {"created": True}, self.request, action="create")
+
+    def perform_update(self, serializer):
+        empresa_id = self._empresa_id_usuario()
+        obj = serializer.instance
+        if empresa_id and obj.empresa_id != int(empresa_id):
+            raise ValidationError({"empresa": "Setor pertence a outra empresa."})
+        updated = serializer.save(empresa=obj.empresa)
+        _audit("requisicaosetor", updated.pk, {"updated": True}, self.request, action="update")
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Exclusão física de setor não é permitida. Utilize inativação."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        obj = self.get_object()
+        before = obj.ativo
+        obj.ativo = True
+        obj.save(update_fields=["ativo"])
+        _audit("requisicaosetor", obj.pk, {"ativo": [before, True]}, request, action="ativar")
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        obj = self.get_object()
+        before = obj.ativo
+        obj.ativo = False
+        obj.save(update_fields=["ativo"])
+        _audit("requisicaosetor", obj.pk, {"ativo": [before, False]}, request, action="inativar")
+        return Response(self.get_serializer(obj).data)
+
+
+class RequisicaoViewSet(BaseViewSet):
+    queryset = Requisicao.objects.select_related("empresa", "loja", "setor", "requisitante", "criado_por").prefetch_related("itens", "historico").all()
+    serializer_class = RequisicaoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        status_q = self.request.query_params.get("status")
+        loja = self.request.query_params.get("loja")
+        prioridade = self.request.query_params.get("prioridade")
+        search = self.request.query_params.get("search")
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if prioridade:
+            qs = qs.filter(prioridade=prioridade)
+        if search:
+            f = Q(setor__nome__icontains=search) | Q(justificativa__icontains=search) | Q(requisitante__username__icontains=search)
+            if str(search).isdigit():
+                f |= Q(numero=int(search))
+            qs = qs.filter(f)
+        return qs
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        loja = serializer.validated_data.get("loja")
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if empresa_id and loja.empresa_id != int(empresa_id):
+            raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        empresa = loja.empresa
+        _ensure_default_requisicao_servico_categorias(empresa.pk)
+        _ensure_default_requisicao_setores(empresa.pk)
+        proximo = (Requisicao.objects.select_for_update().filter(empresa=empresa).aggregate(max_num=Max("numero"))["max_num"] or 0) + 1
+        obj = serializer.save(empresa=empresa, numero=proximo, requisitante=self.request.user, criado_por=self.request.user)
+        _historico(obj, self.request, "CRIACAO", "", obj.status, observacao="Requisição criada.")
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        obj = serializer.instance
+        if obj.status != "RASCUNHO":
+            raise ValidationError({"status": "Somente rascunhos podem ser editados."})
+        loja = serializer.validated_data.get("loja", obj.loja)
+        if loja.empresa_id != obj.empresa_id:
+            raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade}
+        updated = serializer.save(empresa=obj.empresa)
+        after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade}
+        _historico(updated, self.request, "EDICAO", updated.status, updated.status, valor_anterior=before, valor_novo=after, observacao="Requisição editada.")
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Exclusão física de requisição não é permitida. Utilize cancelamento."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    @action(detail=True, methods=["post"], url_path="enviar")
+    @transaction.atomic
+    def enviar(self, request, pk=None):
+        obj = self.get_object()
+        if obj.status != "RASCUNHO":
+            return Response({"detail": "Somente rascunhos podem ser enviados."}, status=status.HTTP_400_BAD_REQUEST)
+        if not obj.itens.exists():
+            return Response({"detail": "Inclua ao menos um item antes de enviar."}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "AGUARDANDO_APROVACAO"
+        obj.save(update_fields=["status", "atualizado_em"])
+        _historico(obj, request, "ENVIO", before, obj.status, observacao=request.data.get("observacao", ""))
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="salvar-enviar")
+    @transaction.atomic
+    def salvar_enviar(self, request, pk=None):
+        obj = Requisicao.objects.select_for_update().get(pk=self.get_object().pk)
+        if obj.status != "RASCUNHO":
+            return Response({"detail": "Somente rascunhos podem ser salvos e enviados."}, status=status.HTTP_400_BAD_REQUEST)
+        dados = request.data.get("requisicao")
+        if isinstance(dados, dict):
+            serializer = self.get_serializer(obj, data=dados, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            obj = serializer.instance
+        if not obj.itens.exists():
+            return Response({"itens": ["Inclua ao menos um item antes de enviar."]}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "AGUARDANDO_APROVACAO"
+        obj.save(update_fields=["status", "atualizado_em"])
+        _historico(obj, request, "ENVIO", before, obj.status, observacao=request.data.get("observacao", ""))
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="aprovar")
+    @transaction.atomic
+    def aprovar(self, request, pk=None):
+        if not _can_approve_requisicao(request.user):
+            return Response({"detail": "Usuário sem permissão para aprovar requisição."}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object()
+        if obj.status not in {"AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"}:
+            return Response({"detail": "Requisição não está aguardando aprovação."}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "APROVADA"
+        obj.aprovado_por = request.user
+        obj.aprovado_em = timezone.now()
+        obj.save(update_fields=["status", "aprovado_por", "aprovado_em", "atualizado_em"])
+        obj.itens.filter(status="PENDENTE").update(status="APROVADO")
+        _historico(obj, request, "APROVACAO", before, obj.status, observacao=request.data.get("observacao", ""))
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="rejeitar")
+    @transaction.atomic
+    def rejeitar(self, request, pk=None):
+        if not _can_approve_requisicao(request.user):
+            return Response({"detail": "Usuário sem permissão para rejeitar requisição."}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object()
+        if obj.status not in {"AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"}:
+            return Response({"detail": "Requisição não pode ser rejeitada neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "REJEITADA"
+        obj.save(update_fields=["status", "atualizado_em"])
+        obj.itens.exclude(status__in=["ATENDIDO", "CANCELADO"]).update(status="REJEITADO")
+        _historico(obj, request, "REJEICAO", before, obj.status, observacao=request.data.get("motivo", ""))
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="devolver")
+    @transaction.atomic
+    def devolver(self, request, pk=None):
+        if not _can_approve_requisicao(request.user):
+            return Response({"detail": "Usuário sem permissão para devolver requisição."}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object()
+        if obj.status not in {"AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"}:
+            return Response({"detail": "Requisição não pode ser devolvida neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "RASCUNHO"
+        obj.save(update_fields=["status", "atualizado_em"])
+        _historico(obj, request, "DEVOLUCAO", before, obj.status, observacao=request.data.get("motivo", ""))
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="cancelar")
+    @transaction.atomic
+    def cancelar(self, request, pk=None):
+        obj = self.get_object()
+        if obj.status in {"CONCLUIDA", "CANCELADA"}:
+            return Response({"detail": "Requisição não pode ser cancelada neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        before = obj.status
+        obj.status = "CANCELADA"
+        obj.save(update_fields=["status", "atualizado_em"])
+        obj.itens.exclude(status__in=["ATENDIDO", "SERVICO_CONCLUIDO"]).update(status="CANCELADO")
+        _historico(obj, request, "CANCELAMENTO", before, obj.status, observacao=request.data.get("motivo", ""))
+        return Response(self.get_serializer(obj).data)
+
+
+class RequisicaoItemViewSet(BaseViewSet):
+    queryset = RequisicaoItem.objects.select_related("requisicao", "produto", "unidade", "categoria_servico").all()
+    serializer_class = RequisicaoItemSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(requisicao__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        requisicao = self.request.query_params.get("requisicao")
+        if requisicao:
+            qs = qs.filter(requisicao_id=requisicao)
+        return qs
+
+    def _validar_empresa(self, data):
+        req = data.get("requisicao")
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and req and req.empresa_id != int(user_empresa_id):
+            raise ValidationError({"requisicao": "Requisição pertence a outra empresa."})
+
+    def perform_create(self, serializer):
+        self._validar_empresa(serializer.validated_data)
+        item = serializer.save()
+        _historico(item.requisicao, self.request, "EDICAO", item.requisicao.status, item.requisicao.status, item=item, valor_novo={"item": item.pk}, observacao="Item incluído.")
+
+    def perform_update(self, serializer):
+        data = {**serializer.validated_data}
+        data.setdefault("requisicao", serializer.instance.requisicao)
+        self._validar_empresa(data)
+        item = serializer.save()
+        _historico(item.requisicao, self.request, "EDICAO", item.requisicao.status, item.requisicao.status, item=item, observacao="Item editado.")
+
+    def perform_destroy(self, instance):
+        if instance.requisicao.status != "RASCUNHO":
+            raise ValidationError({"requisicao": "Somente rascunhos permitem excluir itens."})
+        req = instance.requisicao
+        item_id = instance.pk
+        instance.delete()
+        _historico(req, self.request, "EDICAO", req.status, req.status, valor_anterior={"item": item_id}, observacao="Item removido.")
+
+    @action(detail=True, methods=["post"], url_path="aguardar-cotacao")
+    @transaction.atomic
+    def aguardar_cotacao(self, request, pk=None):
+        item = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
+        self.check_object_permissions(request, item)
+        req = get_object_or_404(Requisicao.objects.select_for_update(), pk=item.requisicao_id)
+        if req.status not in {"APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE", "EM_PROCESSO_COMPRA"}:
+            return Response({"detail": "A requisição precisa estar aprovada para encaminhar item."}, status=status.HTTP_400_BAD_REQUEST)
+        if item.status in {"ATENDIDO", "CANCELADO", "REJEITADO", "SERVICO_CONCLUIDO"}:
+            return Response({"detail": "Item não pode ser encaminhado neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        before_item = item.status
+        item.status = "AGUARDANDO_COTACAO"
+        item.save(update_fields=["status", "atualizado_em"])
+        before_req = req.status
+        req.status = _recalcular_status_requisicao(req)
+        req.save(update_fields=["status", "atualizado_em"])
+        _historico(req, request, "STATUS", before_req, req.status, item=item, valor_anterior={"item_status": before_item}, valor_novo={"item_status": item.status}, observacao="Item marcado aguardando cotação.")
+        return Response(self.get_serializer(item).data)
+
+    @action(detail=True, methods=["post"], url_path="atender")
+    @transaction.atomic
+    def atender(self, request, pk=None):
+        if not _can_manage_requisicao(request.user):
+            return Response({"detail": "Usuário sem permissão para atender requisição."}, status=status.HTTP_403_FORBIDDEN)
+        item = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
+        self.check_object_permissions(request, item)
+        req = get_object_or_404(Requisicao.objects.select_for_update(), pk=item.requisicao_id)
+        if req.status not in {"APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"}:
+            return Response({"detail": "A requisição precisa estar aprovada para atendimento."}, status=status.HTTP_400_BAD_REQUEST)
+        if item.status in {"ATENDIDO", "CANCELADO", "REJEITADO", "AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "SERVICO_CONCLUIDO"}:
+            return Response({"detail": "Item não pode ser atendido neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        if item.tipo != "MATERIAL" or item.origem != "PRODUTO" or not item.produto_id:
+            return Response({"detail": "Somente material cadastrado pode ser atendido pelo estoque nesta etapa."}, status=status.HTTP_400_BAD_REQUEST)
+        qtd = Decimal(request.data.get("quantidade") or 0)
+        if qtd <= 0:
+            return Response({"quantidade": "Informe uma quantidade maior que zero."}, status=status.HTTP_400_BAD_REQUEST)
+        saldo = Decimal(item.qtd_pendente or 0)
+        if qtd > saldo:
+            return Response({"quantidade": "Quantidade não pode ultrapassar o saldo pendente."}, status=status.HTTP_400_BAD_REQUEST)
+        estoque = ProdutoUsoConsumoEstoque.objects.select_for_update().filter(empresa=req.empresa, produto=item.produto, loja=req.loja).first()
+        disponivel = Decimal(getattr(estoque, "saldo", 0) or 0)
+        if qtd > disponivel:
+            return Response({"quantidade": "Estoque insuficiente para a quantidade informada.", "disponivel": str(disponivel)}, status=status.HTTP_400_BAD_REQUEST)
+        before_item = item.status
+        before_req = req.status
+        anterior = disponivel
+        posterior = disponivel - qtd
+        estoque.saldo = posterior
+        estoque.save(update_fields=["saldo", "atualizado_em"])
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=req.empresa,
+            produto=item.produto,
+            loja=req.loja,
+            tipo=ProdutoUsoConsumoMovimentacao.TIPO_CONSUMO_INTERNO,
+            quantidade=qtd,
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            usuario=request.user,
+            motivo="Atendimento de requisição",
+            destino=req.setor,
+            documento=f"REQ {req.numero}",
+            origem="REQUISICAO",
+        )
+        item.qtd_atendida = Decimal(item.qtd_atendida or 0) + qtd
+        item.qtd_pendente = max(Decimal(item.qtd_solicitada or 0) - item.qtd_atendida, Decimal("0"))
+        item.status = "ATENDIDO" if item.qtd_pendente == 0 else "ATENDIDO_PARCIALMENTE"
+        item.save(update_fields=["qtd_atendida", "qtd_pendente", "status", "atualizado_em"])
+        req.status = _recalcular_status_requisicao(req)
+        req.save(update_fields=["status", "atualizado_em"])
+        _historico(req, request, "ATENDIMENTO", before_req, req.status, item=item, valor_anterior={"item_status": before_item, "saldo_estoque": str(anterior)}, valor_novo={"item_status": item.status, "qtd_atendida": str(item.qtd_atendida), "saldo_estoque": str(posterior)}, observacao=request.data.get("observacao", ""))
+        return Response(self.get_serializer(item).data)
+
+
+class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = RequisicaoHistorico.objects.select_related("requisicao", "item", "usuario").all()
+    serializer_class = RequisicaoHistoricoSerializer
+    permission_classes = [HasModuleRole]
+    required_module = "compras"
+    read_roles = ['Admin', 'Diretor', 'Gerente', 'AssistentePagar']
+
+    def _empresa_id_usuario(self):
+        usuario = self.request.user
+        if getattr(usuario, "empresa_id", None):
+            return usuario.empresa_id
+        return None
+
+    def get_queryset(self):
+        qs = self.queryset
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(requisicao__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        requisicao = self.request.query_params.get("requisicao")
+        if requisicao:
+            qs = qs.filter(requisicao_id=requisicao)
         return qs
