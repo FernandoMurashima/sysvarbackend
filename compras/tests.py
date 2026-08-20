@@ -232,9 +232,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
     def test_regressao_admin_todas_enxerga_requisicao_antiga_sem_loja_vinculada_ao_usuario(self):
         User = get_user_model()
         req = self.criar_requisicao()
-        admin = User.objects.create_user("req-admin", "reqadmin@test.local", "123", empresa=self.empresa, loja=None, type="Admin")
-        UserModulePermission.objects.create(user=admin, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
-        UserModulePermission.objects.create(user=admin, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        admin = User.objects.create_superuser("req-admin", "reqadmin@test.local", "123")
         self.client.force_authenticate(admin)
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
         self.assertEqual(resp.status_code, 200, resp.data)
@@ -305,6 +303,20 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         for visao in ("minhas", "para_analisar", "todas"):
             resp = self.client.get("/api/compras/requisicoes/", {"visao": visao})
             self.assertEqual(resp.status_code, 200, resp.data)
+        self.client.force_authenticate(self.solicitante)
+
+    def test_visualizar_todas_nao_concede_edicao_indevida(self):
+        User = get_user_model()
+        auditor = User.objects.create_user("auditor-req", "auditor@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        UserModulePermission.objects.create(user=auditor, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        req = self.criar_requisicao()
+        self.client.force_authenticate(auditor)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Auditor editou"}, format="json")
+        self.assertEqual(resp.status_code, 403, resp.data)
         self.client.force_authenticate(self.solicitante)
 
     def test_usuario_somente_atender_ve_fila_de_atendimento(self):

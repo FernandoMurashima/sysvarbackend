@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
 from accounts.services.effective_access import EffectiveAccessService, LicenseService, increment_permissions_version
+from accounts.requisicoes_permissions import normalize_requisicoes_access
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
 from .models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission, UserFieldPermission
@@ -253,7 +254,11 @@ class UserSerializer(serializers.ModelSerializer):
     def _salvar_permissoes(self, user, permissoes_modulos, permissoes_campos):
         available = EffectiveAccessService(user).available_modules() if user.empresa_id else set()
         if permissoes_modulos is not None:
-            recebidos = {item["modulo"]: item.get("acesso") or UserModulePermission.Access.NONE for item in permissoes_modulos if item.get("acesso") != "HERDAR"}
+            recebidos = {
+                item["modulo"]: normalize_requisicoes_access(item["modulo"], item.get("acesso") or UserModulePermission.Access.NONE)
+                for item in permissoes_modulos
+                if item.get("acesso") != "HERDAR"
+            }
             if not user.is_superuser:
                 recebidos = {modulo: acesso for modulo, acesso in recebidos.items() if modulo in available}
             UserModulePermission.objects.filter(user=user).exclude(modulo__in=recebidos.keys()).delete()
@@ -534,13 +539,13 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
         available = CompanyModuleKeys(perfil.empresa)
         received = {item["modulo"].id: item for item in perms}
         access_by_key = {
-            item["modulo"].chave: item.get("acesso") or UserModulePermission.Access.NONE
+            item["modulo"].chave: normalize_requisicoes_access(item["modulo"].chave, item.get("acesso") or UserModulePermission.Access.NONE)
             for item in perms
         }
         PerfilModuloPermissao.objects.filter(perfil=perfil).exclude(modulo_id__in=received.keys()).delete()
         for modulo_id, item in received.items():
             modulo = item["modulo"]
-            acesso = item.get("acesso") or UserModulePermission.Access.NONE
+            acesso = normalize_requisicoes_access(modulo.chave, item.get("acesso") or UserModulePermission.Access.NONE)
             if modulo.chave not in available and acesso != UserModulePermission.Access.NONE:
                 raise serializers.ValidationError({"permissoes_modulos": f"Módulo não contratado: {modulo.chave}"})
             if acesso != UserModulePermission.Access.NONE:

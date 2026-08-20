@@ -109,25 +109,25 @@ def _historico(requisicao, request, acao, status_anterior="", status_novo="", it
 
 
 def _can_manage_requisicao(user):
-    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
+    if getattr(user, "is_superuser", False):
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_atendimento", EDIT)
 
 
 def _can_approve_requisicao(user):
-    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
+    if getattr(user, "is_superuser", False):
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_analise", EDIT)
 
 
 def _can_request_requisicao(user):
-    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
+    if getattr(user, "is_superuser", False):
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes", EDIT)
 
 
 def _can_view_all_requisicao(user):
-    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
+    if getattr(user, "is_superuser", False):
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_todas", VIEW)
 
@@ -139,7 +139,7 @@ def _can_edit_requisicao_content(user, requisicao):
 
 
 def _scope_requisicao_queryset(qs, user):
-    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
+    if getattr(user, "is_superuser", False):
         return qs
     allowed = EffectiveAccessService(user).allowed_store_ids()
     if allowed is not None:
