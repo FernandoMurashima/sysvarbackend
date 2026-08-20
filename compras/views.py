@@ -109,25 +109,25 @@ def _historico(requisicao, request, acao, status_anterior="", status_novo="", it
 
 
 def _can_manage_requisicao(user):
-    if getattr(user, "is_superuser", False):
+    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_atendimento", EDIT)
 
 
 def _can_approve_requisicao(user):
-    if getattr(user, "is_superuser", False):
+    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_analise", EDIT)
 
 
 def _can_request_requisicao(user):
-    if getattr(user, "is_superuser", False):
+    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes", EDIT)
 
 
 def _can_view_all_requisicao(user):
-    if getattr(user, "is_superuser", False):
+    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
         return True
     return EffectiveAccessService(user).has_module_access("requisicoes_todas", VIEW)
 
@@ -139,7 +139,7 @@ def _can_edit_requisicao_content(user, requisicao):
 
 
 def _scope_requisicao_queryset(qs, user):
-    if getattr(user, "is_superuser", False):
+    if getattr(user, "is_superuser", False) or getattr(user, "type", "") == "Admin":
         return qs
     allowed = EffectiveAccessService(user).allowed_store_ids()
     if allowed is not None:
@@ -1252,7 +1252,7 @@ class RequisicaoItemViewSet(BaseViewSet):
             qs = qs.filter(requisicao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        if not self.request.user.is_superuser:
+        if not (self.request.user.is_superuser or getattr(self.request.user, "type", "") == "Admin"):
             allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
             if allowed is not None:
                 qs = qs.filter(requisicao__loja_id__in=allowed)
@@ -1404,7 +1404,7 @@ class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(requisicao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        if not self.request.user.is_superuser:
+        if not (self.request.user.is_superuser or getattr(self.request.user, "type", "") == "Admin"):
             allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
             if allowed is not None:
                 qs = qs.filter(requisicao__loja_id__in=allowed)

@@ -229,6 +229,29 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertEqual([r["id"] for r in rows], [req.id])
 
+    def test_regressao_admin_todas_enxerga_requisicao_antiga_sem_loja_vinculada_ao_usuario(self):
+        User = get_user_model()
+        req = self.criar_requisicao()
+        admin = User.objects.create_user("req-admin", "reqadmin@test.local", "123", empresa=self.empresa, loja=None, type="Admin")
+        UserModulePermission.objects.create(user=admin, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        UserModulePermission.objects.create(user=admin, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        self.client.force_authenticate(admin)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+
+        self.client.force_authenticate(self.outro_mesma_empresa)
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(req.id, [r["id"] for r in rows])
+        self.client.force_authenticate(self.solicitante)
+
     def test_usuario_sem_compras_com_requisicoes_acessa_e_cria(self):
         User = get_user_model()
         requisitante = User.objects.create_user("req-sem-compras", "reqsc@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
