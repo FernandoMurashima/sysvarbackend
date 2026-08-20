@@ -10,6 +10,8 @@ from .models import (
     Requisicao,
     RequisicaoHistorico,
     RequisicaoItem,
+    RequisicaoFinalidadeAquisicao,
+    RequisicaoMaterialCategoria,
     RequisicaoServicoCategoria,
     RequisicaoSetor,
 )
@@ -200,6 +202,34 @@ class RequisicaoSetorSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
+class RequisicaoMaterialCategoriaSerializer(serializers.ModelSerializer):
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+
+    class Meta:
+        model = RequisicaoMaterialCategoria
+        fields = "__all__"
+        read_only_fields = ("empresa", "data_cadastro")
+
+    def validate_nome(self, value):
+        if not (value or "").strip():
+            raise serializers.ValidationError("Nome da categoria é obrigatório.")
+        return value.strip()
+
+
+class RequisicaoFinalidadeAquisicaoSerializer(serializers.ModelSerializer):
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+
+    class Meta:
+        model = RequisicaoFinalidadeAquisicao
+        fields = "__all__"
+        read_only_fields = ("empresa", "data_cadastro")
+
+    def validate_nome(self, value):
+        if not (value or "").strip():
+            raise serializers.ValidationError("Nome da finalidade é obrigatório.")
+        return value.strip()
+
+
 class RequisicaoHistoricoSerializer(serializers.ModelSerializer):
     usuario_nome = serializers.CharField(source="usuario.username", read_only=True)
 
@@ -225,6 +255,9 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
     produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
     unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
+    categoria_material_nome = serializers.CharField(source="categoria_material.nome", read_only=True)
+    finalidade_aquisicao_nome = serializers.CharField(source="finalidade_aquisicao.nome", read_only=True)
+    finalidade_comportamento = serializers.CharField(source="finalidade_aquisicao.comportamento", read_only=True)
     categoria_servico_nome = serializers.CharField(source="categoria_servico.nome", read_only=True)
 
     class Meta:
@@ -239,6 +272,8 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
         produto = attrs.get("produto", getattr(self.instance, "produto", None))
         unidade = attrs.get("unidade", getattr(self.instance, "unidade", None))
         categoria_servico = attrs.get("categoria_servico", getattr(self.instance, "categoria_servico", None))
+        categoria_material = attrs.get("categoria_material", getattr(self.instance, "categoria_material", None))
+        finalidade_aquisicao = attrs.get("finalidade_aquisicao", getattr(self.instance, "finalidade_aquisicao", None))
         finalidade = attrs.get("finalidade", getattr(self.instance, "finalidade", ""))
         qtd = Decimal(attrs.get("qtd_solicitada", getattr(self.instance, "qtd_solicitada", 0)) or 0)
 
@@ -256,12 +291,28 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
         if categoria_servico and categoria_servico.empresa_id != empresa_id:
             raise serializers.ValidationError({"categoria_servico": "Categoria de serviço pertence a outra empresa."})
+        if categoria_material and categoria_material.empresa_id != empresa_id:
+            raise serializers.ValidationError({"categoria_material": "Categoria de material pertence a outra empresa."})
+        if finalidade_aquisicao and finalidade_aquisicao.empresa_id != empresa_id:
+            raise serializers.ValidationError({"finalidade_aquisicao": "Finalidade pertence a outra empresa."})
+        if tipo == "MATERIAL" and not finalidade_aquisicao and finalidade:
+            finalidade_aquisicao = RequisicaoFinalidadeAquisicao.objects.filter(
+                empresa_id=empresa_id,
+                comportamento=finalidade,
+            ).first()
+            if finalidade_aquisicao:
+                attrs["finalidade_aquisicao"] = finalidade_aquisicao
+            else:
+                raise serializers.ValidationError({"finalidade": "Finalidade inválida."})
 
         if tipo == "MATERIAL":
             if origem not in ("PRODUTO", "LIVRE"):
                 raise serializers.ValidationError({"origem": "Material deve ser cadastrado ou livre."})
-            if not finalidade:
-                raise serializers.ValidationError({"finalidade": "Informe a finalidade da aquisição."})
+            if not finalidade_aquisicao:
+                raise serializers.ValidationError({"finalidade_aquisicao": "Informe a finalidade da aquisição."})
+            if finalidade_aquisicao and not finalidade_aquisicao.ativo and not (self.instance and self.instance.finalidade_aquisicao_id == finalidade_aquisicao.id):
+                raise serializers.ValidationError({"finalidade_aquisicao": "Finalidade inativa não pode ser utilizada em nova requisição."})
+            attrs["finalidade"] = finalidade_aquisicao.comportamento if finalidade_aquisicao else finalidade
             if origem == "PRODUTO" and not produto:
                 raise serializers.ValidationError({"produto": "Informe o produto do material cadastrado."})
             if origem == "PRODUTO":
@@ -273,6 +324,12 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
                 unidade = produto.unidade
             if origem == "LIVRE" and not (attrs.get("descricao", getattr(self.instance, "descricao", "")) or "").strip():
                 raise serializers.ValidationError({"descricao": "Informe a descrição do item livre."})
+            if origem == "LIVRE":
+                if not categoria_material:
+                    raise serializers.ValidationError({"categoria_material": "Informe a categoria do material."})
+                if not categoria_material.ativo and not (self.instance and self.instance.categoria_material_id == categoria_material.id):
+                    raise serializers.ValidationError({"categoria_material": "Categoria de material inativa não pode ser utilizada em nova requisição."})
+                attrs["categoria"] = categoria_material.nome
             if origem == "LIVRE" and not unidade:
                 raise serializers.ValidationError({"unidade": "Informe a unidade do item livre."})
             if qtd <= 0:
@@ -284,6 +341,10 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"origem": "Serviço deve usar origem SERVICO."})
             if finalidade:
                 raise serializers.ValidationError({"finalidade": "Serviço não utiliza finalidade de material."})
+            if finalidade_aquisicao:
+                raise serializers.ValidationError({"finalidade_aquisicao": "Serviço não utiliza finalidade de material."})
+            if categoria_material:
+                raise serializers.ValidationError({"categoria_material": "Serviço não utiliza categoria de material."})
             if produto:
                 raise serializers.ValidationError({"produto": "Serviço não utiliza produto."})
             if not (attrs.get("titulo_servico", getattr(self.instance, "titulo_servico", "")) or "").strip():

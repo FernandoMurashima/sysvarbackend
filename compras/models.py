@@ -146,6 +146,49 @@ class RequisicaoSetor(models.Model):
         return self.nome
 
 
+class RequisicaoMaterialCategoria(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='categorias_material_requisicao', db_index=True)
+    nome = models.CharField(max_length=80)
+    descricao = models.TextField(blank=True, default='')
+    ativo = models.BooleanField(default=True, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'compras_requisicao_material_categoria'
+        ordering = ['nome']
+        constraints = [models.UniqueConstraint(fields=['empresa', 'nome'], name='uq_req_mat_cat_empresa_nome')]
+        indexes = [models.Index(fields=['empresa', 'ativo'])]
+
+    def __str__(self):
+        return self.nome
+
+
+class RequisicaoFinalidadeAquisicao(models.Model):
+    USO_CONSUMO = 'USO_CONSUMO'
+    ALMOXARIFADO = 'ALMOXARIFADO'
+    IMOBILIZADO = 'IMOBILIZADO'
+    OUTRO = 'OUTRO'
+    COMPORTAMENTO_CHOICES = FINALIDADE_ITEM_REQUISICAO
+
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='finalidades_aquisicao', db_index=True)
+    nome = models.CharField(max_length=80)
+    descricao = models.TextField(blank=True, default='')
+    ativo = models.BooleanField(default=True, db_index=True)
+    comportamento = models.CharField(max_length=20, choices=COMPORTAMENTO_CHOICES, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'compras_requisicao_finalidade_aquisicao'
+        ordering = ['nome']
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'nome'], name='uq_req_fin_aq_empresa_nome'),
+        ]
+        indexes = [models.Index(fields=['empresa', 'ativo']), models.Index(fields=['empresa', 'comportamento'])]
+
+    def __str__(self):
+        return self.nome
+
+
 class Requisicao(models.Model):
     id = models.BigAutoField(primary_key=True)
     numero = models.PositiveIntegerField(db_index=True)
@@ -188,6 +231,8 @@ class RequisicaoItem(models.Model):
     descricao = models.CharField(max_length=200, blank=True, default='')
     categoria = models.CharField(max_length=80, blank=True, default='')
     finalidade = models.CharField(max_length=20, choices=FINALIDADE_ITEM_REQUISICAO, blank=True, default='')
+    categoria_material = models.ForeignKey(RequisicaoMaterialCategoria, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_requisicao')
+    finalidade_aquisicao = models.ForeignKey(RequisicaoFinalidadeAquisicao, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_requisicao')
     unidade = models.ForeignKey('produto.Unidade', on_delete=models.PROTECT, null=True, blank=True, related_name='itens_requisicao')
     especificacao_tecnica = models.TextField(blank=True, default='')
     titulo_servico = models.CharField(max_length=160, blank=True, default='')

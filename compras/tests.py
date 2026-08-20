@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserModulePermission
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -155,6 +155,11 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.unidade = self.un_int
         self.produto = self.prod_uso
         self.categoria = RequisicaoServicoCategoria.objects.create(empresa=self.empresa, nome="Informática")
+        self.categoria_material = RequisicaoMaterialCategoria.objects.create(empresa=self.empresa, nome="Informática")
+        self.finalidade_uso = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Uso e Consumo", comportamento="USO_CONSUMO")
+        self.finalidade_almox = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Estoque/Almoxarifado", comportamento="ALMOXARIFADO")
+        self.finalidade_imob = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Imobilizado", comportamento="IMOBILIZADO")
+        self.finalidade_outro = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Outro", comportamento="OUTRO")
         self.setor = RequisicaoSetor.objects.create(empresa=self.empresa, nome="Financeiro")
         self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, nome="Financeiro B")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=self.produto, loja=self.loja, saldo=Decimal("10.000"))
@@ -181,7 +186,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "PRODUTO",
             "produto": self.produto.Idproduto,
             "unidade": self.unidade.Idunidade,
-            "finalidade": "USO_CONSUMO",
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "qtd_solicitada": qtd,
             "observacoes": "Papel",
         }, format="json")
@@ -296,6 +301,84 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertNotIn(self.setor.id, [r["id"] for r in rows])
 
+    def test_categoria_material_pode_ser_criada_editada_e_inativada(self):
+        resp = self.client.post("/api/compras/requisicao-material-categorias/", {"nome": "Segurança", "descricao": "EPIs"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        categoria_id = resp.data["id"]
+
+        resp = self.client.patch(f"/api/compras/requisicao-material-categorias/{categoria_id}/", {"descricao": "EPIs e alarmes"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["descricao"], "EPIs e alarmes")
+
+        resp = self.client.post(f"/api/compras/requisicao-material-categorias/{categoria_id}/inativar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["ativo"])
+        resp = self.client.get("/api/compras/requisicao-material-categorias/", {"ativo": "true"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(categoria_id, [r["id"] for r in rows])
+
+    def test_finalidade_pode_editar_nome_sem_perder_comportamento_e_inativar(self):
+        resp = self.client.patch(f"/api/compras/requisicao-finalidades-aquisicao/{self.finalidade_imob.id}/", {"nome": "Ativo Fixo"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["nome"], "Ativo Fixo")
+        self.assertEqual(resp.data["comportamento"], "IMOBILIZADO")
+
+        resp = self.client.post(f"/api/compras/requisicao-finalidades-aquisicao/{self.finalidade_imob.id}/inativar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.get("/api/compras/requisicao-finalidades-aquisicao/", {"ativo": "true"})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(self.finalidade_imob.id, [r["id"] for r in rows])
+
+    def test_categoria_e_finalidade_de_outra_empresa_sao_rejeitadas_e_inativas_nao_entram(self):
+        req = self.criar_requisicao()
+        categoria_b = RequisicaoMaterialCategoria.objects.create(empresa=self.empresa_b, nome="Material B")
+        finalidade_b = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa_b, nome="Outro B", comportamento="OUTRO")
+
+        base = {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "LIVRE",
+            "descricao": "Item livre",
+            "categoria_material": categoria_b.id,
+            "finalidade_aquisicao": self.finalidade_uso.id,
+            "unidade": self.unidade.Idunidade,
+            "qtd_solicitada": "1.000",
+        }
+        resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("categoria_material", resp.data)
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "categoria_material": self.categoria_material.id, "finalidade_aquisicao": finalidade_b.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("finalidade_aquisicao", resp.data)
+
+        self.categoria_material.ativo = False
+        self.categoria_material.save(update_fields=["ativo"])
+        self.finalidade_uso.ativo = False
+        self.finalidade_uso.save(update_fields=["ativo"])
+        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "categoria_material": self.categoria_material.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_material_livre_exige_categoria_estruturada_e_compatibilidade_finalidade_legada(self):
+        req = self.criar_requisicao()
+        base = {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "LIVRE",
+            "descricao": "Cadeira",
+            "finalidade": "IMOBILIZADO",
+            "unidade": self.unidade.Idunidade,
+            "qtd_solicitada": "1.000",
+        }
+        resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("categoria_material", resp.data)
+
+        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "categoria_material": self.categoria_material.id}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["finalidade"], "IMOBILIZADO")
+        self.assertEqual(resp.data["finalidade_aquisicao"], self.finalidade_imob.id)
+
     def test_categoria_servico_de_outra_empresa_nao_pode_ser_usada(self):
         req = self.criar_requisicao()
         categoria_b = RequisicaoServicoCategoria.objects.create(empresa=self.empresa_b, nome="Serviços B")
@@ -318,8 +401,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Notebook administrativo",
-            "categoria": "Equipamento",
-            "finalidade": "IMOBILIZADO",
+            "categoria_material": self.categoria_material.id,
+            "finalidade_aquisicao": self.finalidade_imob.id,
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
             "especificacao_tecnica": "16 GB RAM, SSD 512 GB",
@@ -345,7 +428,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "PRODUTO",
             "produto": self.prod_uso_dec.Idproduto,
             "unidade": self.un_int.Idunidade,
-            "finalidade": "ALMOXARIFADO",
+            "finalidade_aquisicao": self.finalidade_almox.id,
             "qtd_solicitada": "1.500",
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -356,7 +439,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
             "produto": self.prod_revenda.Idproduto,
-            "finalidade": "USO_CONSUMO",
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -368,7 +451,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Item livre",
-            "finalidade": "OUTRO",
+            "categoria_material": self.categoria_material.id,
+            "finalidade_aquisicao": self.finalidade_outro.id,
             "unidade": self.un_dec.Idunidade,
             "qtd_solicitada": "1.500",
         }
@@ -388,16 +472,16 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Computador Dell",
-            "categoria": "Informática",
+            "categoria_material": self.categoria_material.id,
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
             "especificacao_tecnica": "Intel i5, 8 GB RAM, SSD 500 GB",
         }
         resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
-        self.assertIn("finalidade", resp.data)
+        self.assertIn("finalidade_aquisicao", resp.data)
 
-        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "finalidade": "IMOBILIZADO"}, format="json")
+        resp = self.client.post("/api/compras/requisicao-itens/", {**base, "finalidade_aquisicao": self.finalidade_imob.id}, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["categoria"], "Informática")
         self.assertEqual(resp.data["finalidade"], "IMOBILIZADO")
@@ -407,7 +491,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
             "produto": self.produto.Idproduto,
-            "finalidade": "ALMOXARIFADO",
+            "finalidade_aquisicao": self.finalidade_almox.id,
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -434,10 +518,10 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "descricao_servico": "Equipamento não está refrigerando.",
             "categoria_servico": self.categoria.id,
             "tipo_servico": "CORRETIVA",
-            "finalidade": "USO_CONSUMO",
+            "finalidade_aquisicao": self.finalidade_uso.id,
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
-        self.assertIn("finalidade", resp.data)
+        self.assertIn("finalidade_aquisicao", resp.data)
 
     def test_servico_exige_descricao_e_nao_precisa_campos_de_material(self):
         req = self.criar_requisicao()
@@ -470,7 +554,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
-            "finalidade": "USO_CONSUMO",
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -480,7 +564,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "LIVRE",
-            "finalidade": "USO_CONSUMO",
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
@@ -492,7 +576,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Livre sem unidade",
-            "finalidade": "USO_CONSUMO",
+            "categoria_material": self.categoria_material.id,
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -523,7 +608,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "descricao": "Item livre",
-            "finalidade": "USO_CONSUMO",
+            "categoria_material": self.categoria_material.id,
+            "finalidade_aquisicao": self.finalidade_uso.id,
             "unidade": self.unidade.Idunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
