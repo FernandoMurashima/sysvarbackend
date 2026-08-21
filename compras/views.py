@@ -17,6 +17,7 @@ from auditoria.services import AuditService
 
 from .models import (
     Cotacao,
+    CotacaoItem,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -30,6 +31,7 @@ from .models import (
     RequisicaoSetor,
 )
 from .serializers import (
+    CotacaoItemSerializer,
     CotacaoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
@@ -393,6 +395,31 @@ class CotacaoViewSet(BaseViewSet):
         loja = serializer.validated_data.get("loja") or serializer.instance.loja
         self._validate_loja(loja)
         serializer.save(empresa=loja.empresa)
+
+
+class CotacaoItemViewSet(BaseViewSet):
+    queryset = CotacaoItem.objects.select_related("cotacao", "cotacao__empresa", "produto", "unidade", "requisicao_item_origem", "requisicao_item_origem__requisicao").all()
+    serializer_class = CotacaoItemSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        cotacao = self.request.query_params.get("cotacao")
+        if empresa_id:
+            qs = qs.filter(cotacao__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(cotacao__loja_id__in=allowed)
+        if cotacao:
+            qs = qs.filter(cotacao_id=cotacao)
+        return qs.order_by("id")
+
+    def perform_destroy(self, instance):
+        if instance.cotacao.status != "EM_ELABORACAO":
+            raise ValidationError({"cotacao": "Somente cotações em elaboração podem excluir itens."})
+        instance.delete()
 
 
 class PedidoCompraViewSet(BaseViewSet):

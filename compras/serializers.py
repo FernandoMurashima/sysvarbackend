@@ -439,6 +439,39 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ("criado_em", "atualizado_em")
 
+    def validate(self, attrs):
+        cotacao = attrs.get("cotacao", getattr(self.instance, "cotacao", None))
+        produto = attrs.get("produto", getattr(self.instance, "produto", None))
+        unidade = attrs.get("unidade", getattr(self.instance, "unidade", None))
+        origem = attrs.get("origem", getattr(self.instance, "origem", "AVULSO"))
+        req_item = attrs.get("requisicao_item_origem", getattr(self.instance, "requisicao_item_origem", None))
+        quantidade = attrs.get("quantidade_cotar", getattr(self.instance, "quantidade_cotar", None))
+        descricao = attrs.get("descricao", getattr(self.instance, "descricao", ""))
+        if not cotacao:
+            raise serializers.ValidationError({"cotacao": "Informe a cotação."})
+        if cotacao.status != "EM_ELABORACAO":
+            raise serializers.ValidationError({"cotacao": "Somente cotações em elaboração podem alterar itens."})
+        if quantidade is None or Decimal(quantidade) <= 0:
+            raise serializers.ValidationError({"quantidade_cotar": "Informe uma quantidade maior que zero."})
+        if origem == "REQUISICAO" and not req_item:
+            raise serializers.ValidationError({"requisicao_item_origem": "Informe o item de requisição de origem."})
+        if produto:
+            if produto.empresa_id != cotacao.empresa_id:
+                raise serializers.ValidationError({"produto": "Produto pertence a outra empresa."})
+            attrs["descricao"] = produto.descricao
+            if not unidade and produto.unidade_id:
+                attrs["unidade"] = produto.unidade
+        elif not descricao:
+            raise serializers.ValidationError({"descricao": "Informe a descrição do item avulso."})
+        if not attrs.get("unidade", unidade):
+            raise serializers.ValidationError({"unidade": "Informe a unidade."})
+        unidade_final = attrs.get("unidade", unidade)
+        if unidade_final and unidade_final.empresa_id != cotacao.empresa_id:
+            raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
+        if req_item and req_item.requisicao.empresa_id != cotacao.empresa_id:
+            raise serializers.ValidationError({"requisicao_item_origem": "Item de requisição pertence a outra empresa."})
+        return attrs
+
 
 class CotacaoSerializer(serializers.ModelSerializer):
     itens = CotacaoItemSerializer(many=True, read_only=True)

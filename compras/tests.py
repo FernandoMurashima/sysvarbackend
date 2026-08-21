@@ -135,6 +135,49 @@ class CotacaoBaseTests(TestCase):
         resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Bloqueada"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
 
+    def test_api_item_produto_cadastrado_valido(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "AVULSO", "produto": self.produto.Idproduto, "quantidade_cotar": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["descricao"], self.produto.descricao)
+        self.assertEqual(resp.data["unidade"], self.unidade.Idunidade)
+
+    def test_api_item_avulso_valido(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "AVULSO", "descricao": "Item livre", "quantidade_cotar": "1.500", "unidade": self.unidade.Idunidade}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["descricao"], "Item livre")
+
+    def test_api_bloqueia_quantidade_menor_ou_igual_zero(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "AVULSO", "descricao": "Item livre", "quantidade_cotar": "0.000", "unidade": self.unidade.Idunidade}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_bloqueia_origem_requisicao_sem_item_origem(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "REQUISICAO", "descricao": "Item req", "quantidade_cotar": "1.000", "unidade": self.unidade.Idunidade}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_bloqueia_edicao_e_exclusao_item_fora_de_elaboracao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = CotacaoItem.objects.create(cotacao=cotacao, descricao="Item livre", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        cotacao.status = "ABERTA"
+        cotacao.save(update_fields=["status"])
+        resp = client.patch(f"/api/compras/cotacao-itens/{item.id}/", {"observacao": "bloqueia"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.delete(f"/api/compras/cotacao-itens/{item.id}/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
 class PedidoCompraUnificadoTests(TestCase):
@@ -329,8 +372,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
-            "produto": self.produto.Idproduto,
-            "unidade": self.unidade.Idunidade,
+            "produto": self.produto.Idprodutoproduto,
+            "unidade": self.unidade.Idunidadeunidade,
             "finalidade_aquisicao": self.finalidade_uso.id,
             "qtd_solicitada": qtd,
             "observacoes": "Papel",
@@ -642,7 +685,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "descricao": "Item livre",
             "categoria_material": categoria_b.id,
             "finalidade_aquisicao": self.finalidade_uso.id,
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
         }
         resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
@@ -668,7 +711,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "LIVRE",
             "descricao": "Cadeira",
             "finalidade": "IMOBILIZADO",
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
         }
         resp = self.client.post("/api/compras/requisicao-itens/", base, format="json")
@@ -704,7 +747,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "descricao": "Notebook administrativo",
             "categoria_material": self.categoria_material.id,
             "finalidade_aquisicao": self.finalidade_imob.id,
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
             "especificacao_tecnica": "16 GB RAM, SSD 512 GB",
         }, format="json")
@@ -774,7 +817,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "origem": "LIVRE",
             "descricao": "Computador Dell",
             "categoria_material": self.categoria_material.id,
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
             "especificacao_tecnica": "Intel i5, 8 GB RAM, SSD 500 GB",
         }
@@ -791,7 +834,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
-            "produto": self.produto.Idproduto,
+            "produto": self.produto.Idprodutoproduto,
             "finalidade_aquisicao": self.finalidade_almox.id,
             "qtd_solicitada": "1.000",
         }, format="json")
@@ -804,7 +847,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "requisicao": req.id,
             "tipo": "MATERIAL",
             "origem": "PRODUTO",
-            "produto": self.produto.Idproduto,
+            "produto": self.produto.Idprodutoproduto,
             "finalidade": "PATRIMONIO",
             "qtd_solicitada": "1.000",
         }, format="json")
@@ -866,7 +909,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "tipo": "MATERIAL",
             "origem": "LIVRE",
             "finalidade_aquisicao": self.finalidade_uso.id,
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -933,7 +976,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             "descricao": "Item livre",
             "categoria_material": self.categoria_material.id,
             "finalidade_aquisicao": self.finalidade_uso.id,
-            "unidade": self.unidade.Idunidade,
+            "unidade": self.unidade.Idunidadeunidade,
             "qtd_solicitada": "1.000",
         }, format="json")
         servico = self.client.post("/api/compras/requisicao-itens/", {
