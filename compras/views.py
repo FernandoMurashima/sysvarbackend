@@ -445,6 +445,77 @@ class CotacaoViewSet(BaseViewSet):
             })
         return Response(rows)
 
+    @action(detail=False, methods=["get"], url_path="necessidades")
+    def necessidades(self, request):
+        itens = RequisicaoItem.objects.select_related(
+            "requisicao", "requisicao__loja", "requisicao__setor", "produto", "unidade", "categoria_material"
+        ).filter(
+            requisicao__in=self._requisicoes_disponiveis_qs(),
+            qtd_pendente__gt=0,
+        )
+        categoria = request.query_params.get("categoria")
+        loja = request.query_params.get("loja")
+        setor = request.query_params.get("setor")
+        search = (request.query_params.get("search") or "").strip()
+        if categoria:
+            itens = itens.filter(categoria_material_id=categoria)
+        if loja:
+            itens = itens.filter(requisicao__loja_id=loja)
+        if setor:
+            itens = itens.filter(requisicao__setor_id=setor)
+        if search:
+            itens = itens.filter(Q(produto__descricao__icontains=search) | Q(descricao__icontains=search) | Q(titulo_servico__icontains=search))
+
+        grupos = {}
+        for item in itens.order_by("produto_id", "id"):
+            if item.produto_id:
+                key = f"produto:{item.produto_id}"
+                nome = item.produto.descricao
+            else:
+                key = f"livre:{item.id}"
+                nome = item.descricao or item.titulo_servico or f"Item {item.id}"
+            grupo = grupos.setdefault(key, {
+                "key": key,
+                "produto": item.produto_id,
+                "nome": nome,
+                "quantidade_total_solicitada": Decimal("0"),
+                "quantidade_pendente": Decimal("0"),
+                "requisicoes_ids": set(),
+                "lojas": set(),
+                "setores": set(),
+                "origens": [],
+            })
+            grupo["quantidade_total_solicitada"] += item.qtd_solicitada or Decimal("0")
+            grupo["quantidade_pendente"] += item.qtd_pendente or Decimal("0")
+            grupo["requisicoes_ids"].add(item.requisicao_id)
+            grupo["lojas"].add(item.requisicao.loja.nome_loja)
+            grupo["setores"].add(item.requisicao.setor.nome)
+            grupo["origens"].append({
+                "requisicao": item.requisicao_id,
+                "numero": item.requisicao.numero,
+                "loja_nome": item.requisicao.loja.nome_loja,
+                "setor_nome": item.requisicao.setor.nome,
+                "quantidade_solicitada": item.qtd_solicitada,
+                "quantidade_pendente": item.qtd_pendente,
+            })
+
+        rows = []
+        for grupo in grupos.values():
+            requisicoes_ids = sorted(grupo["requisicoes_ids"])
+            rows.append({
+                "key": grupo["key"],
+                "produto": grupo["produto"],
+                "nome": grupo["nome"],
+                "quantidade_total_solicitada": grupo["quantidade_total_solicitada"],
+                "quantidade_pendente": grupo["quantidade_pendente"],
+                "numero_requisicoes": len(requisicoes_ids),
+                "requisicoes_ids": requisicoes_ids,
+                "lojas": sorted(grupo["lojas"]),
+                "setores": sorted(grupo["setores"]),
+                "origens": grupo["origens"],
+            })
+        return Response(rows)
+
     @transaction.atomic
     @action(detail=True, methods=["post"], url_path="adicionar-requisicoes")
     def adicionar_requisicoes(self, request, pk=None):

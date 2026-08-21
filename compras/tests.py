@@ -40,6 +40,8 @@ class CotacaoBaseTests(TestCase):
         self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Material cotado", unidade=self.unidade)
         self.setor = RequisicaoSetor.objects.create(empresa=self.empresa, nome="Compras")
         self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, nome="Compras B")
+        self.categoria_material = RequisicaoMaterialCategoria.objects.create(empresa=self.empresa, nome="Informática")
+        self.categoria_limpeza = RequisicaoMaterialCategoria.objects.create(empresa=self.empresa, nome="Limpeza")
 
     def criar_cotacao(self, **extras):
         data = {
@@ -235,6 +237,23 @@ class CotacaoBaseTests(TestCase):
         item2 = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="LIVRE", descricao="Livre", unidade=self.unidade, qtd_solicitada=Decimal("3.000"), qtd_pendente=Decimal("3.000"))
         return req, [item1, item2]
 
+    def _req_aprovada_com_produto(self, numero, qtd, categoria=None, loja=None, produto=None):
+        req = self.criar_requisicao(numero, loja=loja or self.loja)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item = RequisicaoItem.objects.create(
+            requisicao=req,
+            tipo="MATERIAL",
+            origem="PRODUTO",
+            produto=produto or self.produto,
+            descricao=(produto or self.produto).descricao,
+            unidade=self.unidade,
+            categoria_material=categoria or self.categoria_material,
+            qtd_solicitada=qtd,
+            qtd_pendente=qtd,
+        )
+        return req, item
+
     def test_api_cotacao_sem_requisicao_continua_valida(self):
         cotacao = self.criar_cotacao()
         self.assertEqual(cotacao.requisicoes_vinculadas.count(), 0)
@@ -299,6 +318,63 @@ class CotacaoBaseTests(TestCase):
         req_fora, _ = self._req_aprovada_com_itens(16, loja=loja_extra)
         resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req_fora.id]}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_necessidades_agrupa_mesmo_produto_cadastrado(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        req1, _ = self._req_aprovada_com_produto(17, Decimal("2.000"))
+        req2, _ = self._req_aprovada_com_produto(18, Decimal("3.000"))
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
+        self.assertEqual(grupo["numero_requisicoes"], 2)
+        self.assertEqual(set(grupo["requisicoes_ids"]), {req1.id, req2.id})
+        self.assertEqual(Decimal(str(grupo["quantidade_pendente"])), Decimal("5.000"))
+
+    def test_api_necessidades_nao_agrupa_item_livre_por_descricao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        req1 = self.criar_requisicao(19)
+        req2 = self.criar_requisicao(20)
+        for req in (req1, req2):
+            req.status = "APROVADA"
+            req.save(update_fields=["status"])
+            RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="LIVRE", descricao="Caneta livre", unidade=self.unidade, categoria_material=self.categoria_material, qtd_solicitada=Decimal("1.000"), qtd_pendente=Decimal("1.000"))
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        livres = [row for row in resp.data if row["nome"] == "Caneta livre"]
+        self.assertEqual(len(livres), 2)
+
+    def test_api_necessidades_respeita_categoria(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        self._req_aprovada_com_produto(21, Decimal("2.000"), categoria=self.categoria_material)
+        produto_limpeza = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Detergente", unidade=self.unidade)
+        self._req_aprovada_com_produto(22, Decimal("4.000"), categoria=self.categoria_limpeza, produto=produto_limpeza)
+        resp = client.get("/api/compras/cotacoes/necessidades/", {"categoria": self.categoria_limpeza.id})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual([row["produto"] for row in resp.data], [produto_limpeza.Idproduto])
+
+    def test_api_necessidades_respeita_empresa_lojas_e_ignora_atendida(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        req_permitida, _ = self._req_aprovada_com_produto(23, Decimal("2.000"))
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Nec Fora", apelido_loja="Loja Nec Fora", cnpj="33111111000703", estado="SP")
+        self._req_aprovada_com_produto(24, Decimal("3.000"), loja=loja_extra)
+        req_b = self.criar_requisicao(25, empresa=self.empresa_b, loja=self.loja_b, setor=self.setor_b, user=self.user_b)
+        req_b.status = "APROVADA"
+        req_b.save(update_fields=["status"])
+        RequisicaoItem.objects.create(requisicao=req_b, tipo="MATERIAL", origem="LIVRE", descricao="Outra empresa", unidade=self.unidade_b, qtd_solicitada=Decimal("9.000"), qtd_pendente=Decimal("9.000"))
+        req_atendida, item_atendido = self._req_aprovada_com_produto(26, Decimal("5.000"))
+        item_atendido.qtd_pendente = Decimal("0.000")
+        item_atendido.save(update_fields=["qtd_pendente"])
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nomes = [row["nome"] for row in resp.data]
+        self.assertIn(self.produto.descricao, nomes)
+        self.assertNotIn("Outra empresa", nomes)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
+        self.assertEqual(set(grupo["requisicoes_ids"]), {req_permitida.id})
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
