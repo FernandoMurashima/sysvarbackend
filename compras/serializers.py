@@ -3,6 +3,9 @@ from django.db import transaction
 from decimal import Decimal
 
 from .models import (
+    Cotacao,
+    CotacaoItem,
+    CotacaoRequisicao,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -416,3 +419,34 @@ class RequisicaoSerializer(serializers.ModelSerializer):
         if setor and (not setor.ativo or not setor.pode_fazer_requisicao):
             raise serializers.ValidationError({"setor": "Setor inativo ou não habilitado para requisições."})
         return attrs
+
+
+class CotacaoRequisicaoSerializer(serializers.ModelSerializer):
+    requisicao_numero = serializers.IntegerField(source="requisicao.numero", read_only=True)
+
+    class Meta:
+        model = CotacaoRequisicao
+        fields = "__all__"
+        read_only_fields = ("criado_em",)
+
+
+class CotacaoItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
+
+    class Meta:
+        model = CotacaoItem
+        fields = "__all__"
+        read_only_fields = ("criado_em", "atualizado_em")
+
+
+class CotacaoSerializer(serializers.ModelSerializer):
+    itens = CotacaoItemSerializer(many=True, read_only=True)
+    requisicoes_vinculadas = CotacaoRequisicaoSerializer(many=True, read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
+
+    class Meta:
+        model = Cotacao
+        fields = "__all__"
+        read_only_fields = ("numero", "criado_em", "atualizado_em")

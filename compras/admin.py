@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
+from .models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
 
 class PedidoCompraParcelaInline(admin.TabularInline):
     model = PedidoCompraParcela
@@ -25,6 +25,43 @@ class PedidoCompraItemInline(admin.TabularInline):
     )
     readonly_fields = ("total_item",)
     show_change_link = True
+
+
+class CotacaoRequisicaoInline(admin.TabularInline):
+    model = CotacaoRequisicao
+    extra = 0
+    fields = ("requisicao", "criado_em")
+    readonly_fields = ("criado_em",)
+
+
+class CotacaoItemInline(admin.TabularInline):
+    model = CotacaoItem
+    extra = 0
+    fields = ("produto", "descricao", "quantidade_cotar", "unidade", "origem", "requisicao_item_origem", "permite_alternativo")
+    show_change_link = True
+
+
+@admin.register(Cotacao)
+class CotacaoAdmin(admin.ModelAdmin):
+    list_display = ("id", "numero", "empresa", "loja", "responsavel", "data_abertura", "status", "prioridade", "tipo_compra")
+    list_filter = ("status", "prioridade", "tipo_compra", "empresa", "loja", "data_abertura")
+    search_fields = ("numero", "observacao", "responsavel__username")
+    readonly_fields = ("numero", "criado_em", "atualizado_em")
+    inlines = [CotacaoRequisicaoInline, CotacaoItemInline]
+
+
+@admin.register(CotacaoItem)
+class CotacaoItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "cotacao", "produto", "descricao", "quantidade_cotar", "unidade", "origem")
+    list_filter = ("origem", "cotacao__empresa", "cotacao__status")
+    search_fields = ("id", "cotacao__numero", "produto__descricao", "descricao")
+
+
+@admin.register(CotacaoRequisicao)
+class CotacaoRequisicaoAdmin(admin.ModelAdmin):
+    list_display = ("id", "cotacao", "requisicao", "criado_em")
+    list_filter = ("cotacao__empresa", "cotacao__status")
+    search_fields = ("cotacao__numero", "requisicao__numero")
 
 @admin.register(PedidoCompra)
 class PedidoCompraAdmin(admin.ModelAdmin):

@@ -38,6 +38,38 @@ PRIORIDADE_REQUISICAO = (
     ('EMERGENCIAL', 'Emergencial'),
 )
 
+PRIORIDADE_COTACAO = (
+    ('NORMAL', 'Normal'),
+    ('URGENTE', 'Urgente'),
+    ('EMERGENCIAL', 'Emergencial'),
+)
+
+STATUS_COTACAO = (
+    ('EM_ELABORACAO', 'Em elaboração'),
+    ('ABERTA', 'Aberta'),
+    ('PROPOSTAS_RECEBIDAS', 'Propostas recebidas'),
+    ('EM_ANALISE', 'Em análise'),
+    ('AGUARDANDO_APROVACAO', 'Aguardando aprovação'),
+    ('APROVADA', 'Aprovada'),
+    ('REJEITADA', 'Rejeitada'),
+    ('CANCELADA', 'Cancelada'),
+    ('PEDIDO_GERADO', 'Pedido gerado'),
+    ('ENCERRADA', 'Encerrada'),
+)
+
+TIPO_COMPRA_COTACAO = (
+    ('REVENDA', 'Revenda'),
+    ('USO_CONSUMO', 'Uso/Consumo'),
+    ('INSUMO', 'Insumo'),
+    ('SERVICO', 'Serviço'),
+    ('OUTRO', 'Outro'),
+)
+
+ORIGEM_ITEM_COTACAO = (
+    ('REQUISICAO', 'Requisição'),
+    ('AVULSO', 'Avulso'),
+)
+
 STATUS_REQUISICAO = (
     ('RASCUNHO', 'Não enviada'),
     ('SOLICITADA', 'Solicitada'),
@@ -281,6 +313,111 @@ class RequisicaoHistorico(models.Model):
             models.Index(fields=['requisicao', '-data_hora']),
             models.Index(fields=['acao', 'data_hora']),
         ]
+
+
+class Cotacao(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    numero = models.PositiveIntegerField(db_index=True, blank=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='cotacoes', db_index=True)
+    loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='cotacoes', db_index=True)
+    responsavel = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='cotacoes_responsavel')
+    data_abertura = models.DateField(default=timezone.localdate, db_index=True)
+    data_limite_propostas = models.DateField(null=True, blank=True, db_index=True)
+    prioridade = models.CharField(max_length=12, choices=PRIORIDADE_COTACAO, default='NORMAL', db_index=True)
+    tipo_compra = models.CharField(max_length=20, choices=TIPO_COMPRA_COTACAO, default='OUTRO', db_index=True)
+    observacao = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=30, choices=STATUS_COTACAO, default='EM_ELABORACAO', db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_cotacao'
+        ordering = ['-data_abertura', '-numero']
+        constraints = [models.UniqueConstraint(fields=['empresa', 'numero'], name='uq_cotacao_empresa_numero')]
+        indexes = [
+            models.Index(fields=['empresa', 'status']),
+            models.Index(fields=['empresa', 'loja']),
+            models.Index(fields=['responsavel', 'data_abertura']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.numero and self.empresa_id:
+            ultimo = Cotacao.objects.filter(empresa_id=self.empresa_id).order_by('-numero').values_list('numero', flat=True).first()
+            self.numero = (ultimo or 0) + 1
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        if self.loja_id and self.empresa_id and self.loja.empresa_id != self.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'loja': 'Loja pertence a outra empresa.'})
+
+    def __str__(self):
+        return f'Cotação {self.numero}'
+
+
+class CotacaoRequisicao(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    cotacao = models.ForeignKey(Cotacao, on_delete=models.CASCADE, related_name='requisicoes_vinculadas')
+    requisicao = models.ForeignKey(Requisicao, on_delete=models.PROTECT, related_name='cotacoes_vinculadas')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'compras_cotacao_requisicao'
+        constraints = [models.UniqueConstraint(fields=['cotacao', 'requisicao'], name='uq_cotacao_requisicao')]
+        indexes = [models.Index(fields=['cotacao']), models.Index(fields=['requisicao'])]
+
+    def clean(self):
+        super().clean()
+        if self.cotacao_id and self.requisicao_id and self.cotacao.empresa_id != self.requisicao.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'requisicao': 'Requisição pertence a outra empresa.'})
+
+    def __str__(self):
+        return f'Cotação {self.cotacao_id} - Requisição {self.requisicao_id}'
+
+
+class CotacaoItem(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    cotacao = models.ForeignKey(Cotacao, on_delete=models.CASCADE, related_name='itens')
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_cotacao')
+    descricao = models.CharField(max_length=200, blank=True, default='')
+    quantidade_cotar = models.DecimalField(max_digits=14, decimal_places=3, validators=[MinValueValidator(0)])
+    unidade = models.ForeignKey('produto.Unidade', on_delete=models.PROTECT, null=True, blank=True, related_name='itens_cotacao')
+    especificacao_tecnica = models.TextField(blank=True, default='')
+    marca_desejada = models.CharField(max_length=120, blank=True, default='')
+    modelo_referencia = models.CharField(max_length=120, blank=True, default='')
+    permite_alternativo = models.BooleanField(default=True)
+    observacao = models.TextField(blank=True, default='')
+    requisicao_item_origem = models.ForeignKey(RequisicaoItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='itens_cotacao')
+    origem = models.CharField(max_length=10, choices=ORIGEM_ITEM_COTACAO, default='AVULSO', db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_cotacao_item'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['cotacao']),
+            models.Index(fields=['produto']),
+            models.Index(fields=['origem']),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.produto_id and self.cotacao_id and self.produto.empresa_id != self.cotacao.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'produto': 'Produto pertence a outra empresa.'})
+        if self.unidade_id and self.cotacao_id and self.unidade.empresa_id != self.cotacao.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'unidade': 'Unidade pertence a outra empresa.'})
+        if self.requisicao_item_origem_id and self.cotacao_id and self.requisicao_item_origem.requisicao.empresa_id != self.cotacao.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'requisicao_item_origem': 'Item de requisição pertence a outra empresa.'})
+
+    def __str__(self):
+        return self.descricao or f'Item cotação {self.id}'
+
 
 class PedidoCompra(models.Model):
     id = models.BigAutoField(primary_key=True)

@@ -1,16 +1,98 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class CotacaoBaseTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.empresa = Empresa.objects.create(nome="Empresa Cot A", documento="33111111000191", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Cot B", documento="33222222000191", plano_completo=True)
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Cot A", apelido_loja="Loja Cot A", cnpj="33111111000100", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Cot B", apelido_loja="Loja Cot B", cnpj="33222222000100", estado="SP")
+        self.user = User.objects.create_user("cotador", "cotador@test.local", "123", empresa=self.empresa, loja=self.loja)
+        self.user_b = User.objects.create_user("cotador-b", "cotadorb@test.local", "123", empresa=self.empresa_b, loja=self.loja_b)
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN", permite_decimal=False)
+        self.unidade_b = Unidade.objects.create(empresa=self.empresa_b, Descricao="Unidade B", Codigo="UNB", permite_decimal=False)
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Material cotado", unidade=self.unidade)
+        self.setor = RequisicaoSetor.objects.create(empresa=self.empresa, nome="Compras")
+        self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, nome="Compras B")
+
+    def criar_cotacao(self, **extras):
+        data = {
+            "empresa": self.empresa,
+            "loja": self.loja,
+            "responsavel": self.user,
+            "tipo_compra": "USO_CONSUMO",
+        }
+        data.update(extras)
+        return Cotacao.objects.create(**data)
+
+    def criar_requisicao(self, numero, empresa=None, loja=None, setor=None, user=None):
+        empresa = empresa or self.empresa
+        loja = loja or self.loja
+        setor = setor or self.setor
+        user = user or self.user
+        return Requisicao.objects.create(numero=numero, empresa=empresa, loja=loja, setor=setor, requisitante=user, criado_por=user, justificativa=f"Req {numero}")
+
+    def test_cria_cotacao_avulsa_com_defaults(self):
+        cotacao = self.criar_cotacao()
+        self.assertEqual(cotacao.numero, 1)
+        self.assertEqual(cotacao.status, "EM_ELABORACAO")
+        self.assertEqual(cotacao.prioridade, "NORMAL")
+        self.assertEqual(cotacao.requisicoes_vinculadas.count(), 0)
+
+    def test_cria_cotacao_com_empresa_e_loja_validas(self):
+        cotacao = self.criar_cotacao(observacao="Cotação validada")
+        cotacao.full_clean()
+        self.assertEqual(cotacao.empresa, self.empresa)
+        self.assertEqual(cotacao.loja, self.loja)
+
+    def test_vincula_mais_de_uma_requisicao_na_mesma_cotacao(self):
+        cotacao = self.criar_cotacao()
+        req1 = self.criar_requisicao(1)
+        req2 = self.criar_requisicao(2)
+        CotacaoRequisicao.objects.create(cotacao=cotacao, requisicao=req1)
+        CotacaoRequisicao.objects.create(cotacao=cotacao, requisicao=req2)
+        self.assertEqual(set(cotacao.requisicoes_vinculadas.values_list("requisicao_id", flat=True)), {req1.id, req2.id})
+
+    def test_cria_item_avulso(self):
+        cotacao = self.criar_cotacao()
+        item = CotacaoItem.objects.create(cotacao=cotacao, descricao="Item livre", quantidade_cotar=Decimal("3.000"), unidade=self.unidade, origem="AVULSO")
+        self.assertEqual(item.origem, "AVULSO")
+        self.assertIsNone(item.requisicao_item_origem)
+
+    def test_cria_item_com_origem_em_requisicao(self):
+        cotacao = self.criar_cotacao()
+        req = self.criar_requisicao(1)
+        req_item = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, descricao="Material", unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"))
+        item = CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao="Material", quantidade_cotar=Decimal("5.000"), unidade=self.unidade, origem="REQUISICAO", requisicao_item_origem=req_item)
+        self.assertEqual(item.origem, "REQUISICAO")
+        self.assertEqual(item.requisicao_item_origem, req_item)
+
+    def test_isolamento_basico_por_empresa_nos_vinculos(self):
+        cotacao = self.criar_cotacao()
+        req_b = self.criar_requisicao(1, empresa=self.empresa_b, loja=self.loja_b, setor=self.setor_b, user=self.user_b)
+        vinculo = CotacaoRequisicao(cotacao=cotacao, requisicao=req_b)
+        with self.assertRaises(ValidationError):
+            vinculo.full_clean()
+
+        req_item_b = RequisicaoItem.objects.create(requisicao=req_b, tipo="MATERIAL", origem="LIVRE", descricao="Outro", unidade=self.unidade_b, qtd_solicitada=Decimal("1.000"), qtd_pendente=Decimal("1.000"))
+        item = CotacaoItem(cotacao=cotacao, descricao="Outro", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="REQUISICAO", requisicao_item_origem=req_item_b)
+        with self.assertRaises(ValidationError):
+            item.full_clean()
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
