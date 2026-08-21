@@ -339,6 +339,8 @@ class EffectiveAccessService:
             return True
         if not loja or loja.empresa_id != user.empresa_id:
             return False
+        if self.is_company_master() or getattr(user, "type", "") == "Admin":
+            return True
         allowed = self.allowed_store_ids()
         return allowed is None or loja.id in allowed
 

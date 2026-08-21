@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
+from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
@@ -121,6 +122,54 @@ class CotacaoBaseTests(TestCase):
         UserModulePermission.objects.create(user=self.user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
         resp = client.post("/api/compras/cotacoes/", {"loja": self.loja_b.id, "tipo_compra": "USO_CONSUMO"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_can_access_store_usuario_com_loja_permitida_e_nao_permitida(self):
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Sem Permissão", apelido_loja="Loja Sem Permissão", cnpj="33111111000290", estado="SP")
+        service = EffectiveAccessService(self.user)
+        self.assertTrue(service.can_access_store(self.loja))
+        self.assertFalse(service.can_access_store(loja_extra))
+
+    def test_can_access_store_admin_sem_lojas_marcadas_acessa_empresa_e_bloqueia_outra(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Admin Cot", apelido_loja="Loja Admin Cot", cnpj="33111111000371", estado="SP")
+        admin = User.objects.create_user("admin-cot", "admincot@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        admin.lojas.clear()
+        service = EffectiveAccessService(admin)
+        self.assertTrue(service.can_access_store(self.loja))
+        self.assertTrue(service.can_access_store(loja_extra))
+        self.assertFalse(service.can_access_store(self.loja_b))
+
+    def test_can_access_store_company_master_sem_lojas_marcadas_acessa_empresa(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Master Cot", apelido_loja="Loja Master Cot", cnpj="33111111000452", estado="SP")
+        master = User.objects.create_user("master-cot", "mastercot@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
+        master.lojas.clear()
+        contrato = self.empresa.contrato
+        contrato.usuario_master = master
+        contrato.save(update_fields=["usuario_master", "updated_at"])
+        service = EffectiveAccessService(master)
+        self.assertTrue(service.can_access_store(loja_extra))
+        self.assertFalse(service.can_access_store(self.loja_b))
+
+    def test_can_access_store_superuser_preservado(self):
+        User = get_user_model()
+        superuser = User.objects.create_superuser("super-cot", "supercot@test.local", "123")
+        service = EffectiveAccessService(superuser)
+        self.assertTrue(service.can_access_store(self.loja))
+        self.assertTrue(service.can_access_store(self.loja_b))
+
+    def test_api_admin_cria_cotacao_em_loja_da_empresa_sem_loja_marcada(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Admin API", apelido_loja="Loja Admin API", cnpj="33111111000533", estado="SP")
+        admin = User.objects.create_user("admin-cot-api", "admincotapi@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        admin.lojas.clear()
+        admin.perfil_principal = self.perfil_compras
+        admin.save(update_fields=["perfil_principal"])
+        client = APIClient()
+        client.force_authenticate(admin)
+        resp = client.post("/api/compras/cotacoes/", {"loja": loja_extra.id, "tipo_compra": "USO_CONSUMO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["loja"], loja_extra.id)
 
     def test_api_edita_em_elaboracao_e_bloqueia_fora_dela(self):
         client = APIClient()

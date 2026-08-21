@@ -382,8 +382,7 @@ class CotacaoViewSet(BaseViewSet):
             raise ValidationError({"loja": "Informe a loja."})
         if empresa_id and loja.empresa_id != int(empresa_id):
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
-        if allowed is not None and loja.id not in allowed:
+        if not EffectiveAccessService(self.request.user).can_access_store(loja):
             raise ValidationError({"loja": "Loja fora do escopo permitido."})
 
     def perform_create(self, serializer):
