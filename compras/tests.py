@@ -5,7 +5,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from accounts.models import UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
@@ -151,13 +151,16 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.aprovador = User.objects.create_user("req-gerente", "reqg@test.local", "123", empresa=self.empresa, loja=self.loja, type="Gerente")
         self.outro_mesma_empresa = User.objects.create_user("req-colega", "reqc@test.local", "123", empresa=self.empresa, loja=self.loja, type="AssistentePagar")
         self.outro = User.objects.create_user("req-outro", "reqo@test.local", "123", empresa=self.empresa_b, loja=self.loja_b, type="Gerente")
+        self.perfil_solicitante = self._perfil_requisicao("Solicitante", self.empresa, ["requisicoes.fazer"])
+        self.perfil_aprovador = self._perfil_requisicao("Aprovador", self.empresa, ["requisicoes.fazer", "requisicoes.aprovar", "requisicoes.atender"])
+        self.perfil_outro = self._perfil_requisicao("Outro", self.empresa_b, ["requisicoes.fazer", "requisicoes.aprovar", "requisicoes.atender"])
+        PerfilModuloPermissao.objects.filter(perfil__in=[self.perfil_solicitante, self.perfil_aprovador, self.perfil_outro], modulo=self.mod_compras).update(acesso=UserModulePermission.Access.EDIT)
+        self.solicitante.perfil_principal = self.perfil_solicitante
+        self.outro_mesma_empresa.perfil_principal = self.perfil_solicitante
+        self.aprovador.perfil_principal = self.perfil_aprovador
+        self.outro.perfil_principal = self.perfil_outro
         for user in (self.solicitante, self.aprovador, self.outro_mesma_empresa, self.outro):
-            UserModulePermission.objects.create(user=user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
-            UserModulePermission.objects.create(user=user, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
-        for user in (self.aprovador, self.outro):
-            UserModulePermission.objects.create(user=user, modulo="requisicoes_analise", acesso=UserModulePermission.Access.EDIT)
-            UserModulePermission.objects.create(user=user, modulo="requisicoes_atendimento", acesso=UserModulePermission.Access.EDIT)
-            UserModulePermission.objects.create(user=user, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+            user.save(update_fields=["perfil_principal"])
         self.unidade = self.un_int
         self.produto = self.prod_uso
         self.categoria = RequisicaoServicoCategoria.objects.create(empresa=self.empresa, nome="Informática")
@@ -170,6 +173,19 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, nome="Financeiro B")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=self.produto, loja=self.loja, saldo=Decimal("10.000"))
         self.client.force_authenticate(self.solicitante)
+
+    def _perfil_requisicao(self, nome, empresa, codigos):
+        perfil = PerfilAcesso.objects.create(empresa=empresa, nome=nome)
+        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.mod_compras, acesso=UserModulePermission.Access.NONE)
+        for codigo in codigos:
+            PerfilProcessPermission.objects.create(perfil=perfil, codigo=codigo, permitido=True)
+        return perfil
+
+    def _atribuir_perfil_requisicao(self, user, nome, codigos):
+        perfil = self._perfil_requisicao(nome, user.empresa, codigos)
+        user.perfil_principal = perfil
+        user.save(update_fields=["perfil_principal"])
+        return perfil
 
     def criar_requisicao(self, **extras):
         data = {
@@ -253,7 +269,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
     def test_usuario_sem_compras_com_requisicoes_acessa_e_cria(self):
         User = get_user_model()
         requisitante = User.objects.create_user("req-sem-compras", "reqsc@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
-        UserModulePermission.objects.create(user=requisitante, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        self._atribuir_perfil_requisicao(requisitante, "Req sem compras", ["requisicoes.fazer"])
         self.client.force_authenticate(requisitante)
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
         self.assertEqual(resp.status_code, 200, resp.data)
@@ -273,7 +289,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
     def test_joao_somente_requisitar_cria_envia_e_nao_ve_todas(self):
         User = get_user_model()
         joao = User.objects.create_user("joao-req", "joao@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
-        UserModulePermission.objects.create(user=joao, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
+        self._atribuir_perfil_requisicao(joao, "Joao Req", ["requisicoes.fazer"])
         self.client.force_authenticate(joao)
         req = self.criar_requisicao(justificativa="Joao requisita")
         self.item_produto(req)
@@ -290,39 +306,37 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(rows, [])
         self.client.force_authenticate(self.solicitante)
 
-    def test_paula_com_requisitar_analisar_e_todas_lista_sem_erro(self):
+    def test_paula_com_requisitar_e_analisar_lista_sem_erro(self):
         User = get_user_model()
         paula = User.objects.create_user("paula-req", "paula@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
-        UserModulePermission.objects.create(user=paula, modulo="requisicoes", acesso=UserModulePermission.Access.EDIT)
-        UserModulePermission.objects.create(user=paula, modulo="requisicoes_analise", acesso=UserModulePermission.Access.EDIT)
-        UserModulePermission.objects.create(user=paula, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        self._atribuir_perfil_requisicao(paula, "Paula Req", ["requisicoes.fazer", "requisicoes.aprovar"])
         req = self.criar_requisicao()
         self.item_produto(req)
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
         self.client.force_authenticate(paula)
-        for visao in ("minhas", "para_analisar", "todas"):
+        for visao in ("minhas", "para_analisar"):
             resp = self.client.get("/api/compras/requisicoes/", {"visao": visao})
             self.assertEqual(resp.status_code, 200, resp.data)
         self.client.force_authenticate(self.solicitante)
 
-    def test_visualizar_todas_nao_concede_edicao_indevida(self):
+    def test_visualizar_todas_nao_existe_para_usuario_comum(self):
         User = get_user_model()
         auditor = User.objects.create_user("auditor-req", "auditor@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
-        UserModulePermission.objects.create(user=auditor, modulo="requisicoes_todas", acesso=UserModulePermission.Access.VIEW)
+        self._atribuir_perfil_requisicao(auditor, "Auditor Req", ["requisicoes.fazer"])
         req = self.criar_requisicao()
         self.client.force_authenticate(auditor)
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
         self.assertEqual(resp.status_code, 200, resp.data)
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
-        self.assertIn(req.id, [r["id"] for r in rows])
+        self.assertNotIn(req.id, [r["id"] for r in rows])
         resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Auditor editou"}, format="json")
-        self.assertEqual(resp.status_code, 403, resp.data)
+        self.assertEqual(resp.status_code, 404, resp.data)
         self.client.force_authenticate(self.solicitante)
 
     def test_usuario_somente_atender_ve_fila_de_atendimento(self):
         User = get_user_model()
         atendente = User.objects.create_user("atendente-req", "atendente@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
-        UserModulePermission.objects.create(user=atendente, modulo="requisicoes_atendimento", acesso=UserModulePermission.Access.EDIT)
+        self._atribuir_perfil_requisicao(atendente, "Atendente Req", ["requisicoes.atender"])
         req = self.criar_requisicao()
         self.item_produto(req)
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
@@ -905,7 +919,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         resp = self.client.post(f"/api/compras/requisicoes/{req2.id}/rejeitar/", {"motivo": "Não aprovado"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         resp = self.client.post(f"/api/compras/requisicoes/{req2.id}/aprovar/", {}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.status_code, 404, resp.data)
         self.client.force_authenticate(self.solicitante)
         resp = self.client.post(f"/api/compras/requisicao-itens/{item2_id}/atender/", {"quantidade": "1.000"}, format="json")
         self.assertEqual(resp.status_code, 403, resp.data)
