@@ -170,6 +170,7 @@ class PerfilProcessPermission(models.Model):
         REQUISICAO_FAZER = "requisicoes.fazer", "Requisições - fazer"
         REQUISICAO_APROVAR = "requisicoes.aprovar", "Requisições - aprovar"
         REQUISICAO_ATENDER = "requisicoes.atender", "Requisições - atender"
+        COTACAO_APROVAR = "cotacao.aprovar", "Cotação - aprovar"
         PEDIDO_COMPRA_APROVAR = "pedido_compra.aprovar", "Pedido de compra - aprovar"
         VENDA_AUTORIZAR_DESCONTO = "vendas.autorizar_desconto", "Vendas - autorizar desconto"
         FUNCIONARIO_SALARIO = "funcionario.salario", "Funcionário - salário"

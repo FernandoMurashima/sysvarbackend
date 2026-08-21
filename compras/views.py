@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.permissions import BasePermission
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
@@ -122,6 +122,7 @@ def _historico(requisicao, request, acao, status_anterior="", status_novo="", it
 REQ_FAZER = "requisicoes.fazer"
 REQ_APROVAR = "requisicoes.aprovar"
 REQ_ATENDER = "requisicoes.atender"
+COTACAO_APROVAR = "cotacao.aprovar"
 
 
 def _requisicao_access(user):
@@ -143,6 +144,10 @@ def _can_approve_requisicao(user):
 
 def _can_request_requisicao(user):
     return _requisicao_access(user).has_process_permission(REQ_FAZER)
+
+
+def _can_approve_cotacao(user):
+    return bool(getattr(user, "is_superuser", False) or _requisicao_access(user).has_process_permission(COTACAO_APROVAR))
 
 
 def _can_view_all_requisicao(user):
@@ -556,6 +561,117 @@ class CotacaoViewSet(BaseViewSet):
         vinculo.delete()
         return Response(self.get_serializer(cotacao).data)
 
+    def _propostas_ativas(self, cotacao):
+        return CotacaoProposta.objects.filter(cotacao=cotacao, ativa=True)
+
+    def _justificativa_obrigatoria(self, cotacao, proposta):
+        propostas = list(self._propostas_ativas(cotacao))
+        if len(propostas) <= 1:
+            return True
+        menor_total = min(p.total_proposta for p in propostas)
+        return proposta.total_proposta != menor_total
+
+    def _snapshot_proposta(self, proposta):
+        return {
+            "proposta": proposta.id,
+            "fornecedor": proposta.cotacao_fornecedor.fornecedor_id,
+            "fornecedor_nome": proposta.cotacao_fornecedor.fornecedor.nome_fornecedor,
+            "frete": str(proposta.frete),
+            "outras_despesas": str(proposta.outras_despesas),
+            "desconto_geral": str(proposta.desconto_geral),
+            "condicao_pagamento": proposta.condicao_pagamento,
+            "prazo_entrega": proposta.prazo_entrega,
+            "validade_proposta": proposta.validade_proposta.isoformat() if proposta.validade_proposta else None,
+            "total_final": str(proposta.total_proposta),
+            "justificativa_vencedor": proposta.cotacao.justificativa_vencedor,
+            "itens": [
+                {
+                    "cotacao_item": item.cotacao_item_id,
+                    "descricao": item.cotacao_item.descricao,
+                    "quantidade_ofertada": str(item.quantidade_ofertada),
+                    "preco_unitario": str(item.preco_unitario),
+                    "desconto_item": str(item.desconto_item),
+                    "marca": item.marca,
+                    "modelo_referencia": item.modelo_referencia,
+                    "garantia": item.garantia,
+                    "prazo_entrega_item": item.prazo_entrega_item,
+                    "total_item": str(item.total_item),
+                }
+                for item in proposta.itens.select_related("cotacao_item").all()
+            ],
+        }
+
+    @action(detail=True, methods=["post"], url_path="selecionar-vencedor")
+    def selecionar_vencedor(self, request, pk=None):
+        cotacao = self.get_object()
+        if cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise ValidationError({"cotacao": "Cotação não permite selecionar vencedor neste status."})
+        proposta_id = request.data.get("proposta")
+        justificativa = (request.data.get("justificativa") or "").strip()
+        proposta = get_object_or_404(CotacaoProposta, pk=proposta_id, cotacao=cotacao, ativa=True)
+        if self._justificativa_obrigatoria(cotacao, proposta) and not justificativa:
+            raise ValidationError({"justificativa": "Informe a justificativa da escolha."})
+        anterior = cotacao.proposta_vencedora_id
+        cotacao.proposta_vencedora = proposta
+        cotacao.justificativa_vencedor = justificativa
+        cotacao.save(update_fields=["proposta_vencedora", "justificativa_vencedor", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "selecionar_vencedor", "anterior": anterior, "novo": proposta.id, "justificativa": justificativa}, request, action="cotacao_selecionar_vencedor")
+        return Response(self.get_serializer(cotacao).data)
+
+    @action(detail=True, methods=["post"], url_path="enviar-aprovacao")
+    def enviar_aprovacao(self, request, pk=None):
+        cotacao = self.get_object()
+        if cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise ValidationError({"cotacao": "Cotação não permite envio para aprovação neste status."})
+        if not cotacao.itens.exists():
+            raise ValidationError({"itens": "Cotação deve possuir itens."})
+        if not self._propostas_ativas(cotacao).exists():
+            raise ValidationError({"propostas": "Cotação deve possuir pelo menos uma proposta."})
+        if not cotacao.proposta_vencedora_id:
+            raise ValidationError({"proposta_vencedora": "Selecione uma proposta vencedora."})
+        if self._justificativa_obrigatoria(cotacao, cotacao.proposta_vencedora) and not cotacao.justificativa_vencedor.strip():
+            raise ValidationError({"justificativa": "Informe a justificativa da escolha."})
+        cotacao.status = "AGUARDANDO_APROVACAO"
+        cotacao.save(update_fields=["status", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "enviar_aprovacao", "proposta_vencedora": cotacao.proposta_vencedora_id, "justificativa": cotacao.justificativa_vencedor}, request, action="cotacao_enviar_aprovacao")
+        return Response(self.get_serializer(cotacao).data)
+
+    @action(detail=True, methods=["post"], url_path="aprovar")
+    def aprovar(self, request, pk=None):
+        if not _can_approve_cotacao(request.user):
+            raise PermissionDenied("Usuário sem autorização para aprovar cotação.")
+        cotacao = self.get_object()
+        if cotacao.status != "AGUARDANDO_APROVACAO":
+            raise ValidationError({"status": "Somente cotações aguardando aprovação podem ser aprovadas."})
+        if not cotacao.proposta_vencedora_id:
+            raise ValidationError({"proposta_vencedora": "Selecione uma proposta vencedora."})
+        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor").get(pk=cotacao.proposta_vencedora_id)
+        cotacao.status = "APROVADA"
+        cotacao.aprovado_por = request.user
+        cotacao.aprovado_em = timezone.now()
+        cotacao.snapshot_proposta_aprovada = self._snapshot_proposta(proposta)
+        cotacao.save(update_fields=["status", "aprovado_por", "aprovado_em", "snapshot_proposta_aprovada", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "aprovar", "proposta_vencedora": proposta.id, "snapshot": True}, request, action="cotacao_aprovar")
+        return Response(self.get_serializer(cotacao).data)
+
+    @action(detail=True, methods=["post"], url_path="rejeitar")
+    def rejeitar(self, request, pk=None):
+        if not _can_approve_cotacao(request.user):
+            raise PermissionDenied("Usuário sem autorização para rejeitar cotação.")
+        motivo = (request.data.get("motivo") or "").strip()
+        if not motivo:
+            raise ValidationError({"motivo": "Informe o motivo da rejeição."})
+        cotacao = self.get_object()
+        if cotacao.status != "AGUARDANDO_APROVACAO":
+            raise ValidationError({"status": "Somente cotações aguardando aprovação podem ser rejeitadas."})
+        cotacao.status = "REJEITADA"
+        cotacao.rejeitado_por = request.user
+        cotacao.rejeitado_em = timezone.now()
+        cotacao.motivo_rejeicao = motivo
+        cotacao.save(update_fields=["status", "rejeitado_por", "rejeitado_em", "motivo_rejeicao", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "rejeitar", "motivo": motivo}, request, action="cotacao_rejeitar")
+        return Response(self.get_serializer(cotacao).data)
+
     @action(detail=True, methods=["get"], url_path="comparativo")
     def comparativo(self, request, pk=None):
         cotacao = self.get_object()
@@ -645,8 +761,8 @@ class CotacaoFornecedorViewSet(BaseViewSet):
         return qs.order_by("fornecedor__nome_fornecedor", "id")
 
     def perform_destroy(self, instance):
-        if instance.cotacao.status in {"APROVADA", "REJEITADA", "CANCELADA", "PEDIDO_GERADO", "ENCERRADA"}:
-            raise ValidationError({"cotacao": "Cotação em status final não permite remover fornecedores."})
+        if instance.cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise ValidationError({"cotacao": "Cotação não permite remover fornecedores neste status."})
         instance.delete()
 
 

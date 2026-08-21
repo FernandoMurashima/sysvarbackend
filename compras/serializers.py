@@ -505,8 +505,8 @@ class CotacaoFornecedorSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"cotacao": "Cotação pertence a outra empresa."})
             if not EffectiveAccessService(user).can_access_store(cotacao.loja):
                 raise serializers.ValidationError({"cotacao": "Cotação fora do escopo permitido."})
-        if cotacao.status in {"APROVADA", "REJEITADA", "CANCELADA", "PEDIDO_GERADO", "ENCERRADA"}:
-            raise serializers.ValidationError({"cotacao": "Cotação em status final não permite alterar fornecedores."})
+        if cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise serializers.ValidationError({"cotacao": "Cotação não permite alterar fornecedores neste status."})
         if not fornecedor:
             raise serializers.ValidationError({"fornecedor": "Informe o fornecedor."})
         if fornecedor.empresa_id != cotacao.empresa_id:
@@ -639,4 +639,19 @@ class CotacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cotacao
         fields = "__all__"
-        read_only_fields = ("numero", "empresa", "responsavel", "status", "criado_em", "atualizado_em")
+        read_only_fields = (
+            "numero",
+            "empresa",
+            "responsavel",
+            "status",
+            "proposta_vencedora",
+            "justificativa_vencedor",
+            "aprovado_por",
+            "aprovado_em",
+            "rejeitado_por",
+            "rejeitado_em",
+            "motivo_rejeicao",
+            "snapshot_proposta_aprovada",
+            "criado_em",
+            "atualizado_em",
+        )

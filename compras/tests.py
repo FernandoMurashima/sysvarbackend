@@ -365,6 +365,16 @@ class CotacaoBaseTests(TestCase):
         proposta.save(update_fields=["total_itens", "total_proposta"])
         return proposta
 
+    def criar_aprovador_cotacao(self):
+        User = get_user_model()
+        aprovador = User.objects.create_user("aprovador-cot", "aprovadorcot@test.local", "123", empresa=self.empresa, loja=self.loja)
+        perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome="Aprovador Cotação")
+        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.mod_compras, acesso=UserModulePermission.Access.EDIT)
+        PerfilProcessPermission.objects.create(perfil=perfil, codigo="cotacao.aprovar", permitido=True)
+        aprovador.perfil_principal = perfil
+        aprovador.save(update_fields=["perfil_principal"])
+        return aprovador
+
     def test_api_cotacao_comparativo_duas_propostas_menor_preco_total_e_percentual(self):
         client = APIClient()
         client.force_authenticate(self.user)
@@ -408,6 +418,78 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(len(resp.data["propostas"]), 1)
         self.assertNotEqual(resp.data["propostas"][0]["itens"][0]["descricao"], "Outra cotação")
+
+    def test_api_cotacao_selecao_manual_somente_um_vencedor(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        p1 = self.criar_proposta_com_item(cotacao, item, "44611111000191", "10.00")
+        p2 = self.criar_proposta_com_item(cotacao, item, "44622222000191", "9.00")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": p1.id, "justificativa": "Prazo melhor"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": p2.id}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        cotacao.refresh_from_db()
+        self.assertEqual(cotacao.proposta_vencedora_id, p2.id)
+
+    def test_api_cotacao_vencedor_justificativa_obrigatoria(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        p1 = self.criar_proposta_com_item(cotacao, item, "44633333000191", "10.00")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": p1.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        p2 = self.criar_proposta_com_item(cotacao, item, "44644444000191", "9.00")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": p1.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": p1.id, "justificativa": "Entrega imediata"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_api_cotacao_envio_sem_vencedor_bloqueado(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        self.criar_proposta_com_item(cotacao, item, "44655555000191", "10.00")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_aprovacao_permissao_snapshot_e_imutabilidade(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        proposta = self.criar_proposta_com_item(cotacao, item, "44666666000191", "10.00")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 403, resp.data)
+        client.force_authenticate(self.criar_aprovador_cotacao())
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "APROVADA")
+        self.assertIsNotNone(resp.data["snapshot_proposta_aprovada"])
+        resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Não pode"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-propostas/{proposta.id}/", {"frete": "99.00"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_rejeicao_exige_motivo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        proposta = self.criar_proposta_com_item(cotacao, item, "44677777000191", "10.00")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
+        client.force_authenticate(self.criar_aprovador_cotacao())
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/rejeitar/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/rejeitar/", {"motivo": "Revisar valores"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "REJEITADA")
 
     def test_api_item_produto_cadastrado_valido(self):
         client = APIClient()
