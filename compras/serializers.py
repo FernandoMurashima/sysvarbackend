@@ -433,6 +433,7 @@ class CotacaoRequisicaoSerializer(serializers.ModelSerializer):
 class CotacaoItemSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
     unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
+    requisicao_origem_numero = serializers.IntegerField(source="requisicao_item_origem.requisicao.numero", read_only=True)
 
     class Meta:
         model = CotacaoItem

@@ -18,6 +18,7 @@ from auditoria.services import AuditService
 from .models import (
     Cotacao,
     CotacaoItem,
+    CotacaoRequisicao,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -396,6 +397,89 @@ class CotacaoViewSet(BaseViewSet):
         loja = serializer.validated_data.get("loja") or serializer.instance.loja
         self._validate_loja(loja)
         serializer.save(empresa=loja.empresa)
+
+    def _requisicoes_disponiveis_qs(self):
+        qs = Requisicao.objects.select_related("loja", "setor", "requisitante").prefetch_related("itens").filter(
+            status__in=["APROVADA", "EM_PROCESSO_COMPRA", "EM_PROCESSO_CONTRATACAO"]
+        )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(loja_id__in=allowed)
+        return qs.order_by("-data_requisicao", "-numero")
+
+    def _copiar_item_requisicao(self, cotacao, req_item):
+        descricao = req_item.produto.descricao if req_item.produto_id else (req_item.descricao or req_item.titulo_servico or "")
+        return CotacaoItem.objects.create(
+            cotacao=cotacao,
+            produto=req_item.produto,
+            descricao=descricao,
+            quantidade_cotar=req_item.qtd_pendente or req_item.qtd_solicitada,
+            unidade=req_item.unidade,
+            especificacao_tecnica=req_item.especificacao_tecnica,
+            observacao=req_item.observacoes,
+            requisicao_item_origem=req_item,
+            origem="REQUISICAO",
+        )
+
+    @action(detail=False, methods=["get"], url_path="requisicoes-disponiveis")
+    def requisicoes_disponiveis(self, request):
+        rows = []
+        for req in self._requisicoes_disponiveis_qs():
+            itens = list(req.itens.all())
+            rows.append({
+                "id": req.id,
+                "numero": req.numero,
+                "loja": req.loja_id,
+                "loja_nome": req.loja.nome_loja,
+                "setor_nome": req.setor.nome,
+                "requisitante_nome": req.requisitante.username,
+                "quantidade_itens": len(itens),
+                "data_requisicao": req.data_requisicao,
+                "prioridade": req.prioridade,
+                "itens": RequisicaoItemSerializer(itens, many=True).data,
+            })
+        return Response(rows)
+
+    @transaction.atomic
+    @action(detail=True, methods=["post"], url_path="adicionar-requisicoes")
+    def adicionar_requisicoes(self, request, pk=None):
+        cotacao = self.get_object()
+        if cotacao.status != "EM_ELABORACAO":
+            raise ValidationError({"cotacao": "Somente cotações em elaboração podem vincular requisições."})
+        ids = request.data.get("requisicoes") or request.data.get("ids") or []
+        if request.data.get("requisicao"):
+            ids = [request.data.get("requisicao")]
+        ids = [int(i) for i in ids]
+        disponiveis = self._requisicoes_disponiveis_qs().filter(id__in=ids)
+        encontrados = {r.id: r for r in disponiveis}
+        if set(ids) != set(encontrados):
+            raise ValidationError({"requisicoes": "Uma ou mais requisições não estão disponíveis para cotação."})
+        existentes = set(CotacaoRequisicao.objects.filter(cotacao=cotacao, requisicao_id__in=ids).values_list("requisicao_id", flat=True))
+        if existentes:
+            raise ValidationError({"requisicoes": "Requisição já vinculada à cotação."})
+        for req_id in ids:
+            req = encontrados[req_id]
+            CotacaoRequisicao.objects.create(cotacao=cotacao, requisicao=req)
+            for item in req.itens.all():
+                self._copiar_item_requisicao(cotacao, item)
+        return Response(self.get_serializer(cotacao).data)
+
+    @transaction.atomic
+    @action(detail=True, methods=["post"], url_path="remover-requisicao")
+    def remover_requisicao(self, request, pk=None):
+        cotacao = self.get_object()
+        if cotacao.status != "EM_ELABORACAO":
+            raise ValidationError({"cotacao": "Somente cotações em elaboração podem remover requisições."})
+        req_id = request.data.get("requisicao")
+        vinculo = get_object_or_404(CotacaoRequisicao, cotacao=cotacao, requisicao_id=req_id)
+        CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO", requisicao_item_origem__requisicao_id=req_id).delete()
+        vinculo.delete()
+        return Response(self.get_serializer(cotacao).data)
 
 
 class CotacaoItemViewSet(BaseViewSet):

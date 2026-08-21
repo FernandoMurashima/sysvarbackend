@@ -227,6 +227,79 @@ class CotacaoBaseTests(TestCase):
         resp = client.delete(f"/api/compras/cotacao-itens/{item.id}/")
         self.assertEqual(resp.status_code, 400, resp.data)
 
+    def _req_aprovada_com_itens(self, numero, loja=None):
+        req = self.criar_requisicao(numero, loja=loja or self.loja)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item1 = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, descricao="Material", unidade=self.unidade, qtd_solicitada=Decimal("2.000"), qtd_pendente=Decimal("2.000"))
+        item2 = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="LIVRE", descricao="Livre", unidade=self.unidade, qtd_solicitada=Decimal("3.000"), qtd_pendente=Decimal("3.000"))
+        return req, [item1, item2]
+
+    def test_api_cotacao_sem_requisicao_continua_valida(self):
+        cotacao = self.criar_cotacao()
+        self.assertEqual(cotacao.requisicoes_vinculadas.count(), 0)
+        self.assertEqual(cotacao.itens.count(), 0)
+
+    def test_api_adiciona_uma_requisicao_e_copia_todos_itens_com_origem(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        req, req_itens = self._req_aprovada_com_itens(10)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req.id]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(CotacaoRequisicao.objects.filter(cotacao=cotacao, requisicao=req).count(), 1)
+        itens = list(CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO"))
+        self.assertEqual(len(itens), 2)
+        self.assertEqual({i.requisicao_item_origem_id for i in itens}, {i.id for i in req_itens})
+
+    def test_api_adiciona_varias_requisicoes(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        req1, _ = self._req_aprovada_com_itens(11)
+        req2, _ = self._req_aprovada_com_itens(12)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req1.id, req2.id]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(cotacao.requisicoes_vinculadas.count(), 2)
+        self.assertEqual(cotacao.itens.filter(origem="REQUISICAO").count(), 4)
+
+    def test_api_bloqueia_duplicidade_de_requisicao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        req, _ = self._req_aprovada_com_itens(13)
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req.id]}, format="json")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req.id]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_remove_requisicao_remove_somente_itens_da_requisicao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        req, _ = self._req_aprovada_com_itens(14)
+        avulso = CotacaoItem.objects.create(cotacao=cotacao, descricao="Avulso", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req.id]}, format="json")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/remover-requisicao/", {"requisicao": req.id}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(CotacaoRequisicao.objects.filter(cotacao=cotacao, requisicao=req).exists())
+        self.assertFalse(CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO").exists())
+        self.assertTrue(CotacaoItem.objects.filter(pk=avulso.pk).exists())
+
+    def test_api_bloqueia_requisicao_de_outra_empresa_ou_loja_fora_escopo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        req_b = self.criar_requisicao(15, empresa=self.empresa_b, loja=self.loja_b, setor=self.setor_b, user=self.user_b)
+        req_b.status = "APROVADA"
+        req_b.save(update_fields=["status"])
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req_b.id]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Fora Cot", apelido_loja="Loja Fora Cot", cnpj="33111111000614", estado="SP")
+        req_fora, _ = self._req_aprovada_com_itens(16, loja=loja_extra)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req_fora.id]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
 class PedidoCompraUnificadoTests(TestCase):
