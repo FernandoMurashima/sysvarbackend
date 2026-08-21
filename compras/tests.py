@@ -20,10 +20,20 @@ class CotacaoBaseTests(TestCase):
         User = get_user_model()
         self.empresa = Empresa.objects.create(nome="Empresa Cot A", documento="33111111000191", plano_completo=True)
         self.empresa_b = Empresa.objects.create(nome="Empresa Cot B", documento="33222222000191", plano_completo=True)
+        self.mod_compras, _ = ModuloSistema.objects.get_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "ativo": True, "ordem": 10},
+        )
+        EmpresaContrato.objects.update_or_create(empresa=self.empresa, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "limite_sessoes_simultaneas": 5})
+        EmpresaContrato.objects.update_or_create(empresa=self.empresa_b, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "limite_sessoes_simultaneas": 5})
         self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Cot A", apelido_loja="Loja Cot A", cnpj="33111111000100", estado="SP")
         self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Cot B", apelido_loja="Loja Cot B", cnpj="33222222000100", estado="SP")
         self.user = User.objects.create_user("cotador", "cotador@test.local", "123", empresa=self.empresa, loja=self.loja)
         self.user_b = User.objects.create_user("cotador-b", "cotadorb@test.local", "123", empresa=self.empresa_b, loja=self.loja_b)
+        self.perfil_compras = PerfilAcesso.objects.create(empresa=self.empresa, nome="Compras Cotação")
+        PerfilModuloPermissao.objects.create(perfil=self.perfil_compras, modulo=self.mod_compras, acesso=UserModulePermission.Access.EDIT)
+        self.user.perfil_principal = self.perfil_compras
+        self.user.save(update_fields=["perfil_principal"])
         self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN", permite_decimal=False)
         self.unidade_b = Unidade.objects.create(empresa=self.empresa_b, Descricao="Unidade B", Codigo="UNB", permite_decimal=False)
         self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Material cotado", unidade=self.unidade)
@@ -93,6 +103,37 @@ class CotacaoBaseTests(TestCase):
         item = CotacaoItem(cotacao=cotacao, descricao="Outro", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="REQUISICAO", requisicao_item_origem=req_item_b)
         with self.assertRaises(ValidationError):
             item.full_clean()
+
+    def test_api_cria_cotacao_com_defaults(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        UserModulePermission.objects.create(user=self.user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
+        resp = client.post("/api/compras/cotacoes/", {"loja": self.loja.id, "tipo_compra": "USO_CONSUMO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["numero"], 1)
+        self.assertEqual(resp.data["status"], "EM_ELABORACAO")
+        self.assertEqual(resp.data["prioridade"], "NORMAL")
+        self.assertEqual(resp.data["responsavel"], self.user.id)
+
+    def test_api_bloqueia_loja_fora_do_escopo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        UserModulePermission.objects.create(user=self.user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
+        resp = client.post("/api/compras/cotacoes/", {"loja": self.loja_b.id, "tipo_compra": "USO_CONSUMO"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_edita_em_elaboracao_e_bloqueia_fora_dela(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        UserModulePermission.objects.create(user=self.user, modulo="compras", acesso=UserModulePermission.Access.EDIT)
+        cotacao = self.criar_cotacao()
+        resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Editada"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["observacao"], "Editada")
+        cotacao.status = "ABERTA"
+        cotacao.save(update_fields=["status"])
+        resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Bloqueada"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

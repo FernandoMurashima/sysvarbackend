@@ -16,6 +16,7 @@ from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
 
 from .models import (
+    Cotacao,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -29,6 +30,7 @@ from .models import (
     RequisicaoSetor,
 )
 from .serializers import (
+    CotacaoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
     PedidoCompraEntregaSerializer,
@@ -348,6 +350,51 @@ class BaseViewSet(viewsets.ModelViewSet):
 
 
 # ----------------- Pedido -----------------
+class CotacaoViewSet(BaseViewSet):
+    queryset = Cotacao.objects.select_related("empresa", "loja", "responsavel").all()
+    serializer_class = CotacaoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        loja = self.request.query_params.get("loja")
+        status_q = self.request.query_params.get("status")
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(loja_id__in=allowed)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        return qs.order_by("-data_abertura", "-numero")
+
+    def _validate_loja(self, loja):
+        empresa_id = self._empresa_id_usuario()
+        if not loja:
+            raise ValidationError({"loja": "Informe a loja."})
+        if empresa_id and loja.empresa_id != int(empresa_id):
+            raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None and loja.id not in allowed:
+            raise ValidationError({"loja": "Loja fora do escopo permitido."})
+
+    def perform_create(self, serializer):
+        loja = serializer.validated_data.get("loja")
+        self._validate_loja(loja)
+        serializer.save(empresa=loja.empresa, responsavel=self.request.user, status="EM_ELABORACAO")
+
+    def perform_update(self, serializer):
+        if serializer.instance.status != "EM_ELABORACAO":
+            raise ValidationError({"status": "Somente cotações em elaboração podem ser editadas."})
+        loja = serializer.validated_data.get("loja") or serializer.instance.loja
+        self._validate_loja(loja)
+        serializer.save(empresa=loja.empresa)
+
+
 class PedidoCompraViewSet(BaseViewSet):
     queryset = PedidoCompra.objects.all().order_by("-emissao", "-id")
     serializer_class = PedidoCompraSerializer

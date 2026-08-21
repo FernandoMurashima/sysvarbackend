@@ -449,4 +449,4 @@ class CotacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cotacao
         fields = "__all__"
-        read_only_fields = ("numero", "criado_em", "atualizado_em")
+        read_only_fields = ("numero", "empresa", "responsavel", "status", "criado_em", "atualizado_em")
