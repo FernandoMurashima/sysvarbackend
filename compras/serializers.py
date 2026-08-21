@@ -3,6 +3,7 @@ from django.db import transaction
 from decimal import Decimal
 
 from accounts.services.effective_access import EffectiveAccessService
+from compras.services_necessidade import indicador_requisicao_item
 
 from .models import (
     Cotacao,
@@ -274,11 +275,15 @@ class RequisicaoItemSerializer(serializers.ModelSerializer):
     finalidade_aquisicao_nome = serializers.CharField(source="finalidade_aquisicao.nome", read_only=True)
     finalidade_comportamento = serializers.CharField(source="finalidade_aquisicao.comportamento", read_only=True)
     categoria_servico_nome = serializers.CharField(source="categoria_servico.nome", read_only=True)
+    indicador_compra = serializers.SerializerMethodField()
 
     class Meta:
         model = RequisicaoItem
         fields = "__all__"
-        read_only_fields = ("qtd_atendida", "qtd_pendente", "status", "criado_em", "atualizado_em")
+        read_only_fields = ("qtd_atendida", "qtd_pendente", "status", "criado_em", "atualizado_em", "indicador_compra")
+
+    def get_indicador_compra(self, obj):
+        return indicador_requisicao_item(obj)
 
     def validate(self, attrs):
         requisicao = attrs.get("requisicao") or getattr(self.instance, "requisicao", None)

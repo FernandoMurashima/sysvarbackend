@@ -71,6 +71,7 @@ except Exception:
 from cadastros.models import Nat_Lancamento
 from cadastros.models import Loja
 from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
+from .services_necessidade import estoque_disponivel_requisicao_item
 
 
 # ----------------- Auditoria robusta -----------------
@@ -478,6 +479,8 @@ class CotacaoViewSet(BaseViewSet):
 
         grupos = {}
         for item in itens.order_by("produto_id", "id"):
+            if item.produto_id and estoque_disponivel_requisicao_item(item) >= Decimal(item.qtd_pendente or 0):
+                continue
             if item.produto_id:
                 key = f"produto:{item.produto_id}"
                 nome = item.produto.descricao

@@ -819,6 +819,92 @@ class CotacaoBaseTests(TestCase):
         grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
         self.assertEqual(set(grupo["requisicoes_ids"]), {req_permitida.id})
 
+    def test_api_requisicao_item_sem_estoque_sem_compra_indica_vermelho(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        PerfilProcessPermission.objects.create(perfil=self.perfil_compras, codigo="requisicoes.atender", permitido=True)
+        req = self.criar_requisicao(30)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"), status="APROVADO")
+        resp = client.get(f"/api/compras/requisicao-itens/{item.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["indicador_compra"]["cor"], "VERMELHO")
+        self.assertEqual(resp.data["indicador_compra"]["codigo"], "PRECISA_COMPRAR")
+
+    def test_api_requisicao_item_em_cotacao_indica_amarelo_e_preserva_link(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        PerfilProcessPermission.objects.create(perfil=self.perfil_compras, codigo="requisicoes.atender", permitido=True)
+        req = self.criar_requisicao(31)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"), status="APROVADO")
+        cotacao = self.criar_cotacao(status="ABERTA")
+        CotacaoRequisicao.objects.create(cotacao=cotacao, requisicao=req)
+        CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao=self.produto.descricao, quantidade_cotar=Decimal("5.000"), unidade=self.unidade, origem="REQUISICAO", requisicao_item_origem=item)
+        resp = client.get(f"/api/compras/requisicao-itens/{item.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["indicador_compra"]["cor"], "AMARELO")
+        self.assertEqual(resp.data["indicador_compra"]["cotacoes"][0]["id"], cotacao.id)
+
+    def test_api_requisicao_item_com_estoque_suficiente_indica_verde_sem_alterar_solicitada(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        PerfilProcessPermission.objects.create(perfil=self.perfil_compras, codigo="requisicoes.atender", permitido=True)
+        req = self.criar_requisicao(32)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"), status="APROVADO")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, loja=self.loja, produto=self.produto, saldo=Decimal("20.000"))
+        resp = client.get(f"/api/compras/requisicao-itens/{item.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["indicador_compra"]["cor"], "VERDE")
+        item.refresh_from_db()
+        self.assertEqual(item.qtd_solicitada, Decimal("5.000"))
+
+    def test_api_atendimento_parcial_baixa_estoque_e_recalcula_indicador(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        PerfilProcessPermission.objects.create(perfil=self.perfil_compras, codigo="requisicoes.atender", permitido=True)
+        req = self.criar_requisicao(33)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        item = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"), status="APROVADO")
+        estoque = ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, loja=self.loja, produto=self.produto, saldo=Decimal("20.000"))
+        resp = client.post(f"/api/compras/requisicao-itens/{item.id}/atender/", {"quantidade": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item.refresh_from_db()
+        estoque.refresh_from_db()
+        self.assertEqual(item.qtd_atendida, Decimal("2.000"))
+        self.assertEqual(item.qtd_pendente, Decimal("3.000"))
+        self.assertEqual(estoque.saldo, Decimal("18.000"))
+        resp = client.get(f"/api/compras/requisicao-itens/{item.id}/")
+        self.assertEqual(resp.data["indicador_compra"]["cor"], "VERDE")
+
+    def test_api_necessidades_nao_mistura_empresa_loja_e_ignora_item_com_estoque(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        req = self.criar_requisicao(34)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=self.produto, unidade=self.unidade, qtd_solicitada=Decimal("5.000"), qtd_pendente=Decimal("5.000"), status="APROVADO")
+        produto_com_estoque = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Material disponível", unidade=self.unidade)
+        item_verde = RequisicaoItem.objects.create(requisicao=req, tipo="MATERIAL", origem="PRODUTO", produto=produto_com_estoque, unidade=self.unidade, qtd_solicitada=Decimal("2.000"), qtd_pendente=Decimal("2.000"), status="APROVADO")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, loja=self.loja, produto=produto_com_estoque, saldo=Decimal("2.000"))
+        req_b = self.criar_requisicao(34, empresa=self.empresa_b, loja=self.loja_b, setor=self.setor_b, user=self.user_b)
+        req_b.status = "APROVADA"
+        req_b.save(update_fields=["status"])
+        produto_b = Produto.objects.create(empresa=self.empresa_b, tipo_produto="2", descricao="Material B", unidade=self.unidade_b)
+        RequisicaoItem.objects.create(requisicao=req_b, tipo="MATERIAL", origem="PRODUTO", produto=produto_b, unidade=self.unidade_b, qtd_solicitada=Decimal("8.000"), qtd_pendente=Decimal("8.000"), status="APROVADO")
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        produtos = {row["produto"] for row in resp.data}
+        self.assertIn(self.produto.Idproduto, produtos)
+        self.assertNotIn(produto_com_estoque.Idproduto, produtos)
+        self.assertNotIn(produto_b.Idproduto, produtos)
+        self.assertEqual(item_verde.qtd_solicitada, Decimal("2.000"))
+
     def _pedido_compra_produto(self, emissao, qtd, recebido, preco, loja=None, fornecedor=None, status="AP"):
         fornecedor = fornecedor or Fornecedor.objects.create(
             empresa=self.empresa,
