@@ -556,6 +556,74 @@ class CotacaoViewSet(BaseViewSet):
         vinculo.delete()
         return Response(self.get_serializer(cotacao).data)
 
+    @action(detail=True, methods=["get"], url_path="comparativo")
+    def comparativo(self, request, pk=None):
+        cotacao = self.get_object()
+        itens = list(cotacao.itens.select_related("produto", "unidade").order_by("id"))
+        propostas = list(
+            CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor")
+            .prefetch_related("itens", "itens__cotacao_item")
+            .filter(cotacao=cotacao, ativa=True)
+            .order_by("cotacao_fornecedor__fornecedor__nome_fornecedor", "id")
+        )
+        itens_por_proposta = {p.id: {i.cotacao_item_id: i for i in p.itens.all()} for p in propostas}
+        menores_preco = {}
+        menores_custo = {}
+        for item in itens:
+            ofertas = [itens_por_proposta[p.id].get(item.id) for p in propostas]
+            ofertas = [oferta for oferta in ofertas if oferta]
+            if ofertas:
+                menores_preco[item.id] = min(oferta.preco_unitario for oferta in ofertas)
+                menores_custo[item.id] = min(oferta.total_item for oferta in ofertas)
+        totais = [p.total_proposta for p in propostas]
+        menor_total = min(totais) if totais else None
+        maior_total = max(totais) if totais else None
+        prazos = []
+        for proposta in propostas:
+            try:
+                prazos.append((int(proposta.prazo_entrega), proposta.id))
+            except (TypeError, ValueError):
+                continue
+        melhor_prazo = min(prazos)[0] if prazos else None
+        rows = []
+        for proposta in propostas:
+            total = proposta.total_proposta or Decimal("0")
+            rows.append({
+                "proposta": proposta.id,
+                "cotacao_fornecedor": proposta.cotacao_fornecedor_id,
+                "fornecedor": proposta.cotacao_fornecedor.fornecedor_id,
+                "fornecedor_nome": proposta.cotacao_fornecedor.fornecedor.nome_fornecedor,
+                "total_itens": proposta.total_itens,
+                "desconto_geral": proposta.desconto_geral,
+                "frete": proposta.frete,
+                "outras_despesas": proposta.outras_despesas,
+                "total_geral": total,
+                "menor_total_geral": menor_total is not None and total == menor_total,
+                "diferenca_percentual": Decimal("0") if menor_total in (None, 0) else ((total - menor_total) / menor_total * Decimal("100")).quantize(Decimal("0.01")),
+                "economia_vs_mais_cara": Decimal("0") if maior_total is None else (maior_total - total),
+                "prazo_entrega": proposta.prazo_entrega,
+                "melhor_prazo": melhor_prazo is not None and str(proposta.prazo_entrega).isdigit() and int(proposta.prazo_entrega) == melhor_prazo,
+                "condicao_pagamento": proposta.condicao_pagamento,
+                "validade_proposta": proposta.validade_proposta,
+                "itens": [{
+                    "cotacao_item": item.id,
+                    "descricao": item.produto.descricao if item.produto_id else item.descricao,
+                    "quantidade_cotar": item.quantidade_cotar,
+                    "sem_oferta": itens_por_proposta[proposta.id].get(item.id) is None,
+                    "quantidade_ofertada": getattr(itens_por_proposta[proposta.id].get(item.id), "quantidade_ofertada", None),
+                    "preco_unitario": getattr(itens_por_proposta[proposta.id].get(item.id), "preco_unitario", None),
+                    "desconto_item": getattr(itens_por_proposta[proposta.id].get(item.id), "desconto_item", None),
+                    "custo_final_item": getattr(itens_por_proposta[proposta.id].get(item.id), "total_item", None),
+                    "menor_preco_unitario": itens_por_proposta[proposta.id].get(item.id) is not None and itens_por_proposta[proposta.id][item.id].preco_unitario == menores_preco.get(item.id),
+                    "menor_custo_final": itens_por_proposta[proposta.id].get(item.id) is not None and itens_por_proposta[proposta.id][item.id].total_item == menores_custo.get(item.id),
+                    "marca": getattr(itens_por_proposta[proposta.id].get(item.id), "marca", ""),
+                    "modelo_referencia": getattr(itens_por_proposta[proposta.id].get(item.id), "modelo_referencia", ""),
+                    "garantia": getattr(itens_por_proposta[proposta.id].get(item.id), "garantia", ""),
+                    "prazo_entrega_item": getattr(itens_por_proposta[proposta.id].get(item.id), "prazo_entrega_item", ""),
+                } for item in itens],
+            })
+        return Response({"cotacao": cotacao.id, "itens": [{"id": i.id, "descricao": i.produto.descricao if i.produto_id else i.descricao, "quantidade_cotar": i.quantidade_cotar} for i in itens], "propostas": rows})
+
 
 class CotacaoFornecedorViewSet(BaseViewSet):
     queryset = CotacaoFornecedor.objects.select_related("cotacao", "cotacao__empresa", "cotacao__loja", "fornecedor").all()

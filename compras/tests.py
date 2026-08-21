@@ -357,6 +357,58 @@ class CotacaoBaseTests(TestCase):
         resp = client.patch(f"/api/compras/cotacao-propostas/{proposta.id}/", {"frete": "4.00"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
 
+    def criar_proposta_com_item(self, cotacao, item, documento, preco, qtd="1.000", frete="0.00"):
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor(documento=documento, nome=f"Fornecedor {documento[-4:]}"))
+        proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, frete=Decimal(frete))
+        CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=item, quantidade_ofertada=Decimal(qtd), preco_unitario=Decimal(preco))
+        proposta.recomputar_totais()
+        proposta.save(update_fields=["total_itens", "total_proposta"])
+        return proposta
+
+    def test_api_cotacao_comparativo_duas_propostas_menor_preco_total_e_percentual(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        self.criar_proposta_com_item(cotacao, item, "44111111000191", "10.00")
+        self.criar_proposta_com_item(cotacao, item, "44222222000191", "12.00")
+        resp = client.get(f"/api/compras/cotacoes/{cotacao.id}/comparativo/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        propostas = resp.data["propostas"]
+        self.assertEqual(len(propostas), 2)
+        self.assertTrue(propostas[0]["itens"][0]["menor_preco_unitario"])
+        self.assertTrue(propostas[0]["menor_total_geral"])
+        self.assertEqual(Decimal(str(propostas[1]["diferenca_percentual"])), Decimal("20.00"))
+        self.assertEqual(Decimal(str(propostas[0]["economia_vs_mais_cara"])), Decimal("2.00"))
+
+    def test_api_cotacao_comparativo_item_sem_oferta_nao_vira_zero(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item_a = self.criar_item_cotacao(cotacao, "Item A")
+        self.criar_item_cotacao(cotacao, "Item B")
+        self.criar_proposta_com_item(cotacao, item_a, "44333333000191", "10.00")
+        resp = client.get(f"/api/compras/cotacoes/{cotacao.id}/comparativo/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        sem_oferta = resp.data["propostas"][0]["itens"][1]
+        self.assertTrue(sem_oferta["sem_oferta"])
+        self.assertIsNone(sem_oferta["preco_unitario"])
+        self.assertIsNone(sem_oferta["custo_final_item"])
+
+    def test_api_cotacao_comparativo_nao_mistura_outra_cotacao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        outra = self.criar_cotacao()
+        item_outra = self.criar_item_cotacao(outra, "Outra cotação")
+        self.criar_proposta_com_item(cotacao, item, "44444444000191", "10.00")
+        self.criar_proposta_com_item(outra, item_outra, "44555555000191", "1.00")
+        resp = client.get(f"/api/compras/cotacoes/{cotacao.id}/comparativo/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(len(resp.data["propostas"]), 1)
+        self.assertNotEqual(resp.data["propostas"][0]["itens"][0]["descricao"], "Outra cotação")
+
     def test_api_item_produto_cadastrado_valido(self):
         client = APIClient()
         client.force_authenticate(self.user)
