@@ -17,6 +17,7 @@ from auditoria.services import AuditService
 
 from .models import (
     Cotacao,
+    CotacaoFornecedor,
     CotacaoItem,
     CotacaoRequisicao,
     PedidoCompra,
@@ -33,6 +34,7 @@ from .models import (
 )
 from .serializers import (
     CotacaoItemSerializer,
+    CotacaoFornecedorSerializer,
     CotacaoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
@@ -551,6 +553,31 @@ class CotacaoViewSet(BaseViewSet):
         CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO", requisicao_item_origem__requisicao_id=req_id).delete()
         vinculo.delete()
         return Response(self.get_serializer(cotacao).data)
+
+
+class CotacaoFornecedorViewSet(BaseViewSet):
+    queryset = CotacaoFornecedor.objects.select_related("cotacao", "cotacao__empresa", "cotacao__loja", "fornecedor").all()
+    serializer_class = CotacaoFornecedorSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        cotacao = self.request.query_params.get("cotacao")
+        if empresa_id:
+            qs = qs.filter(cotacao__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(cotacao__loja_id__in=allowed)
+        if cotacao:
+            qs = qs.filter(cotacao_id=cotacao)
+        return qs.order_by("fornecedor__nome_fornecedor", "id")
+
+    def perform_destroy(self, instance):
+        if instance.cotacao.status in {"APROVADA", "REJEITADA", "CANCELADA", "PEDIDO_GERADO", "ENCERRADA"}:
+            raise ValidationError({"cotacao": "Cotação em status final não permite remover fornecedores."})
+        instance.delete()
 
 
 class CotacaoItemViewSet(BaseViewSet):

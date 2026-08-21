@@ -2,8 +2,11 @@ from rest_framework import serializers
 from django.db import transaction
 from decimal import Decimal
 
+from accounts.services.effective_access import EffectiveAccessService
+
 from .models import (
     Cotacao,
+    CotacaoFornecedor,
     CotacaoItem,
     CotacaoRequisicao,
     PedidoCompra,
@@ -471,6 +474,50 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
         if req_item and req_item.requisicao.empresa_id != cotacao.empresa_id:
             raise serializers.ValidationError({"requisicao_item_origem": "Item de requisição pertence a outra empresa."})
+        return attrs
+
+
+class CotacaoFornecedorSerializer(serializers.ModelSerializer):
+    fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
+
+    class Meta:
+        model = CotacaoFornecedor
+        fields = "__all__"
+        read_only_fields = ("criado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        cotacao = attrs.get("cotacao", getattr(self.instance, "cotacao", None))
+        fornecedor = attrs.get("fornecedor", getattr(self.instance, "fornecedor", None))
+        status_participacao = attrs.get(
+            "status_participacao",
+            getattr(self.instance, "status_participacao", "CONVIDADO"),
+        )
+        motivo = attrs.get("motivo_desclassificacao", getattr(self.instance, "motivo_desclassificacao", ""))
+        if not cotacao:
+            raise serializers.ValidationError({"cotacao": "Informe a cotação."})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated:
+            empresa_id = getattr(user, "empresa_id", None)
+            if empresa_id and cotacao.empresa_id != empresa_id:
+                raise serializers.ValidationError({"cotacao": "Cotação pertence a outra empresa."})
+            if not EffectiveAccessService(user).can_access_store(cotacao.loja):
+                raise serializers.ValidationError({"cotacao": "Cotação fora do escopo permitido."})
+        if cotacao.status in {"APROVADA", "REJEITADA", "CANCELADA", "PEDIDO_GERADO", "ENCERRADA"}:
+            raise serializers.ValidationError({"cotacao": "Cotação em status final não permite alterar fornecedores."})
+        if not fornecedor:
+            raise serializers.ValidationError({"fornecedor": "Informe o fornecedor."})
+        if fornecedor.empresa_id != cotacao.empresa_id:
+            raise serializers.ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
+        if not fornecedor.ativo:
+            raise serializers.ValidationError({"fornecedor": "Fornecedor inativo não pode participar da cotação."})
+        if status_participacao == "DESCLASSIFICADO" and not (motivo or "").strip():
+            raise serializers.ValidationError({"motivo_desclassificacao": "Informe o motivo da desclassificação."})
+        qs = CotacaoFornecedor.objects.filter(cotacao=cotacao, fornecedor=fornecedor)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({"fornecedor": "Fornecedor já incluído na cotação."})
         return attrs
 
 

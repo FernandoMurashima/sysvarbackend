@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
+from .models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
 
 class PedidoCompraParcelaInline(admin.TabularInline):
     model = PedidoCompraParcela
@@ -41,13 +41,21 @@ class CotacaoItemInline(admin.TabularInline):
     show_change_link = True
 
 
+class CotacaoFornecedorInline(admin.TabularInline):
+    model = CotacaoFornecedor
+    extra = 0
+    fields = ("fornecedor", "status_participacao", "motivo_desclassificacao", "observacao", "criado_em")
+    readonly_fields = ("criado_em",)
+    show_change_link = True
+
+
 @admin.register(Cotacao)
 class CotacaoAdmin(admin.ModelAdmin):
     list_display = ("id", "numero", "empresa", "loja", "responsavel", "data_abertura", "status", "prioridade", "tipo_compra")
     list_filter = ("status", "prioridade", "tipo_compra", "empresa", "loja", "data_abertura")
     search_fields = ("numero", "observacao", "responsavel__username")
     readonly_fields = ("numero", "criado_em", "atualizado_em")
-    inlines = [CotacaoRequisicaoInline, CotacaoItemInline]
+    inlines = [CotacaoRequisicaoInline, CotacaoItemInline, CotacaoFornecedorInline]
 
 
 @admin.register(CotacaoItem)
@@ -62,6 +70,13 @@ class CotacaoRequisicaoAdmin(admin.ModelAdmin):
     list_display = ("id", "cotacao", "requisicao", "criado_em")
     list_filter = ("cotacao__empresa", "cotacao__status")
     search_fields = ("cotacao__numero", "requisicao__numero")
+
+
+@admin.register(CotacaoFornecedor)
+class CotacaoFornecedorAdmin(admin.ModelAdmin):
+    list_display = ("id", "cotacao", "fornecedor", "status_participacao", "criado_em")
+    list_filter = ("status_participacao", "cotacao__empresa", "cotacao__status")
+    search_fields = ("cotacao__numero", "fornecedor__nome_fornecedor")
 
 @admin.register(PedidoCompra)
 class PedidoCompraAdmin(admin.ModelAdmin):

@@ -70,6 +70,14 @@ ORIGEM_ITEM_COTACAO = (
     ('AVULSO', 'Avulso'),
 )
 
+STATUS_PARTICIPACAO_COTACAO = (
+    ('CONVIDADO', 'Convidado'),
+    ('PROPOSTA_RECEBIDA', 'Proposta recebida'),
+    ('NAO_RESPONDEU', 'Não respondeu'),
+    ('RECUSOU', 'Recusou'),
+    ('DESCLASSIFICADO', 'Desclassificado'),
+)
+
 STATUS_REQUISICAO = (
     ('RASCUNHO', 'Não enviada'),
     ('SOLICITADA', 'Solicitada'),
@@ -417,6 +425,40 @@ class CotacaoItem(models.Model):
 
     def __str__(self):
         return self.descricao or f'Item cotação {self.id}'
+
+
+class CotacaoFornecedor(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    cotacao = models.ForeignKey(Cotacao, on_delete=models.CASCADE, related_name='fornecedores_participantes')
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='cotacoes_participantes')
+    status_participacao = models.CharField(max_length=20, choices=STATUS_PARTICIPACAO_COTACAO, default='CONVIDADO', db_index=True)
+    motivo_desclassificacao = models.TextField(blank=True, default='')
+    observacao = models.TextField(blank=True, default='')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_cotacao_fornecedor'
+        constraints = [models.UniqueConstraint(fields=['cotacao', 'fornecedor'], name='uq_cotacao_fornecedor')]
+        indexes = [
+            models.Index(fields=['cotacao', 'status_participacao']),
+            models.Index(fields=['fornecedor']),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.cotacao_id and self.fornecedor_id and self.cotacao.empresa_id != self.fornecedor.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'fornecedor': 'Fornecedor pertence a outra empresa.'})
+        if self.fornecedor_id and not self.fornecedor.ativo:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'fornecedor': 'Fornecedor inativo não pode participar da cotação.'})
+        if self.status_participacao == 'DESCLASSIFICADO' and not (self.motivo_desclassificacao or '').strip():
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'motivo_desclassificacao': 'Informe o motivo da desclassificação.'})
+
+    def __str__(self):
+        return f'Cotação {self.cotacao_id} - {self.fornecedor_id}'
 
 
 class PedidoCompra(models.Model):

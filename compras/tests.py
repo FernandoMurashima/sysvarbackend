@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -53,6 +53,18 @@ class CotacaoBaseTests(TestCase):
         }
         data.update(extras)
         return Cotacao.objects.create(**data)
+
+    def criar_fornecedor(self, documento="44999999000191", empresa=None, nome="Fornecedor Cot", ativo=True):
+        documento = documento
+        return Fornecedor.objects.create(
+            empresa=empresa or self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=documento,
+            cnpj=documento,
+            nome_fornecedor=nome,
+            categoria="OUTROS",
+            ativo=ativo,
+        )
 
     def criar_requisicao(self, numero, empresa=None, loja=None, setor=None, user=None):
         empresa = empresa or self.empresa
@@ -185,6 +197,66 @@ class CotacaoBaseTests(TestCase):
         cotacao.status = "ABERTA"
         cotacao.save(update_fields=["status"])
         resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Bloqueada"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_fornecedor_adiciona_valido(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        fornecedor = self.criar_fornecedor()
+        cotacao = self.criar_cotacao()
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao.id, "fornecedor": fornecedor.id}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["status_participacao"], "CONVIDADO")
+        self.assertEqual(resp.data["fornecedor"], fornecedor.id)
+
+    def test_api_cotacao_fornecedor_impede_duplicado(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        fornecedor = self.criar_fornecedor()
+        cotacao = self.criar_cotacao()
+        CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor)
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao.id, "fornecedor": fornecedor.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_fornecedor_impede_outra_empresa_e_inativo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        fornecedor_b = self.criar_fornecedor(documento="44888888000191", empresa=self.empresa_b, nome="Fornecedor B")
+        inativo = self.criar_fornecedor(documento="44777777000191", nome="Fornecedor Inativo", ativo=False)
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao.id, "fornecedor": fornecedor_b.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao.id, "fornecedor": inativo.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_fornecedor_desclassificacao_exige_motivo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        participante = CotacaoFornecedor.objects.create(cotacao=self.criar_cotacao(), fornecedor=self.criar_fornecedor())
+        resp = client.patch(f"/api/compras/cotacao-fornecedores/{participante.id}/", {"status_participacao": "DESCLASSIFICADO", "motivo_desclassificacao": ""}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-fornecedores/{participante.id}/", {"status_participacao": "DESCLASSIFICADO", "motivo_desclassificacao": "Sem aderência"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_api_cotacao_fornecedor_remove_em_fase_editavel(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        participante = CotacaoFornecedor.objects.create(cotacao=self.criar_cotacao(status="ABERTA"), fornecedor=self.criar_fornecedor())
+        resp = client.delete(f"/api/compras/cotacao-fornecedores/{participante.id}/")
+        self.assertEqual(resp.status_code, 204, resp.data)
+        self.assertFalse(CotacaoFornecedor.objects.filter(pk=participante.pk).exists())
+
+    def test_api_cotacao_fornecedor_bloqueia_status_final_da_cotacao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao(status="APROVADA")
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        fornecedor_novo = self.criar_fornecedor(documento="44666666000191", nome="Fornecedor Novo")
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao.id, "fornecedor": fornecedor_novo.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-fornecedores/{participante.id}/", {"status_participacao": "RECUSOU"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.delete(f"/api/compras/cotacao-fornecedores/{participante.id}/")
         self.assertEqual(resp.status_code, 400, resp.data)
 
     def test_api_item_produto_cadastrado_valido(self):

@@ -1,6 +1,7 @@
 from rest_framework.routers import DefaultRouter
 from .views import (
     CotacaoViewSet,
+    CotacaoFornecedorViewSet,
     CotacaoItemViewSet,
     PedidoCompraViewSet, PedidoCompraItemViewSet,
     PedidoCompraEntregaViewSet, PedidoCompraParcelaViewSet,
@@ -11,6 +12,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register('cotacoes', CotacaoViewSet)
+router.register('cotacao-fornecedores', CotacaoFornecedorViewSet)
 router.register('cotacao-itens', CotacaoItemViewSet)
 router.register('pedidos', PedidoCompraViewSet)
 router.register('itens', PedidoCompraItemViewSet)
