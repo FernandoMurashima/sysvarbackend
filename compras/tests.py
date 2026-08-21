@@ -452,6 +452,33 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.client.force_authenticate(self.solicitante)
 
+    def test_lojas_permitidas_usuario_com_uma_loja_retorna_uma(self):
+        resp = self.client.get("/api/compras/requisicoes/lojas-permitidas/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual([row["id"] for row in resp.data], [self.loja.id])
+
+    def test_lojas_permitidas_usuario_com_duas_lojas_retorna_duas_sem_vazar_empresa(self):
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Extra", apelido_loja="Loja Extra", cnpj="11111111000282", estado="SP")
+        self.solicitante.lojas.add(loja_extra, self.loja_b)
+        resp = self.client.get("/api/compras/requisicoes/lojas-permitidas/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        ids = {row["id"] for row in resp.data}
+        self.assertEqual(ids, {self.loja.id, loja_extra.id})
+        self.assertNotIn(self.loja_b.id, ids)
+
+    def test_lojas_permitidas_admin_sem_lojas_explicitamente_marcadas_retorna_todas_da_empresa(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Admin Extra", apelido_loja="Loja Admin Extra", cnpj="11111111000363", estado="SP")
+        admin = User.objects.create_user("admin-lojas-req", "adminlojas@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        admin.lojas.clear()
+        self.client.force_authenticate(admin)
+        resp = self.client.get("/api/compras/requisicoes/lojas-permitidas/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        ids = {row["id"] for row in resp.data}
+        self.assertEqual(ids, {self.loja.id, loja_extra.id})
+        self.assertNotIn(self.loja_b.id, ids)
+        self.client.force_authenticate(self.solicitante)
+
     def test_joao_somente_requisitar_cria_envia_e_nao_ve_todas(self):
         User = get_user_model()
         joao = User.objects.create_user("joao-req", "joao@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")

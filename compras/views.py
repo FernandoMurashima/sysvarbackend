@@ -190,6 +190,8 @@ class HasRequisicaoProcessAccess(BasePermission):
             return True
         action = getattr(view, "action", None)
         if action in {"list", "retrieve", "lojas_permitidas"}:
+            if action == "lojas_permitidas" and getattr(user, "type", "") == "Admin":
+                return True
             return _has_any_requisicao_permission(user)
         codes = self.ACTION_CODES.get(action, [])
         return any(_requisicao_access(user).has_process_permission(code) for code in codes)
@@ -1206,8 +1208,10 @@ class RequisicaoViewSet(BaseViewSet):
             qs = qs.filter(empresa_id=empresa_id)
         elif not request.user.is_superuser:
             return Response([])
-        allowed = EffectiveAccessService(request.user).allowed_store_ids()
-        if allowed is not None:
+        access = EffectiveAccessService(request.user)
+        acesso_total_empresa = bool(request.user.is_superuser or access.is_company_master() or getattr(request.user, "type", "") == "Admin")
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not acesso_total_empresa:
             qs = qs.filter(id__in=allowed)
         return Response([
             {
