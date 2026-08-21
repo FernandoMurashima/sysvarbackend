@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from cadastros.models import EmpresaContrato, EmpresaModulo, ModuloSistema
-from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 
 
 NONE = UserModulePermission.Access.NONE
@@ -267,9 +267,6 @@ class EffectiveAccessService:
             return NONE
         if self.is_company_master():
             return EDIT
-        override = user.module_permissions.filter(modulo=module_key).only("acesso").first()
-        if override:
-            return override.acesso
         perfil = getattr(user, "perfil_principal", None)
         if not perfil or not perfil.ativo:
             return NONE
@@ -287,6 +284,43 @@ class EffectiveAccessService:
             if required == VIEW and access not in {VIEW, EDIT}:
                 return False
         return True
+
+    def can_delete_module(self, module_key: str | None) -> bool:
+        if not module_key:
+            return False
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if user.is_superuser:
+            return True
+        if not self.contract_state().active or module_key not in self.available_modules():
+            return False
+        if self.is_company_master():
+            return True
+        perfil = getattr(user, "perfil_principal", None)
+        if not perfil or not perfil.ativo:
+            return False
+        return PerfilModuloPermissao.objects.filter(
+            perfil=perfil,
+            modulo__chave=module_key,
+            acesso=EDIT,
+            pode_excluir=True,
+        ).exists()
+
+    def has_process_permission(self, codigo: str) -> bool:
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if user.is_superuser:
+            return True
+        if not self.contract_state().active:
+            return False
+        if self.is_company_master():
+            return True
+        perfil = getattr(user, "perfil_principal", None)
+        if not perfil or not perfil.ativo:
+            return False
+        return PerfilProcessPermission.objects.filter(perfil=perfil, codigo=codigo, permitido=True).exists()
 
     def allowed_store_ids(self):
         user = self.user
@@ -354,9 +388,26 @@ class EffectiveAccessService:
             },
             "modulos_disponiveis_empresa": sorted(self.available_modules()) if getattr(user, "is_authenticated", False) else [],
             "permissoes_efetivas": self.effective_permissions_payload() if getattr(user, "is_authenticated", False) else {},
+            "permissoes_processos": self.process_permissions_payload() if getattr(user, "is_authenticated", False) else {},
             "lojas_permitidas": list(user.lojas.values("id", "nome_loja", "apelido_loja")) if getattr(user, "is_authenticated", False) and not user.is_superuser else [],
             "sessao_atual": self.current_session_payload(),
         }
+
+    def process_permissions_payload(self):
+        if getattr(self.user, "is_superuser", False) or self.is_company_master():
+            data = {code: True for code, _ in PerfilProcessPermission.Process.choices}
+            data.update({f"modulo.{key}.excluir": True for key in self.available_modules()})
+            return data
+        perfil = getattr(self.user, "perfil_principal", None)
+        if not perfil or not perfil.ativo:
+            return {}
+        data = {
+            p.codigo: bool(p.permitido)
+            for p in PerfilProcessPermission.objects.filter(perfil=perfil, permitido=True)
+        }
+        for p in PerfilModuloPermissao.objects.filter(perfil=perfil, acesso=EDIT, pode_excluir=True).select_related("modulo"):
+            data[f"modulo.{p.modulo.chave}.excluir"] = True
+        return data
 
     def current_session_payload(self):
         sessao = getattr(self.user, "_current_access_session", None)

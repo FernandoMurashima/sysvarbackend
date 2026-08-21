@@ -69,11 +69,7 @@ def user_module_access(user, modulo):
 
 
 def can_delete_in_module(user, modulo):
-    if not user or not user.is_authenticated:
-        return False
-    if user.is_superuser:
-        return True
-    return user_module_access(user, modulo) == EDIT
+    return EffectiveAccessService(user).can_delete_module(modulo)
 
 
 def has_field_permission(user, campo, default_roles=None):
@@ -81,12 +77,8 @@ def has_field_permission(user, campo, default_roles=None):
         return False
     if user.is_superuser:
         return True
-    try:
-        perm = user.field_permissions.filter(campo=campo).only("pode_ver").first()
-        if perm is not None:
-            return bool(perm.pode_ver)
-    except Exception:
-        pass
+    if EffectiveAccessService(user).has_process_permission(campo):
+        return True
     return has_role(user, default_roles or [])
 
 

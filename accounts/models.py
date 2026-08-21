@@ -153,6 +153,7 @@ class PerfilModuloPermissao(models.Model):
     perfil = models.ForeignKey(PerfilAcesso, on_delete=models.CASCADE, related_name="permissoes_modulos")
     modulo = models.ForeignKey('cadastros.ModuloSistema', on_delete=models.PROTECT, related_name="permissoes_perfis")
     acesso = models.CharField(max_length=10, choices=UserModulePermission.Access.choices, default=UserModulePermission.Access.NONE, db_index=True)
+    pode_excluir = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["perfil_id", "modulo__ordem"]
@@ -162,6 +163,30 @@ class PerfilModuloPermissao(models.Model):
 
     def __str__(self):
         return f"{self.perfil_id} - {self.modulo.chave}: {self.acesso}"
+
+
+class PerfilProcessPermission(models.Model):
+    class Process(models.TextChoices):
+        REQUISICAO_FAZER = "requisicoes.fazer", "Requisições - fazer"
+        REQUISICAO_APROVAR = "requisicoes.aprovar", "Requisições - aprovar"
+        REQUISICAO_ATENDER = "requisicoes.atender", "Requisições - atender"
+        PEDIDO_COMPRA_APROVAR = "pedido_compra.aprovar", "Pedido de compra - aprovar"
+        VENDA_AUTORIZAR_DESCONTO = "vendas.autorizar_desconto", "Vendas - autorizar desconto"
+        FUNCIONARIO_SALARIO = "funcionario.salario", "Funcionário - salário"
+        PRODUTO_CUSTO = "produto.custo", "Produto - custos e margens"
+
+    perfil = models.ForeignKey(PerfilAcesso, on_delete=models.CASCADE, related_name="permissoes_processos")
+    codigo = models.CharField(max_length=80, choices=Process.choices, db_index=True)
+    permitido = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ["perfil_id", "codigo"]
+        constraints = [
+            models.UniqueConstraint(fields=["perfil", "codigo"], name="uq_perfil_process_permission")
+        ]
+
+    def __str__(self):
+        return f"{self.perfil_id} - {self.codigo}: {self.permitido}"
 
 
 class SessaoUsuario(models.Model):

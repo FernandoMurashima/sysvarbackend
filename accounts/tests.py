@@ -11,7 +11,7 @@ from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
 from cadastros.models import EmpresaContrato, ModuloSistema
-from accounts.models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, SessionToken, UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from accounts.services.sessions import ConcurrentSessionService, token_hash
 from auditoria.models import AuditAction, AuditLog
@@ -358,6 +358,79 @@ class SaaSAccessControlTests(TestCase):
         self.assertEqual(response.status_code, 201)
         contrato.refresh_from_db()
         self.assertEqual(contrato.sessoes_ativas, 0)
+
+    def test_perfil_e_fonte_principal_de_permissoes_funcionais(self):
+        usuario = get_user_model().objects.create_user(
+            username="perfil_only",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        UserModulePermission.objects.create(user=usuario, modulo="vendas", acesso=UserModulePermission.Access.EDIT)
+
+        service = EffectiveAccessService(usuario)
+
+        self.assertEqual(service.module_access("vendas"), UserModulePermission.Access.NONE)
+        self.assertFalse(service.has_module_access("vendas"))
+
+    def test_niveis_de_acesso_e_exclusao_sao_resolvidos_pelo_perfil(self):
+        usuario = get_user_model().objects.create_user(
+            username="perfil_levels",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        PerfilModuloPermissao.objects.update_or_create(
+            perfil=self.perfil_padrao,
+            modulo=self.vendas,
+            defaults={"acesso": UserModulePermission.Access.VIEW, "pode_excluir": False},
+        )
+        service = EffectiveAccessService(usuario)
+        self.assertTrue(service.has_module_access("vendas"))
+        self.assertFalse(service.has_module_access("vendas", UserModulePermission.Access.EDIT))
+        self.assertFalse(service.can_delete_module("vendas"))
+
+        PerfilModuloPermissao.objects.update_or_create(
+            perfil=self.perfil_padrao,
+            modulo=self.vendas,
+            defaults={"acesso": UserModulePermission.Access.EDIT, "pode_excluir": False},
+        )
+        self.assertTrue(service.has_module_access("vendas", UserModulePermission.Access.EDIT))
+        self.assertFalse(service.can_delete_module("vendas"))
+
+        PerfilModuloPermissao.objects.update_or_create(
+            perfil=self.perfil_padrao,
+            modulo=self.vendas,
+            defaults={"acesso": UserModulePermission.Access.EDIT, "pode_excluir": True},
+        )
+        self.assertTrue(service.can_delete_module("vendas"))
+
+    def test_autorizacoes_de_processo_e_campos_sensiveis_ficam_no_perfil(self):
+        usuario = get_user_model().objects.create_user(
+            username="perfil_processos",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=self.perfil_padrao,
+        )
+        codigos = [
+            "requisicoes.fazer",
+            "requisicoes.aprovar",
+            "requisicoes.atender",
+            "pedido_compra.aprovar",
+            "vendas.autorizar_desconto",
+            "funcionario.salario",
+            "produto.custo",
+        ]
+        for codigo in codigos:
+            PerfilProcessPermission.objects.create(perfil=self.perfil_padrao, codigo=codigo, permitido=True)
+
+        service = EffectiveAccessService(usuario)
+
+        for codigo in codigos:
+            self.assertTrue(service.has_process_permission(codigo))
 
     def test_limite_de_sessoes_bloqueia_login_concorrente(self):
         contrato = self.empresa.contrato
@@ -833,7 +906,7 @@ class SaaSAccessControlTests(TestCase):
         self.empresa.contrato.refresh_from_db()
         self.assertEqual(self.empresa.contrato.usuario_master_id, novo.pk)
 
-    def test_permissao_efetiva_usa_perfil_e_override(self):
+    def test_permissao_efetiva_usa_perfil_sem_override_de_usuario(self):
         user = get_user_model().objects.create_user(
             username="operador_saas",
             password="12345678",
@@ -845,7 +918,7 @@ class SaaSAccessControlTests(TestCase):
 
         access = EffectiveAccessService(user)
 
-        self.assertEqual(access.module_access("operacional"), UserModulePermission.Access.EDIT)
+        self.assertEqual(access.module_access("operacional"), UserModulePermission.Access.VIEW)
         self.assertEqual(access.module_access("configuracoes"), UserModulePermission.Access.NONE)
         self.assertEqual(access.module_access("vendas"), UserModulePermission.Access.NONE)
 

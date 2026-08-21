@@ -6,7 +6,7 @@ from accounts.services.effective_access import EffectiveAccessService, LicenseSe
 from accounts.requisicoes_permissions import normalize_requisicoes_access
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
-from .models import PerfilAcesso, PerfilModuloPermissao, SessaoUsuario, UserModulePermission, UserFieldPermission
+from .models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, SessaoUsuario, UserModulePermission, UserFieldPermission
 
 User = get_user_model()
 
@@ -207,8 +207,8 @@ class UserSerializer(serializers.ModelSerializer):
         if not password:
             raise serializers.ValidationError({"password": "Senha inicial é obrigatória."})
         lojas = validated_data.pop("lojas", [])
-        permissoes_modulos = validated_data.pop("module_permissions", [])
-        permissoes_campos = validated_data.pop("field_permissions", [])
+        validated_data.pop("module_permissions", [])
+        validated_data.pop("field_permissions", [])
         with transaction.atomic():
             user = User(**validated_data)
             user.set_password(password)
@@ -217,7 +217,6 @@ class UserSerializer(serializers.ModelSerializer):
                 user.lojas.set(lojas)
             elif user.loja_id:
                 user.lojas.set([user.loja])
-            self._salvar_permissoes(user, permissoes_modulos, permissoes_campos)
             if user.empresa_id:
                 increment_permissions_version(user.empresa)
             request = self.context.get("request")
@@ -231,8 +230,8 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Usuário não pode alterar seu próprio perfil.")
         password = validated_data.pop("password", None)
         lojas = validated_data.pop("lojas", None)
-        permissoes_modulos = validated_data.pop("module_permissions", None)
-        permissoes_campos = validated_data.pop("field_permissions", None)
+        validated_data.pop("module_permissions", None)
+        validated_data.pop("field_permissions", None)
         was_active = instance.is_active
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -244,7 +243,6 @@ class UserSerializer(serializers.ModelSerializer):
                 instance.lojas.set(lojas)
             elif instance.loja_id and not instance.lojas.filter(pk=instance.loja_id).exists():
                 instance.lojas.add(instance.loja)
-            self._salvar_permissoes(instance, permissoes_modulos, permissoes_campos)
             if instance.empresa_id:
                 increment_permissions_version(instance.empresa)
             request = self.context.get("request")
@@ -498,16 +496,23 @@ class PerfilModuloPermissaoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PerfilModuloPermissao
-        fields = ("id", "modulo", "modulo_chave", "modulo_nome", "acesso")
+        fields = ("id", "modulo", "modulo_chave", "modulo_nome", "acesso", "pode_excluir")
+
+
+class PerfilProcessPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerfilProcessPermission
+        fields = ("id", "codigo", "permitido")
 
 
 class PerfilAcessoSerializer(serializers.ModelSerializer):
     permissoes_modulos = PerfilModuloPermissaoSerializer(many=True, required=False)
+    permissoes_processos = PerfilProcessPermissionSerializer(many=True, required=False)
     usuarios_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = PerfilAcesso
-        fields = ("id", "empresa", "nome", "descricao", "ativo", "padrao", "usuarios_count", "permissoes_modulos", "created_at", "updated_at")
+        fields = ("id", "empresa", "nome", "descricao", "ativo", "padrao", "usuarios_count", "permissoes_modulos", "permissoes_processos", "created_at", "updated_at")
         read_only_fields = ("created_at", "updated_at")
 
     def __init__(self, *args, **kwargs):
@@ -555,7 +560,7 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
                 ]
                 if missing:
                     raise serializers.ValidationError({"permissoes_modulos": f"Módulo {modulo.chave} exige dependências ativas: {', '.join(missing)}"})
-            PerfilModuloPermissao.objects.update_or_create(perfil=perfil, modulo=modulo, defaults={"acesso": acesso})
+            PerfilModuloPermissao.objects.update_or_create(perfil=perfil, modulo=modulo, defaults={"acesso": acesso, "pode_excluir": bool(item.get("pode_excluir"))})
         increment_permissions_version(perfil.empresa)
         request = self.context.get("request")
         # Obrigatório: permissões de perfil compõem a autorização efetiva dos usuários.
@@ -563,24 +568,38 @@ class PerfilAcessoSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         perms = validated_data.pop("permissoes_modulos", None)
+        proc_perms = validated_data.pop("permissoes_processos", None)
         with transaction.atomic():
             perfil = PerfilAcesso.objects.create(**validated_data)
             self._save_perms(perfil, perms)
+            self._save_process_perms(perfil, proc_perms)
             request = self.context.get("request")
             transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_CREATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=perfil, after={"nome": perfil.nome, "ativo": perfil.ativo, "padrao": perfil.padrao}))
         return perfil
 
     def update(self, instance, validated_data):
         perms = validated_data.pop("permissoes_modulos", None)
+        proc_perms = validated_data.pop("permissoes_processos", None)
         with transaction.atomic():
             for attr, value in validated_data.items():
                 setattr(instance, attr, value)
             instance.save()
             self._save_perms(instance, perms)
+            self._save_process_perms(instance, proc_perms)
             increment_permissions_version(instance.empresa)
             request = self.context.get("request")
             transaction.on_commit(lambda: AuditService.success(AuditAction.PROFILE_UPDATED, category=AuditCategory.ACCESS, request=request, user=getattr(request, "user", None), instance=instance, metadata={"campos": list(validated_data.keys())}))
         return instance
+
+    def _save_process_perms(self, perfil, proc_perms):
+        if proc_perms is None:
+            return
+        valid = {code for code, _ in PerfilProcessPermission.Process.choices}
+        received = {item["codigo"]: bool(item.get("permitido")) for item in proc_perms if item.get("codigo") in valid}
+        PerfilProcessPermission.objects.filter(perfil=perfil).exclude(codigo__in=received.keys()).delete()
+        for codigo, permitido in received.items():
+            PerfilProcessPermission.objects.update_or_create(perfil=perfil, codigo=codigo, defaults={"permitido": permitido})
+        increment_permissions_version(perfil.empresa)
 
 
 def CompanyModuleKeys(empresa):
