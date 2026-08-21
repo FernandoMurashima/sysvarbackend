@@ -8,6 +8,8 @@ from .models import (
     Cotacao,
     CotacaoFornecedor,
     CotacaoItem,
+    CotacaoProposta,
+    CotacaoPropostaItem,
     CotacaoRequisicao,
     PedidoCompra,
     PedidoCompraItem,
@@ -519,6 +521,113 @@ class CotacaoFornecedorSerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError({"fornecedor": "Fornecedor já incluído na cotação."})
         return attrs
+
+
+class CotacaoPropostaItemSerializer(serializers.ModelSerializer):
+    cotacao_item_descricao = serializers.CharField(source="cotacao_item.descricao", read_only=True)
+    quantidade_cotar = serializers.DecimalField(source="cotacao_item.quantidade_cotar", max_digits=14, decimal_places=3, read_only=True)
+
+    class Meta:
+        model = CotacaoPropostaItem
+        fields = "__all__"
+        read_only_fields = ("total_item",)
+        extra_kwargs = {"proposta": {"required": False}}
+
+    def validate(self, attrs):
+        proposta = attrs.get("proposta", getattr(self.instance, "proposta", None))
+        cotacao_item = attrs.get("cotacao_item", getattr(self.instance, "cotacao_item", None))
+        quantidade = attrs.get("quantidade_ofertada", getattr(self.instance, "quantidade_ofertada", None))
+        preco = attrs.get("preco_unitario", getattr(self.instance, "preco_unitario", None))
+        desconto = attrs.get("desconto_item", getattr(self.instance, "desconto_item", 0))
+        if proposta and proposta.cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise serializers.ValidationError({"proposta": "Cotação em status final não permite alterar propostas."})
+        if not cotacao_item:
+            raise serializers.ValidationError({"cotacao_item": "Informe o item da cotação."})
+        cotacao = attrs.get("_cotacao") or getattr(proposta, "cotacao", None)
+        if cotacao and cotacao_item.cotacao_id != cotacao.id:
+            raise serializers.ValidationError({"cotacao_item": "Item não pertence à cotação da proposta."})
+        if quantidade is None or Decimal(quantidade) <= 0:
+            raise serializers.ValidationError({"quantidade_ofertada": "Informe uma quantidade maior que zero."})
+        if preco is None or Decimal(preco) < 0:
+            raise serializers.ValidationError({"preco_unitario": "Informe preço maior ou igual a zero."})
+        if desconto is not None and Decimal(desconto) < 0:
+            raise serializers.ValidationError({"desconto_item": "Informe desconto maior ou igual a zero."})
+        return attrs
+
+
+class CotacaoPropostaSerializer(serializers.ModelSerializer):
+    itens = CotacaoPropostaItemSerializer(many=True, required=False)
+    fornecedor_nome = serializers.CharField(source="cotacao_fornecedor.fornecedor.nome_fornecedor", read_only=True)
+
+    class Meta:
+        model = CotacaoProposta
+        fields = "__all__"
+        read_only_fields = ("total_itens", "total_proposta", "criado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        cotacao = attrs.get("cotacao", getattr(self.instance, "cotacao", None))
+        participante = attrs.get("cotacao_fornecedor", getattr(self.instance, "cotacao_fornecedor", None))
+        if not cotacao:
+            raise serializers.ValidationError({"cotacao": "Informe a cotação."})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated:
+            empresa_id = getattr(user, "empresa_id", None)
+            if empresa_id and cotacao.empresa_id != empresa_id:
+                raise serializers.ValidationError({"cotacao": "Cotação pertence a outra empresa."})
+            if not EffectiveAccessService(user).can_access_store(cotacao.loja):
+                raise serializers.ValidationError({"cotacao": "Cotação fora do escopo permitido."})
+        if cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise serializers.ValidationError({"cotacao": "Cotação em status final não permite alterar propostas."})
+        if not participante:
+            raise serializers.ValidationError({"cotacao_fornecedor": "Informe o fornecedor participante."})
+        if participante.cotacao_id != cotacao.id:
+            raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor não participa desta cotação."})
+        if CotacaoProposta.objects.filter(cotacao_fornecedor=participante, ativa=True).exclude(pk=getattr(self.instance, "pk", None)).exists():
+            raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor já possui proposta ativa nesta cotação."})
+        for campo in ("frete", "outras_despesas", "desconto_geral"):
+            valor = attrs.get(campo, getattr(self.instance, campo, 0))
+            if valor is not None and Decimal(valor) < 0:
+                raise serializers.ValidationError({campo: "Informe valor maior ou igual a zero."})
+        itens = attrs.get("itens", [])
+        item_ids = [item.get("cotacao_item").id for item in itens if item.get("cotacao_item")]
+        if len(item_ids) != len(set(item_ids)):
+            raise serializers.ValidationError({"itens": "Item duplicado na proposta."})
+        for item in itens:
+            item["_cotacao"] = cotacao
+            CotacaoPropostaItemSerializer(context=self.context).validate(item)
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        itens_data = validated_data.pop("itens", [])
+        proposta = CotacaoProposta.objects.create(**validated_data)
+        self._salvar_itens(proposta, itens_data)
+        proposta.recomputar_totais()
+        proposta.save(update_fields=["total_itens", "total_proposta", "atualizado_em"])
+        participante = proposta.cotacao_fornecedor
+        if participante.status_participacao != "PROPOSTA_RECEBIDA":
+            participante.status_participacao = "PROPOSTA_RECEBIDA"
+            participante.save(update_fields=["status_participacao", "atualizado_em"])
+        return proposta
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        itens_data = validated_data.pop("itens", None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+        if itens_data is not None:
+            instance.itens.all().delete()
+            self._salvar_itens(instance, itens_data)
+        instance.recomputar_totais()
+        instance.save(update_fields=["total_itens", "total_proposta", "atualizado_em"])
+        return instance
+
+    def _salvar_itens(self, proposta, itens_data):
+        for item_data in itens_data:
+            item_data.pop("_cotacao", None)
+            CotacaoPropostaItem.objects.create(proposta=proposta, **item_data)
 
 
 class CotacaoSerializer(serializers.ModelSerializer):

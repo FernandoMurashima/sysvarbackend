@@ -3,6 +3,7 @@ from .views import (
     CotacaoViewSet,
     CotacaoFornecedorViewSet,
     CotacaoItemViewSet,
+    CotacaoPropostaViewSet,
     PedidoCompraViewSet, PedidoCompraItemViewSet,
     PedidoCompraEntregaViewSet, PedidoCompraParcelaViewSet,
     RequisicaoHistoricoViewSet, RequisicaoItemViewSet,
@@ -14,6 +15,7 @@ router = DefaultRouter()
 router.register('cotacoes', CotacaoViewSet)
 router.register('cotacao-fornecedores', CotacaoFornecedorViewSet)
 router.register('cotacao-itens', CotacaoItemViewSet)
+router.register('cotacao-propostas', CotacaoPropostaViewSet)
 router.register('pedidos', PedidoCompraViewSet)
 router.register('itens', PedidoCompraItemViewSet)
 router.register('entregas', PedidoCompraEntregaViewSet)

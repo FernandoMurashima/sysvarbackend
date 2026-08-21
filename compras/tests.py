@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -257,6 +257,104 @@ class CotacaoBaseTests(TestCase):
         resp = client.patch(f"/api/compras/cotacao-fornecedores/{participante.id}/", {"status_participacao": "RECUSOU"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
         resp = client.delete(f"/api/compras/cotacao-fornecedores/{participante.id}/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def criar_item_cotacao(self, cotacao=None, descricao="Item proposta"):
+        return CotacaoItem.objects.create(
+            cotacao=cotacao or self.criar_cotacao(),
+            produto=self.produto,
+            descricao=descricao,
+            quantidade_cotar=Decimal("5.000"),
+            unidade=self.unidade,
+            origem="AVULSO",
+        )
+
+    def proposta_payload(self, cotacao, participante, item, itens=None, **extras):
+        data = {
+            "cotacao": cotacao.id,
+            "cotacao_fornecedor": participante.id,
+            "frete": "10.00",
+            "outras_despesas": "5.00",
+            "desconto_geral": "3.00",
+            "itens": itens if itens is not None else [{
+                "cotacao_item": item.id,
+                "quantidade_ofertada": "2.000",
+                "preco_unitario": "10.00",
+                "desconto_item": "1.00",
+                "marca": "Marca A",
+            }],
+        }
+        data.update(extras)
+        return data
+
+    def test_api_cotacao_proposta_cria_valida_totais_e_status_fornecedor(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante, item), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(Decimal(resp.data["total_itens"]), Decimal("19.00"))
+        self.assertEqual(Decimal(resp.data["total_proposta"]), Decimal("31.00"))
+        participante.refresh_from_db()
+        self.assertEqual(participante.status_participacao, "PROPOSTA_RECEBIDA")
+
+    def test_api_cotacao_proposta_exige_fornecedor_participante(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        participante_b = CotacaoFornecedor.objects.create(cotacao=self.criar_cotacao(), fornecedor=self.criar_fornecedor(documento="44555555000191", nome="Fornecedor Outro"))
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante_b, item), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_proposta_item_deve_pertencer_a_cotacao(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item_outra = self.criar_item_cotacao(self.criar_cotacao(), "Outro")
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante, item_outra), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_proposta_quantidade_e_preco_validos(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante, item, itens=[{"cotacao_item": item.id, "quantidade_ofertada": "0.000", "preco_unitario": "10.00"}]), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante, item, itens=[{"cotacao_item": item.id, "quantidade_ofertada": "1.000", "preco_unitario": "-1.00"}]), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cotacao_proposta_permite_item_sem_oferta(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        self.criar_item_cotacao(cotacao, "Sem oferta")
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        resp = client.post("/api/compras/cotacao-propostas/", self.proposta_payload(cotacao, participante, item), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(len(resp.data["itens"]), 1)
+
+    def test_api_cotacao_proposta_edicao_permitida_em_fase_correta(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao(status="ABERTA")
+        item = self.criar_item_cotacao(cotacao)
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, frete=Decimal("1.00"))
+        CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=item, quantidade_ofertada=Decimal("1.000"), preco_unitario=Decimal("2.00"))
+        proposta.recomputar_totais()
+        proposta.save(update_fields=["total_itens", "total_proposta"])
+        resp = client.patch(f"/api/compras/cotacao-propostas/{proposta.id}/", {"frete": "3.00"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        cotacao.status = "APROVADA"
+        cotacao.save(update_fields=["status"])
+        resp = client.patch(f"/api/compras/cotacao-propostas/{proposta.id}/", {"frete": "4.00"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
 
     def test_api_item_produto_cadastrado_valido(self):

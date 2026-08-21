@@ -19,6 +19,7 @@ from .models import (
     Cotacao,
     CotacaoFornecedor,
     CotacaoItem,
+    CotacaoProposta,
     CotacaoRequisicao,
     PedidoCompra,
     PedidoCompraItem,
@@ -35,6 +36,7 @@ from .models import (
 from .serializers import (
     CotacaoItemSerializer,
     CotacaoFornecedorSerializer,
+    CotacaoPropostaSerializer,
     CotacaoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
@@ -578,6 +580,37 @@ class CotacaoFornecedorViewSet(BaseViewSet):
         if instance.cotacao.status in {"APROVADA", "REJEITADA", "CANCELADA", "PEDIDO_GERADO", "ENCERRADA"}:
             raise ValidationError({"cotacao": "Cotação em status final não permite remover fornecedores."})
         instance.delete()
+
+
+class CotacaoPropostaViewSet(BaseViewSet):
+    queryset = CotacaoProposta.objects.select_related(
+        "cotacao", "cotacao__empresa", "cotacao__loja", "cotacao_fornecedor", "cotacao_fornecedor__fornecedor"
+    ).prefetch_related("itens", "itens__cotacao_item").all()
+    serializer_class = CotacaoPropostaSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        cotacao = self.request.query_params.get("cotacao")
+        cotacao_fornecedor = self.request.query_params.get("cotacao_fornecedor")
+        if empresa_id:
+            qs = qs.filter(cotacao__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(cotacao__loja_id__in=allowed)
+        if cotacao:
+            qs = qs.filter(cotacao_id=cotacao)
+        if cotacao_fornecedor:
+            qs = qs.filter(cotacao_fornecedor_id=cotacao_fornecedor)
+        return qs.order_by("-data_proposta", "-id")
+
+    def perform_destroy(self, instance):
+        if instance.cotacao.status not in {"EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE"}:
+            raise ValidationError({"cotacao": "Cotação em status final não permite alterar propostas."})
+        instance.ativa = False
+        instance.save(update_fields=["ativa", "atualizado_em"])
 
 
 class CotacaoItemViewSet(BaseViewSet):

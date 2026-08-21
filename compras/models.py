@@ -461,6 +461,74 @@ class CotacaoFornecedor(models.Model):
         return f'Cotação {self.cotacao_id} - {self.fornecedor_id}'
 
 
+class CotacaoProposta(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    cotacao = models.ForeignKey(Cotacao, on_delete=models.CASCADE, related_name='propostas')
+    cotacao_fornecedor = models.ForeignKey(CotacaoFornecedor, on_delete=models.PROTECT, related_name='propostas')
+    data_proposta = models.DateField(default=timezone.localdate)
+    validade_proposta = models.DateField(null=True, blank=True)
+    prazo_entrega = models.CharField(max_length=120, blank=True, default='')
+    condicao_pagamento = models.CharField(max_length=160, blank=True, default='')
+    frete = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    outras_despesas = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    desconto_geral = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    total_itens = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    total_proposta = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    observacao = models.TextField(blank=True, default='')
+    anexo = models.FileField(upload_to='cotacoes/propostas/', null=True, blank=True)
+    ativa = models.BooleanField(default=True, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_cotacao_proposta'
+        indexes = [
+            models.Index(fields=['cotacao', 'ativa']),
+            models.Index(fields=['cotacao_fornecedor']),
+        ]
+
+    def recomputar_totais(self):
+        itens = list(self.itens.all())
+        self.total_itens = sum((i.total_item or 0) for i in itens)
+        self.total_proposta = (self.total_itens or 0) - (self.desconto_geral or 0) + (self.frete or 0) + (self.outras_despesas or 0)
+
+    def __str__(self):
+        return f'Proposta {self.id} - Cotação {self.cotacao_id}'
+
+
+class CotacaoPropostaItem(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    proposta = models.ForeignKey(CotacaoProposta, on_delete=models.CASCADE, related_name='itens')
+    cotacao_item = models.ForeignKey(CotacaoItem, on_delete=models.PROTECT, related_name='propostas_itens')
+    quantidade_ofertada = models.DecimalField(max_digits=14, decimal_places=3)
+    preco_unitario = models.DecimalField(max_digits=14, decimal_places=4)
+    desconto_item = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    marca = models.CharField(max_length=120, blank=True, default='')
+    modelo_referencia = models.CharField(max_length=120, blank=True, default='')
+    garantia = models.CharField(max_length=120, blank=True, default='')
+    prazo_entrega_item = models.CharField(max_length=120, blank=True, default='')
+    observacao = models.TextField(blank=True, default='')
+    total_item = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = 'compras_cotacao_proposta_item'
+        constraints = [models.UniqueConstraint(fields=['proposta', 'cotacao_item'], name='uq_cotacao_proposta_item')]
+        indexes = [
+            models.Index(fields=['proposta']),
+            models.Index(fields=['cotacao_item']),
+        ]
+
+    def recalcular_total(self):
+        self.total_item = (self.quantidade_ofertada or 0) * (self.preco_unitario or 0) - (self.desconto_item or 0)
+
+    def save(self, *args, **kwargs):
+        self.recalcular_total()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'Item proposta {self.id}'
+
+
 class PedidoCompra(models.Model):
     id = models.BigAutoField(primary_key=True)
 

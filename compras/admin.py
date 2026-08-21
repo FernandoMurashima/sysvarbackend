@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
+from .models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraEntrega, PedidoCompraParcela
 
 class PedidoCompraParcelaInline(admin.TabularInline):
     model = PedidoCompraParcela
@@ -77,6 +77,29 @@ class CotacaoFornecedorAdmin(admin.ModelAdmin):
     list_display = ("id", "cotacao", "fornecedor", "status_participacao", "criado_em")
     list_filter = ("status_participacao", "cotacao__empresa", "cotacao__status")
     search_fields = ("cotacao__numero", "fornecedor__nome_fornecedor")
+
+
+class CotacaoPropostaItemInline(admin.TabularInline):
+    model = CotacaoPropostaItem
+    extra = 0
+    fields = ("cotacao_item", "quantidade_ofertada", "preco_unitario", "desconto_item", "marca", "modelo_referencia", "total_item")
+    readonly_fields = ("total_item",)
+
+
+@admin.register(CotacaoProposta)
+class CotacaoPropostaAdmin(admin.ModelAdmin):
+    list_display = ("id", "cotacao", "cotacao_fornecedor", "data_proposta", "total_proposta", "ativa")
+    list_filter = ("ativa", "cotacao__empresa", "cotacao__status", "data_proposta")
+    search_fields = ("cotacao__numero", "cotacao_fornecedor__fornecedor__nome_fornecedor")
+    readonly_fields = ("total_itens", "total_proposta", "criado_em", "atualizado_em")
+    inlines = [CotacaoPropostaItemInline]
+
+
+@admin.register(CotacaoPropostaItem)
+class CotacaoPropostaItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "proposta", "cotacao_item", "quantidade_ofertada", "preco_unitario", "desconto_item", "total_item")
+    list_filter = ("proposta__cotacao__empresa",)
+    search_fields = ("proposta__cotacao__numero", "cotacao_item__descricao")
 
 @admin.register(PedidoCompra)
 class PedidoCompraAdmin(admin.ModelAdmin):
