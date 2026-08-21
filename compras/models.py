@@ -563,9 +563,11 @@ class PedidoCompra(models.Model):
     total_itens = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     total_desconto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     frete = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    outras_despesas = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     total_pedido = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     observacoes = models.TextField(null=True, blank=True)
+    cotacao_origem = models.OneToOneField(Cotacao, on_delete=models.PROTECT, null=True, blank=True, related_name='pedido_compra_gerado')
     data_cadastro = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -578,7 +580,7 @@ class PedidoCompra(models.Model):
     def recomputa_totais(self):
         itens = self.itens.all()
         self.total_itens = sum([i.total_item or 0 for i in itens])
-        self.total_pedido = (self.total_itens - (self.total_desconto or 0)) + (self.frete or 0)
+        self.total_pedido = (self.total_itens - (self.total_desconto or 0)) + (self.frete or 0) + (self.outras_despesas or 0)
         if self.total_pedido < 0:
             raise ValueError('Total do pedido não pode ser negativo.')
 

@@ -48,6 +48,8 @@ class PedidoCompraItemSerializer(serializers.ModelSerializer):
 
         if not pedido:
             raise serializers.ValidationError({"pedido": "Informe o pedido."})
+        if pedido.cotacao_origem_id:
+            raise serializers.ValidationError({"pedido": "Pedido originado de cotação aprovada não permite alteração comercial."})
         if pedido.status != "AB":
             raise serializers.ValidationError({"pedido": "Somente pedidos em aberto (AB) permitem alteração de itens."})
         if not produto:
@@ -137,6 +139,7 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
     parcelas = PedidoCompraParcelaSerializer(many=True, read_only=True)
     idnatureza = serializers.SerializerMethodField()
     natureza_label = serializers.SerializerMethodField()
+    cotacao_origem_numero = serializers.IntegerField(source="cotacao_origem.numero", read_only=True)
 
     # proteção: forma de pagamento setada via ação específica
     forma_pagamento = serializers.CharField(read_only=True)
@@ -154,6 +157,10 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
+        if self.instance and self.instance.cotacao_origem_id:
+            protegidos = {"loja", "fornecedor", "forma_pagamento", "prazo_pagamento", "total_desconto", "frete", "outras_despesas", "observacoes"}
+            if set(attrs.keys()) & protegidos:
+                raise serializers.ValidationError("Pedido originado de cotação aprovada não permite alteração comercial.")
         attrs.pop("tipo", None)
         frete = Decimal(attrs.get("frete", getattr(self.instance, "frete", 0)) or 0)
         total_desconto = Decimal(attrs.get("total_desconto", getattr(self.instance, "total_desconto", 0)) or 0)
@@ -635,6 +642,7 @@ class CotacaoSerializer(serializers.ModelSerializer):
     requisicoes_vinculadas = CotacaoRequisicaoSerializer(many=True, read_only=True)
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
+    pedido_compra_gerado_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotacao
@@ -655,3 +663,7 @@ class CotacaoSerializer(serializers.ModelSerializer):
             "criado_em",
             "atualizado_em",
         )
+
+    def get_pedido_compra_gerado_id(self, obj):
+        pedido = getattr(obj, "pedido_compra_gerado", None)
+        return getattr(pedido, "id", None)

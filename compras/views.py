@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Avg, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
@@ -601,6 +602,47 @@ class CotacaoViewSet(BaseViewSet):
             ],
         }
 
+    def _tipo_pedido_cotacao(self, tipo_compra):
+        return {"REVENDA": "1", "USO_CONSUMO": "2", "INSUMO": "4"}.get(tipo_compra, "2")
+
+    def _gerar_pedido_da_cotacao(self, cotacao, request):
+        existente = getattr(cotacao, "pedido_compra_gerado", None)
+        if existente:
+            return existente
+        snapshot = cotacao.snapshot_proposta_aprovada or {}
+        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor").get(pk=cotacao.proposta_vencedora_id)
+        pedido = PedidoCompra.objects.create(
+            empresa=cotacao.empresa,
+            loja=cotacao.loja,
+            fornecedor=proposta.cotacao_fornecedor.fornecedor,
+            tipo=self._tipo_pedido_cotacao(cotacao.tipo_compra),
+            emissao=timezone.localdate(),
+            previsao_entrega=parse_date(str(snapshot.get("prazo_entrega"))) if str(snapshot.get("prazo_entrega") or "").count("-") == 2 else None,
+            forma_pagamento=snapshot.get("condicao_pagamento") or "",
+            frete=Decimal(str(snapshot.get("frete") or 0)),
+            outras_despesas=Decimal(str(snapshot.get("outras_despesas") or 0)),
+            total_desconto=Decimal(str(snapshot.get("desconto_geral") or 0)),
+            observacoes=f"Origem: Cotação {cotacao.numero}",
+            cotacao_origem=cotacao,
+        )
+        for item in snapshot.get("itens", []):
+            cot_item = CotacaoItem.objects.filter(pk=item.get("cotacao_item"), cotacao=cotacao).first()
+            pedido_item = PedidoCompraItem.objects.create(
+                pedido=pedido,
+                produto=getattr(cot_item, "produto", None),
+                descricao_livre=(getattr(cot_item, "descricao", "") if not getattr(cot_item, "produto_id", None) else ""),
+                qtd=Decimal(str(item.get("quantidade_ofertada") or 0)),
+                preco_unit=Decimal(str(item.get("preco_unitario") or 0)).quantize(Decimal("0.01")),
+                desconto_valor=Decimal(str(item.get("desconto_item") or 0)),
+                observacoes=item.get("observacao") or "",
+            )
+            pedido_item.recalcular_totais()
+            pedido_item.save(update_fields=["qtd", "preco_unit", "desconto_valor", "total_item", "observacoes"])
+        pedido.recomputa_totais()
+        pedido.save(update_fields=["total_itens", "total_desconto", "frete", "outras_despesas", "total_pedido"])
+        _audit("pedidocompra", pedido.pk, {"acao": "gerado_por_cotacao", "cotacao": cotacao.pk, "usuario": request.user.pk}, request, action="pedido_gerado_por_cotacao")
+        return pedido
+
     @action(detail=True, methods=["post"], url_path="selecionar-vencedor")
     def selecionar_vencedor(self, request, pk=None):
         cotacao = self.get_object()
@@ -637,6 +679,7 @@ class CotacaoViewSet(BaseViewSet):
         return Response(self.get_serializer(cotacao).data)
 
     @action(detail=True, methods=["post"], url_path="aprovar")
+    @transaction.atomic
     def aprovar(self, request, pk=None):
         if not _can_approve_cotacao(request.user):
             raise PermissionDenied("Usuário sem autorização para aprovar cotação.")
@@ -651,7 +694,10 @@ class CotacaoViewSet(BaseViewSet):
         cotacao.aprovado_em = timezone.now()
         cotacao.snapshot_proposta_aprovada = self._snapshot_proposta(proposta)
         cotacao.save(update_fields=["status", "aprovado_por", "aprovado_em", "snapshot_proposta_aprovada", "atualizado_em"])
-        _audit("cotacao", cotacao.pk, {"acao": "aprovar", "proposta_vencedora": proposta.id, "snapshot": True}, request, action="cotacao_aprovar")
+        pedido = self._gerar_pedido_da_cotacao(cotacao, request)
+        cotacao.status = "PEDIDO_GERADO"
+        cotacao.save(update_fields=["status", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "aprovar", "proposta_vencedora": proposta.id, "snapshot": True, "pedido": pedido.pk}, request, action="cotacao_aprovar")
         return Response(self.get_serializer(cotacao).data)
 
     @action(detail=True, methods=["post"], url_path="rejeitar")
@@ -946,6 +992,8 @@ class PedidoCompraViewSet(BaseViewSet):
         serializer.save(empresa=loja.empresa)
 
     def perform_update(self, serializer):
+        if serializer.instance.cotacao_origem_id:
+            raise ValidationError({"detail": "Pedido originado de cotação aprovada não permite alteração comercial."})
         loja = serializer.validated_data.get("loja") or serializer.instance.loja
         fornecedor = serializer.validated_data.get("fornecedor") or serializer.instance.fornecedor
         empresa_id = serializer.instance.empresa_id or getattr(loja, "empresa_id", None)
@@ -962,12 +1010,14 @@ class PedidoCompraViewSet(BaseViewSet):
             raise ValidationError({"fornecedor": "Fornecedor bloqueado não pode ser utilizado em novo pedido."})
         obj = serializer.save(empresa=loja.empresa)
         obj.recomputa_totais()
-        obj.save(update_fields=["total_itens", "total_desconto", "frete", "total_pedido"])
+        obj.save(update_fields=["total_itens", "total_desconto", "frete", "outras_despesas", "total_pedido"])
         _sincronizar_parcelas_planejadas(obj, self.request, motivo="alteracao_cabecalho")
 
     def perform_destroy(self, instance):
         if instance.status != "AB":
             raise ValidationError({"detail": "Somente pedidos em aberto (AB) podem ser excluídos."})
+        if instance.cotacao_origem_id:
+            raise ValidationError({"detail": "Pedido originado de cotação aprovada não pode ser excluído por edição comercial."})
         instance.delete()
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
@@ -979,6 +1029,8 @@ class PedidoCompraViewSet(BaseViewSet):
         Body: {"id_forma": 2} ou {"codigo_forma":"30/60", "id_prazo": 1}.
         """
         obj: PedidoCompra = self.get_object()
+        if obj.cotacao_origem_id:
+            return Response({"detail": "Pedido originado de cotação aprovada não permite alterar condição comercial."}, status=status.HTTP_400_BAD_REQUEST)
         if obj.status != "AB":
             return Response({"detail": "Somente AB"}, status=status.HTTP_400_BAD_REQUEST)
         if not FIN_OK:
@@ -1019,7 +1071,7 @@ class PedidoCompraViewSet(BaseViewSet):
             return Response({"detail": "Prazo sem parcelas configuradas"}, status=status.HTTP_400_BAD_REQUEST)
 
         obj.recomputa_totais()
-        obj.save(update_fields=["total_itens", "total_desconto", "frete", "total_pedido"])
+        obj.save(update_fields=["total_itens", "total_desconto", "frete", "outras_despesas", "total_pedido"])
 
         before = obj.forma_pagamento
         before_prazo = obj.prazo_pagamento_id
@@ -1330,9 +1382,11 @@ class PedidoCompraItemViewSet(BaseViewSet):
         pedido = instance.pedido
         if pedido.status != "AB":
             raise ValidationError({"pedido": "Somente pedidos em aberto (AB) permitem exclusão de itens."})
+        if pedido.cotacao_origem_id:
+            raise ValidationError({"pedido": "Pedido originado de cotação aprovada não permite alteração comercial."})
         instance.delete()
         pedido.recomputa_totais()
-        update_fields = ["total_itens", "total_desconto", "frete", "total_pedido"]
+        update_fields = ["total_itens", "total_desconto", "frete", "outras_despesas", "total_pedido"]
         if not pedido.itens.exists() and pedido.tipo:
             pedido.tipo = ""
             update_fields.append("tipo")
@@ -1359,6 +1413,8 @@ class PedidoCompraItemViewSet(BaseViewSet):
             raise ValidationError({"produto": "Produto de fabricação própria não participa de Compras."})
         if pedido and pedido.status != "AB":
             raise ValidationError({"pedido": "Somente pedidos em aberto (AB) permitem alteração de itens."})
+        if pedido and pedido.cotacao_origem_id:
+            raise ValidationError({"pedido": "Pedido originado de cotação aprovada não permite alteração comercial."})
 
 
 # ----------------- Entregas -----------------

@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -469,7 +470,7 @@ class CotacaoBaseTests(TestCase):
         client.force_authenticate(self.criar_aprovador_cotacao())
         resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(resp.data["status"], "APROVADA")
+        self.assertEqual(resp.data["status"], "PEDIDO_GERADO")
         self.assertIsNotNone(resp.data["snapshot_proposta_aprovada"])
         resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Não pode"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
@@ -490,6 +491,80 @@ class CotacaoBaseTests(TestCase):
         resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/rejeitar/", {"motivo": "Revisar valores"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["status"], "REJEITADA")
+
+    def aprovar_cotacao_com_pedido(self, frete="7.00"):
+        client = APIClient()
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        proposta = self.criar_proposta_com_item(cotacao, item, "44688888000191", "12.00", qtd="2.000", frete=frete)
+        proposta.outras_despesas = Decimal("4.00")
+        proposta.desconto_geral = Decimal("3.00")
+        proposta.condicao_pagamento = "30 dias"
+        proposta.recomputar_totais()
+        proposta.save(update_fields=["outras_despesas", "desconto_geral", "condicao_pagamento", "total_itens", "total_proposta"])
+        client.force_authenticate(self.user)
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
+        client.force_authenticate(self.criar_aprovador_cotacao())
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
+        cotacao.refresh_from_db()
+        return client, cotacao, proposta, resp
+
+    def test_api_cotacao_aprovacao_gera_um_pedido_com_dados_do_snapshot(self):
+        client, cotacao, proposta, resp = self.aprovar_cotacao_com_pedido()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "PEDIDO_GERADO")
+        pedido = cotacao.pedido_compra_gerado
+        self.assertEqual(pedido.cotacao_origem, cotacao)
+        self.assertEqual(pedido.fornecedor, proposta.cotacao_fornecedor.fornecedor)
+        self.assertEqual(pedido.loja, cotacao.loja)
+        self.assertEqual(pedido.forma_pagamento, "30 dias")
+        self.assertEqual(pedido.frete, Decimal("7.00"))
+        self.assertEqual(pedido.outras_despesas, Decimal("4.00"))
+        self.assertEqual(pedido.total_desconto, Decimal("3.00"))
+        self.assertEqual(pedido.total_pedido, Decimal("32.00"))
+        item = pedido.itens.get()
+        self.assertEqual(item.qtd, Decimal("2.000"))
+        self.assertEqual(item.preco_unit, Decimal("12.00"))
+
+    def test_api_cotacao_aprovacao_nao_duplica_pedido(self):
+        client, cotacao, _proposta, resp = self.aprovar_cotacao_com_pedido()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        first_id = cotacao.pedido_compra_gerado.id
+        cotacao.status = "AGUARDANDO_APROVACAO"
+        cotacao.save(update_fields=["status"])
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(PedidoCompra.objects.filter(cotacao_origem=cotacao).count(), 1)
+        self.assertEqual(cotacao.pedido_compra_gerado.id, first_id)
+
+    def test_api_pedido_originado_de_cotacao_bloqueia_alteracao_comercial(self):
+        client, cotacao, _proposta, resp = self.aprovar_cotacao_com_pedido()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        pedido = cotacao.pedido_compra_gerado
+        item = pedido.itens.get()
+        resp = client.patch(f"/api/compras/pedidos/{pedido.id}/", {"frete": "99.00"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/itens/{item.id}/", {"qtd": "9.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.delete(f"/api/compras/itens/{item.id}/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_falha_geracao_pedido_faz_rollback(self):
+        client = APIClient()
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        proposta = self.criar_proposta_com_item(cotacao, item, "44699999000191", "12.00")
+        client.force_authenticate(self.user)
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
+        client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
+        client.force_authenticate(self.criar_aprovador_cotacao())
+        with patch("compras.views.PedidoCompraItem.objects.create", side_effect=Exception("falha")):
+            with self.assertRaises(Exception):
+                client.post(f"/api/compras/cotacoes/{cotacao.id}/aprovar/", {}, format="json")
+        cotacao.refresh_from_db()
+        self.assertEqual(cotacao.status, "AGUARDANDO_APROVACAO")
+        self.assertFalse(PedidoCompra.objects.filter(cotacao_origem=cotacao).exists())
 
     def test_api_item_produto_cadastrado_valido(self):
         client = APIClient()
