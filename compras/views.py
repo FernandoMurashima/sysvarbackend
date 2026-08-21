@@ -643,6 +643,20 @@ class CotacaoViewSet(BaseViewSet):
         _audit("pedidocompra", pedido.pk, {"acao": "gerado_por_cotacao", "cotacao": cotacao.pk, "usuario": request.user.pk}, request, action="pedido_gerado_por_cotacao")
         return pedido
 
+    def _cancelar_pedido_vinculado_se_permitido(self, cotacao, request):
+        pedido = getattr(cotacao, "pedido_compra_gerado", None)
+        if not pedido:
+            return None
+        if PedidoCompraEntrega.objects.filter(item__pedido=pedido, qtd_recebida__gt=0).exists():
+            raise ValidationError({"pedido": "Pedido vinculado já possui recebimento/execução e não pode ser cancelado com segurança."})
+        if (pedido.status or "").upper() != "AB":
+            raise ValidationError({"pedido": "Pedido vinculado não está em aberto e não pode ser cancelado pela Cotação."})
+        antes = pedido.status
+        pedido.status = "CA"
+        pedido.save(update_fields=["status"])
+        _audit("pedidocompra", pedido.pk, {"acao": "cancelado_por_cancelamento_cotacao", "cotacao": cotacao.pk, "status": [antes, "CA"]}, request, action="cancelar_por_cotacao")
+        return pedido
+
     @action(detail=True, methods=["post"], url_path="selecionar-vencedor")
     def selecionar_vencedor(self, request, pk=None):
         cotacao = self.get_object()
@@ -716,6 +730,26 @@ class CotacaoViewSet(BaseViewSet):
         cotacao.motivo_rejeicao = motivo
         cotacao.save(update_fields=["status", "rejeitado_por", "rejeitado_em", "motivo_rejeicao", "atualizado_em"])
         _audit("cotacao", cotacao.pk, {"acao": "rejeitar", "motivo": motivo}, request, action="cotacao_rejeitar")
+        return Response(self.get_serializer(cotacao).data)
+
+    @transaction.atomic
+    @action(detail=True, methods=["post"], url_path="cancelar")
+    def cancelar(self, request, pk=None):
+        cotacao = self.get_object()
+        motivo = (request.data.get("motivo") or "").strip()
+        if not motivo:
+            raise ValidationError({"motivo": "Informe o motivo do cancelamento."})
+        if cotacao.status in {"CANCELADA", "ENCERRADA"}:
+            raise ValidationError({"status": "Cotação já está cancelada ou encerrada."})
+        pedido = None
+        if cotacao.status == "PEDIDO_GERADO":
+            pedido = self._cancelar_pedido_vinculado_se_permitido(cotacao, request)
+        cotacao.status = "CANCELADA"
+        cotacao.cancelado_por = request.user
+        cotacao.cancelado_em = timezone.now()
+        cotacao.motivo_cancelamento = motivo
+        cotacao.save(update_fields=["status", "cancelado_por", "cancelado_em", "motivo_cancelamento", "atualizado_em"])
+        _audit("cotacao", cotacao.pk, {"acao": "cancelar", "motivo": motivo, "pedido": getattr(pedido, "pk", None)}, request, action="cotacao_cancelar")
         return Response(self.get_serializer(cotacao).data)
 
     @action(detail=True, methods=["get"], url_path="comparativo")

@@ -566,6 +566,69 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(cotacao.status, "AGUARDANDO_APROVACAO")
         self.assertFalse(PedidoCompra.objects.filter(cotacao_origem=cotacao).exists())
 
+    def test_api_cancela_cotacao_antes_aprovacao_e_exige_motivo(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/cancelar/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/cancelar/", {"motivo": "Compra suspensa"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "CANCELADA")
+        self.assertEqual(resp.data["motivo_cancelamento"], "Compra suspensa")
+        self.assertTrue(AuditLog.objects.filter(model="cotacao", object_id=str(cotacao.pk)).exists())
+
+    def test_api_cotacao_cancelada_fica_imutavel(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao(status="CANCELADA")
+        item = self.criar_item_cotacao(cotacao)
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante)
+        resp = client.patch(f"/api/compras/cotacoes/{cotacao.id}/", {"observacao": "Não altera"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-itens/{item.id}/", {"quantidade_cotar": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-fornecedores/{participante.id}/", {"observacao": "Não altera"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = client.patch(f"/api/compras/cotacao-propostas/{proposta.id}/", {"frete": "1.00"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_api_cancela_aprovada_sem_pedido_executado(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao(status="APROVADA")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/cancelar/", {"motivo": "Revisão"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "CANCELADA")
+        self.assertTrue(Cotacao.objects.filter(pk=cotacao.pk).exists())
+
+    def test_api_cancela_pedido_gerado_sem_recebimento_preserva_registros(self):
+        client, cotacao, _proposta, resp = self.aprovar_cotacao_com_pedido()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        pedido = cotacao.pedido_compra_gerado
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/cancelar/", {"motivo": "Cancelamento aprovado"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        cotacao.refresh_from_db()
+        pedido.refresh_from_db()
+        self.assertEqual(cotacao.status, "CANCELADA")
+        self.assertEqual(pedido.status, "CA")
+        self.assertTrue(PedidoCompra.objects.filter(pk=pedido.pk).exists())
+
+    def test_api_bloqueia_cancelamento_com_pedido_recebido(self):
+        client, cotacao, _proposta, resp = self.aprovar_cotacao_com_pedido()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        pedido = cotacao.pedido_compra_gerado
+        item = pedido.itens.get()
+        PedidoCompraEntrega.objects.create(item=item, qtd_prevista=item.qtd, qtd_recebida=Decimal("1.000"), status="PARC")
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/cancelar/", {"motivo": "Cancelar"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        cotacao.refresh_from_db()
+        pedido.refresh_from_db()
+        self.assertEqual(cotacao.status, "PEDIDO_GERADO")
+        self.assertEqual(pedido.status, "AB")
+
     def test_api_item_produto_cadastrado_valido(self):
         client = APIClient()
         client.force_authenticate(self.user)
