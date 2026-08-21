@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -9,7 +10,7 @@ from rest_framework.test import APIClient
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -375,6 +376,76 @@ class CotacaoBaseTests(TestCase):
         self.assertNotIn("Outra empresa", nomes)
         grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
         self.assertEqual(set(grupo["requisicoes_ids"]), {req_permitida.id})
+
+    def _pedido_compra_produto(self, emissao, qtd, recebido, preco, loja=None, fornecedor=None, status="AP"):
+        fornecedor = fornecedor or Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=f"44{PedidoCompra.objects.count():012d}",
+            cnpj=f"44{PedidoCompra.objects.count():012d}",
+            nome_fornecedor=f"Fornecedor {PedidoCompra.objects.count()}",
+            categoria="USO_CONSUMO",
+        )
+        pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=loja or self.loja, fornecedor=fornecedor, emissao=emissao, status=status)
+        item = PedidoCompraItem.objects.create(pedido=pedido, produto=self.produto, qtd=qtd, preco_unit=preco)
+        PedidoCompraEntrega.objects.create(item=item, qtd_prevista=qtd, qtd_recebida=recebido, data_recebida=emissao if recebido else None, status="RECB" if recebido >= qtd else "PARC")
+        return item
+
+    def test_api_apoio_decisao_calcula_necessidade_estoque_pendente_e_historico(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao=self.produto.descricao, quantidade_cotar=Decimal("8.000"), unidade=self.unidade, origem="AVULSO")
+        self._req_aprovada_com_produto(27, Decimal("6.000"))
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=self.produto, loja=self.loja, saldo=Decimal("7.000"))
+        forn_a = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="55111111000191", cnpj="55111111000191", nome_fornecedor="Fornecedor A", categoria="USO_CONSUMO")
+        self._pedido_compra_produto(timezone.localdate() - timedelta(days=30), Decimal("10.000"), Decimal("4.000"), Decimal("2.80"), fornecedor=forn_a)
+        self._pedido_compra_produto(timezone.localdate() - timedelta(days=60), Decimal("30.000"), Decimal("30.000"), Decimal("2.60"), fornecedor=forn_a, status="AT")
+        self._pedido_compra_produto(timezone.localdate() - timedelta(days=90), Decimal("50.000"), Decimal("50.000"), Decimal("2.40"), fornecedor=forn_a, status="AT")
+        self._pedido_compra_produto(timezone.localdate() - timedelta(days=120), Decimal("70.000"), Decimal("70.000"), Decimal("2.20"), fornecedor=forn_a, status="AT")
+        resp = client.get(f"/api/compras/cotacao-itens/{item.id}/apoio-decisao/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(str(resp.data["necessidade_aberta"])), Decimal("6.000"))
+        self.assertEqual(Decimal(str(resp.data["estoque_atual"])), Decimal("7.000"))
+        self.assertEqual(Decimal(str(resp.data["pedidos_pendentes"])), Decimal("6.000"))
+        self.assertEqual(len(resp.data["ultimas_compras"]), 3)
+        self.assertEqual(Decimal(str(resp.data["ultimo_preco"])), Decimal("2.80"))
+        self.assertEqual(Decimal(str(resp.data["preco_medio"])).quantize(Decimal("0.01")), Decimal("2.60"))
+        self.assertEqual(Decimal(str(resp.data["media_quantidades_ultimas_compras"])).quantize(Decimal("0.01")), Decimal("28.00"))
+        self.assertEqual(Decimal(str(resp.data["quantidade_cotar"])), Decimal("8.000"))
+
+    def test_api_apoio_decisao_item_sem_historico_e_avulso(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item_produto = CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao=self.produto.descricao, quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        resp = client.get(f"/api/compras/cotacao-itens/{item_produto.id}/apoio-decisao/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["ultimas_compras"], [])
+        self.assertIsNone(resp.data["ultimo_preco"])
+        item_avulso = CotacaoItem.objects.create(cotacao=cotacao, descricao="Livre", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        resp = client.get(f"/api/compras/cotacao-itens/{item_avulso.id}/apoio-decisao/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIsNone(resp.data["necessidade_aberta"])
+        self.assertEqual(resp.data["ultimas_compras"], [])
+
+    def test_api_apoio_decisao_respeita_empresa_e_loja(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao=self.produto.descricao, quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        self._req_aprovada_com_produto(28, Decimal("2.000"))
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Apoio Fora", apelido_loja="Loja Apoio Fora", cnpj="33111111000894", estado="SP")
+        self._req_aprovada_com_produto(29, Decimal("9.000"), loja=loja_extra)
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=self.produto, loja=self.loja, saldo=Decimal("4.000"))
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=self.produto, loja=loja_extra, saldo=Decimal("99.000"))
+        self._pedido_compra_produto(timezone.localdate(), Decimal("5.000"), Decimal("1.000"), Decimal("2.00"))
+        self._pedido_compra_produto(timezone.localdate(), Decimal("9.000"), Decimal("0.000"), Decimal("2.00"), loja=loja_extra)
+        resp = client.get(f"/api/compras/cotacao-itens/{item.id}/apoio-decisao/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(str(resp.data["necessidade_aberta"])), Decimal("2.000"))
+        self.assertEqual(Decimal(str(resp.data["estoque_atual"])), Decimal("4.000"))
+        self.assertEqual(Decimal(str(resp.data["pedidos_pendentes"])), Decimal("4.000"))
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

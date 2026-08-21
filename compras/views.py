@@ -4,7 +4,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Avg, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
@@ -576,6 +576,88 @@ class CotacaoItemViewSet(BaseViewSet):
         if instance.cotacao.status != "EM_ELABORACAO":
             raise ValidationError({"cotacao": "Somente cotações em elaboração podem excluir itens."})
         instance.delete()
+
+    def _allowed_store_ids_for_empresa(self):
+        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        return allowed
+
+    @action(detail=True, methods=["get"], url_path="apoio-decisao")
+    def apoio_decisao(self, request, pk=None):
+        item = self.get_object()
+        produto = item.produto
+        if not produto:
+            return Response({
+                "cotacao_item": item.id,
+                "produto": None,
+                "necessidade_aberta": None,
+                "estoque_atual": None,
+                "pedidos_pendentes": None,
+                "ultimas_compras": [],
+                "media_quantidades_ultimas_compras": None,
+                "ultimo_preco": None,
+                "preco_medio": None,
+                "quantidade_cotar": item.quantidade_cotar,
+            })
+
+        empresa_id = item.cotacao.empresa_id
+        allowed = self._allowed_store_ids_for_empresa()
+        req_itens = RequisicaoItem.objects.filter(
+            requisicao__empresa_id=empresa_id,
+            requisicao__status__in=["APROVADA", "EM_PROCESSO_COMPRA", "EM_PROCESSO_CONTRATACAO"],
+            produto=produto,
+            qtd_pendente__gt=0,
+        )
+        estoques = ProdutoUsoConsumoEstoque.objects.filter(empresa_id=empresa_id, produto=produto)
+        pedidos_itens = PedidoCompraItem.objects.select_related("pedido", "pedido__fornecedor").prefetch_related("entregas").filter(
+            pedido__empresa_id=empresa_id,
+            pedido__status__in=["AB", "AP"],
+            produto=produto,
+        )
+        historico_itens = PedidoCompraItem.objects.select_related("pedido", "pedido__fornecedor").filter(
+            pedido__empresa_id=empresa_id,
+            produto=produto,
+            entregas__qtd_recebida__gt=0,
+        )
+        if allowed is not None:
+            req_itens = req_itens.filter(requisicao__loja_id__in=allowed)
+            estoques = estoques.filter(loja_id__in=allowed)
+            pedidos_itens = pedidos_itens.filter(pedido__loja_id__in=allowed)
+            historico_itens = historico_itens.filter(pedido__loja_id__in=allowed)
+        historico_itens = historico_itens.distinct().order_by("-pedido__emissao", "-id")[:3]
+
+        necessidade = req_itens.aggregate(total=Sum("qtd_pendente"))["total"] or Decimal("0")
+        estoque = estoques.aggregate(total=Sum("saldo"))["total"] or Decimal("0")
+        pendente = Decimal("0")
+        for pedido_item in pedidos_itens:
+            recebido = pedido_item.entregas.aggregate(total=Sum("qtd_recebida"))["total"] or Decimal("0")
+            saldo = Decimal(pedido_item.qtd or 0) - Decimal(recebido or 0)
+            if saldo > 0:
+                pendente += saldo
+
+        ultimas = []
+        for pedido_item in historico_itens:
+            recebido = pedido_item.entregas.aggregate(total=Sum("qtd_recebida"))["total"] or Decimal("0")
+            data_recebida = pedido_item.entregas.filter(qtd_recebida__gt=0).aggregate(data=Max("data_recebida"))["data"]
+            ultimas.append({
+                "data": data_recebida or pedido_item.pedido.emissao,
+                "quantidade": recebido,
+                "preco_unitario": pedido_item.preco_unit,
+                "fornecedor": getattr(pedido_item.pedido.fornecedor, "nome_fornecedor", "") or getattr(pedido_item.pedido.fornecedor, "RazaoSocial", ""),
+            })
+        media_qtd = (sum((Decimal(c["quantidade"] or 0) for c in ultimas), Decimal("0")) / Decimal(len(ultimas))) if ultimas else None
+        preco_medio = (sum((Decimal(c["preco_unitario"] or 0) for c in ultimas), Decimal("0")) / Decimal(len(ultimas))) if ultimas else None
+        return Response({
+            "cotacao_item": item.id,
+            "produto": produto.pk,
+            "necessidade_aberta": necessidade,
+            "estoque_atual": estoque,
+            "pedidos_pendentes": pendente,
+            "ultimas_compras": ultimas,
+            "media_quantidades_ultimas_compras": media_qtd,
+            "ultimo_preco": ultimas[0]["preco_unitario"] if ultimas else None,
+            "preco_medio": preco_medio,
+            "quantidade_cotar": item.quantidade_cotar,
+        })
 
 
 class PedidoCompraViewSet(BaseViewSet):
