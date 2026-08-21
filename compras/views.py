@@ -171,6 +171,13 @@ def _scope_requisicao_queryset(qs, user):
     return qs
 
 
+def _cotacao_store_filter_ids(user):
+    access = EffectiveAccessService(user)
+    if getattr(user, "is_superuser", False) or access.is_company_master() or getattr(user, "type", "") == "Admin":
+        return None
+    return access.allowed_store_ids()
+
+
 def _has_any_requisicao_permission(user):
     return _can_request_requisicao(user) or _can_approve_requisicao(user) or _can_manage_requisicao(user)
 
@@ -379,7 +386,7 @@ class CotacaoViewSet(BaseViewSet):
             qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         if allowed is not None:
             qs = qs.filter(loja_id__in=allowed)
         if loja:
@@ -418,7 +425,7 @@ class CotacaoViewSet(BaseViewSet):
             qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         if allowed is not None:
             qs = qs.filter(loja_id__in=allowed)
         return qs.order_by("-data_requisicao", "-numero")
@@ -836,7 +843,7 @@ class CotacaoFornecedorViewSet(BaseViewSet):
             qs = qs.filter(cotacao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         if allowed is not None:
             qs = qs.filter(cotacao__loja_id__in=allowed)
         if cotacao:
@@ -864,7 +871,7 @@ class CotacaoPropostaViewSet(BaseViewSet):
             qs = qs.filter(cotacao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         if allowed is not None:
             qs = qs.filter(cotacao__loja_id__in=allowed)
         if cotacao:
@@ -892,7 +899,7 @@ class CotacaoItemViewSet(BaseViewSet):
             qs = qs.filter(cotacao__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         if allowed is not None:
             qs = qs.filter(cotacao__loja_id__in=allowed)
         if cotacao:
@@ -905,7 +912,7 @@ class CotacaoItemViewSet(BaseViewSet):
         instance.delete()
 
     def _allowed_store_ids_for_empresa(self):
-        allowed = EffectiveAccessService(self.request.user).allowed_store_ids()
+        allowed = _cotacao_store_filter_ids(self.request.user)
         return allowed
 
     @action(detail=True, methods=["get"], url_path="apoio-decisao")

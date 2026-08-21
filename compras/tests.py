@@ -187,6 +187,69 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["loja"], loja_extra.id)
 
+    def test_api_admin_cria_item_e_listagem_da_cotacao_retorna_item(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Admin Item", apelido_loja="Loja Admin Item", cnpj="33111111000886", estado="SP")
+        admin = User.objects.create_user("admin-cot-item", "admincotitem@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        admin.lojas.clear()
+        admin.perfil_principal = self.perfil_compras
+        admin.save(update_fields=["perfil_principal"])
+        client = APIClient()
+        client.force_authenticate(admin)
+        resp = client.post("/api/compras/cotacoes/", {"loja": loja_extra.id, "tipo_compra": "USO_CONSUMO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        cotacao_id = resp.data["id"]
+        resp = client.post("/api/compras/cotacao-itens/", {
+            "cotacao": cotacao_id,
+            "produto": self.produto.Idproduto,
+            "quantidade_cotar": "1.000",
+            "unidade": self.unidade.Idunidade,
+            "origem": "AVULSO",
+            "descricao": "",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        item_id = resp.data["id"]
+        self.assertTrue(CotacaoItem.objects.filter(pk=item_id, cotacao_id=cotacao_id, cotacao__empresa=self.empresa, cotacao__loja=loja_extra, produto=self.produto, unidade=self.unidade, quantidade_cotar=Decimal("1.000"), origem="AVULSO").exists())
+        resp = client.get("/api/compras/cotacao-itens/", {"cotacao": cotacao_id})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data if isinstance(resp.data, list) else resp.data["results"]
+        self.assertIn(item_id, [row["id"] for row in rows])
+        resp = client.get(f"/api/compras/cotacoes/{cotacao_id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIn(item_id, [row["id"] for row in resp.data["itens"]])
+
+    def test_api_admin_adiciona_fornecedor_e_listagem_da_cotacao_retorna_fornecedor(self):
+        User = get_user_model()
+        loja_extra = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Admin Forn", apelido_loja="Loja Admin Forn", cnpj="33111111000967", estado="SP")
+        admin = User.objects.create_user("admin-cot-forn", "admincotforn@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        admin.lojas.clear()
+        admin.perfil_principal = self.perfil_compras
+        admin.save(update_fields=["perfil_principal"])
+        fornecedor = self.criar_fornecedor(documento="44555555000191", nome="Fornecedor Listagem")
+        fornecedor_b = self.criar_fornecedor(documento="44555555000272", empresa=self.empresa_b, nome="Fornecedor Outra Empresa")
+        cotacao_outra = self.criar_cotacao(empresa=self.empresa_b, loja=self.loja_b, responsavel=self.user_b)
+        participante_outra = CotacaoFornecedor.objects.create(cotacao=cotacao_outra, fornecedor=fornecedor_b)
+        client = APIClient()
+        client.force_authenticate(admin)
+        resp = client.post("/api/compras/cotacoes/", {"loja": loja_extra.id, "tipo_compra": "USO_CONSUMO"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        cotacao_id = resp.data["id"]
+        resp = client.post("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao_id, "fornecedor": fornecedor.id}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        participante_id = resp.data["id"]
+        self.assertTrue(CotacaoFornecedor.objects.filter(pk=participante_id, cotacao_id=cotacao_id, fornecedor=fornecedor, status_participacao="CONVIDADO").exists())
+        resp = client.get("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao_id})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data if isinstance(resp.data, list) else resp.data["results"]
+        ids = [row["id"] for row in rows]
+        self.assertIn(participante_id, ids)
+        self.assertNotIn(participante_outra.id, ids)
+        resp = client.get(f"/api/compras/cotacoes/{cotacao_id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = client.get("/api/compras/cotacao-fornecedores/", {"cotacao": cotacao_id})
+        rows = resp.data if isinstance(resp.data, list) else resp.data["results"]
+        self.assertIn(participante_id, [row["id"] for row in rows])
+
     def test_api_edita_em_elaboracao_e_bloqueia_fora_dela(self):
         client = APIClient()
         client.force_authenticate(self.user)
