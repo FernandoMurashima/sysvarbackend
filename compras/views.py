@@ -137,7 +137,7 @@ def _can_request_requisicao(user):
 
 
 def _can_view_all_requisicao(user):
-    return _is_requisicao_admin(user)
+    return _is_requisicao_admin(user) or _can_manage_requisicao(user)
 
 
 def _can_edit_requisicao_content(user, requisicao):

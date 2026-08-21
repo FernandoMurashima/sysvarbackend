@@ -290,6 +290,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         User = get_user_model()
         joao = User.objects.create_user("joao-req", "joao@test.local", "123", empresa=self.empresa, loja=self.loja, type="Regular")
         self._atribuir_perfil_requisicao(joao, "Joao Req", ["requisicoes.fazer"])
+        req_alheia = Requisicao.objects.create(numero=2, empresa=self.empresa, loja=self.loja, setor=self.setor, requisitante=self.outro_mesma_empresa, criado_por=self.outro_mesma_empresa, justificativa="Colega")
         self.client.force_authenticate(joao)
         req = self.criar_requisicao(justificativa="Joao requisita")
         self.item_produto(req)
@@ -298,9 +299,11 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "minhas"})
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertIn(req.id, [r["id"] for r in rows])
+        self.assertNotIn(req_alheia.id, [r["id"] for r in rows])
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertNotIn(req.id, [r["id"] for r in rows])
+        self.assertNotIn(req_alheia.id, [r["id"] for r in rows])
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_analisar"})
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertEqual(rows, [])
@@ -344,6 +347,10 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
         self.client.force_authenticate(atendente)
         resp = self.client.get("/api/compras/requisicoes/", {"visao": "para_atender"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(req.id, [r["id"] for r in rows])
+        resp = self.client.get("/api/compras/requisicoes/", {"visao": "todas"})
         self.assertEqual(resp.status_code, 200, resp.data)
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertIn(req.id, [r["id"] for r in rows])
