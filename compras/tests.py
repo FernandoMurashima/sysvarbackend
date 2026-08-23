@@ -929,6 +929,88 @@ class CotacaoBaseTests(TestCase):
         grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
         self.assertEqual(set(grupo["requisicoes_ids"]), {req_permitida.id})
 
+    def test_api_cotacao_enxerga_requisicoes_de_outro_usuario_sem_permissao_requisicoes(self):
+        User = get_user_model()
+        requisitante = User.objects.create_user("joao-cot-req", "joaocotreq@test.local", "123", empresa=self.empresa, loja=self.loja)
+        cotador = User.objects.create_user("maria-cot", "mariacot@test.local", "123", empresa=self.empresa, loja=self.loja)
+        perfil_cotacao = PerfilAcesso.objects.create(empresa=self.empresa, nome="Cotação sem Requisição")
+        PerfilModuloPermissao.objects.create(perfil=perfil_cotacao, modulo=self.mod_compras, acesso=UserModulePermission.Access.EDIT)
+        PerfilProcessPermission.objects.create(perfil=perfil_cotacao, codigo="cotacao.aprovar", permitido=True)
+        cotador.perfil_principal = perfil_cotacao
+        cotador.save(update_fields=["perfil_principal"])
+
+        req = self.criar_requisicao(230, user=requisitante)
+        req.status = "APROVADA"
+        req.save(update_fields=["status"])
+        RequisicaoItem.objects.create(
+            requisicao=req,
+            tipo="MATERIAL",
+            origem="LIVRE",
+            descricao="Necessidade de outro requisitante",
+            unidade=self.unidade,
+            categoria_material=self.categoria_material,
+            qtd_solicitada=Decimal("4.000"),
+            qtd_pendente=Decimal("4.000"),
+            status="APROVADO",
+        )
+
+        client = APIClient()
+        client.force_authenticate(cotador)
+        resp = client.get("/api/compras/cotacoes/requisicoes-disponiveis/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIn(req.id, [row["id"] for row in resp.data])
+
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        origem_ids = {origem["requisicao"] for row in resp.data for origem in row["origens"]}
+        self.assertIn(req.id, origem_ids)
+
+        cotacao = self.criar_cotacao(responsavel=cotador)
+        resp = client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-requisicoes/", {"requisicoes": [req.id]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(CotacaoRequisicao.objects.filter(cotacao=cotacao, requisicao=req).exists())
+
+        resp = client.get("/api/compras/requisicoes/", {"visao": "todas"})
+        self.assertEqual(resp.status_code, 403, resp.data)
+
+    def test_api_cotacao_requisicoes_respeita_empresa_loja_e_elegibilidade_para_usuario_cotacao(self):
+        User = get_user_model()
+        cotador = User.objects.create_user("maria-cot-escopo", "mariacotescopo@test.local", "123", empresa=self.empresa, loja=self.loja)
+        perfil_cotacao = PerfilAcesso.objects.create(empresa=self.empresa, nome="Cotação Escopo")
+        PerfilModuloPermissao.objects.create(perfil=perfil_cotacao, modulo=self.mod_compras, acesso=UserModulePermission.Access.EDIT)
+        PerfilProcessPermission.objects.create(perfil=perfil_cotacao, codigo="cotacao.aprovar", permitido=True)
+        cotador.perfil_principal = perfil_cotacao
+        cotador.save(update_fields=["perfil_principal"])
+
+        req_ok, _ = self._req_aprovada_com_itens(231)
+        loja_fora = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Cot Fora Escopo", apelido_loja="Loja Cot Fora Escopo", cnpj="33111111001661", estado="SP")
+        req_fora, _ = self._req_aprovada_com_itens(232, loja=loja_fora)
+        req_b = self.criar_requisicao(233, empresa=self.empresa_b, loja=self.loja_b, setor=self.setor_b, user=self.user_b)
+        req_b.status = "APROVADA"
+        req_b.save(update_fields=["status"])
+        RequisicaoItem.objects.create(requisicao=req_b, tipo="MATERIAL", origem="LIVRE", descricao="Outra empresa cotação", unidade=self.unidade_b, qtd_solicitada=Decimal("1.000"), qtd_pendente=Decimal("1.000"))
+        req_sem_pendente, itens_sem_pendente = self._req_aprovada_com_itens(234)
+        for item_sem_pendente in itens_sem_pendente:
+            item_sem_pendente.qtd_pendente = Decimal("0.000")
+            item_sem_pendente.save(update_fields=["qtd_pendente"])
+
+        client = APIClient()
+        client.force_authenticate(cotador)
+        resp = client.get("/api/compras/cotacoes/requisicoes-disponiveis/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        ids = {row["id"] for row in resp.data}
+        self.assertIn(req_ok.id, ids)
+        self.assertNotIn(req_fora.id, ids)
+        self.assertNotIn(req_b.id, ids)
+
+        resp = client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        origem_ids = {origem["requisicao"] for row in resp.data for origem in row["origens"]}
+        self.assertIn(req_ok.id, origem_ids)
+        self.assertNotIn(req_fora.id, origem_ids)
+        self.assertNotIn(req_b.id, origem_ids)
+        self.assertNotIn(req_sem_pendente.id, origem_ids)
+
     def test_api_requisicao_item_sem_estoque_sem_compra_indica_vermelho(self):
         client = APIClient()
         client.force_authenticate(self.user)

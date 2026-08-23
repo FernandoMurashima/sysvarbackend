@@ -177,6 +177,13 @@ def _cotacao_store_filter_ids(user):
     return access.allowed_store_ids()
 
 
+def _scope_cotacao_requisicao_queryset(qs, user):
+    allowed = _cotacao_store_filter_ids(user)
+    if allowed is not None:
+        qs = qs.filter(loja_id__in=allowed)
+    return qs
+
+
 def _has_any_requisicao_permission(user):
     return _can_request_requisicao(user) or _can_approve_requisicao(user) or _can_manage_requisicao(user)
 
@@ -417,17 +424,16 @@ class CotacaoViewSet(BaseViewSet):
 
     def _requisicoes_disponiveis_qs(self):
         qs = Requisicao.objects.select_related("loja", "setor", "requisitante").prefetch_related("itens").filter(
-            status__in=["APROVADA", "EM_PROCESSO_COMPRA", "EM_PROCESSO_CONTRATACAO"]
+            status__in=["APROVADA", "EM_PROCESSO_COMPRA", "EM_PROCESSO_CONTRATACAO"],
+            itens__qtd_pendente__gt=0,
         )
         empresa_id = self._empresa_id_usuario()
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
-        allowed = _cotacao_store_filter_ids(self.request.user)
-        if allowed is not None:
-            qs = qs.filter(loja_id__in=allowed)
-        return qs.order_by("-data_requisicao", "-numero")
+        qs = _scope_cotacao_requisicao_queryset(qs, self.request.user)
+        return qs.distinct().order_by("-data_requisicao", "-numero")
 
     def _copiar_item_requisicao(self, cotacao, req_item):
         descricao = req_item.produto.descricao if req_item.produto_id else (req_item.descricao or req_item.titulo_servico or "")
