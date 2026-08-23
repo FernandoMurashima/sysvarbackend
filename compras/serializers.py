@@ -26,9 +26,10 @@ from .models import (
 )
 
 try:
-    from financeiro.models import Pagar
+    from financeiro.models import Pagar, PrazoPagamento
 except Exception:
     Pagar = None
+    PrazoPagamento = None
 
 # ----------------- Itens -----------------
 TIPOS_COMPRA_PRODUTO = ("1", "2", "4")
@@ -570,11 +571,18 @@ class CotacaoPropostaItemSerializer(serializers.ModelSerializer):
 class CotacaoPropostaSerializer(serializers.ModelSerializer):
     itens = CotacaoPropostaItemSerializer(many=True, required=False)
     fornecedor_nome = serializers.CharField(source="cotacao_fornecedor.fornecedor.nome_fornecedor", read_only=True)
+    prazo_pagamento_descricao = serializers.CharField(source="prazo_pagamento.descricao", read_only=True)
+    condicao_pagamento_legivel = serializers.SerializerMethodField()
 
     class Meta:
         model = CotacaoProposta
         fields = "__all__"
         read_only_fields = ("total_itens", "total_proposta", "criado_em", "atualizado_em")
+
+    def get_condicao_pagamento_legivel(self, obj):
+        if obj.prazo_pagamento_id:
+            return obj.prazo_pagamento.descricao or obj.prazo_pagamento.codigo
+        return obj.condicao_pagamento or ""
 
     def validate(self, attrs):
         cotacao = attrs.get("cotacao", getattr(self.instance, "cotacao", None))
@@ -597,6 +605,12 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor não participa desta cotação."})
         if CotacaoProposta.objects.filter(cotacao_fornecedor=participante, ativa=True).exclude(pk=getattr(self.instance, "pk", None)).exists():
             raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor já possui proposta ativa nesta cotação."})
+        prazo_pagamento = attrs.get("prazo_pagamento", getattr(self.instance, "prazo_pagamento", None))
+        if prazo_pagamento and cotacao and prazo_pagamento.empresa_id and prazo_pagamento.empresa_id != cotacao.empresa_id:
+            raise serializers.ValidationError({"prazo_pagamento": "Condição de pagamento pertence a outra empresa."})
+        prazo_dias = attrs.get("prazo_entrega_dias", getattr(self.instance, "prazo_entrega_dias", None))
+        if prazo_dias is not None and int(prazo_dias) < 0:
+            raise serializers.ValidationError({"prazo_entrega_dias": "Informe prazo de entrega maior ou igual a zero."})
         for campo in ("frete", "outras_despesas", "desconto_geral"):
             valor = attrs.get(campo, getattr(self.instance, campo, 0))
             if valor is not None and Decimal(valor) < 0:
@@ -613,6 +627,7 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         itens_data = validated_data.pop("itens", [])
+        self._normalizar_campos_estruturados(validated_data)
         proposta = CotacaoProposta.objects.create(**validated_data)
         self._salvar_itens(proposta, itens_data)
         proposta.recomputar_totais()
@@ -626,6 +641,7 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         itens_data = validated_data.pop("itens", None)
+        self._normalizar_campos_estruturados(validated_data)
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save()
@@ -641,6 +657,14 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
             item_data.pop("_cotacao", None)
             CotacaoPropostaItem.objects.create(proposta=proposta, **item_data)
 
+    def _normalizar_campos_estruturados(self, data):
+        prazo = data.get("prazo_pagamento")
+        if prazo:
+            data["condicao_pagamento"] = prazo.descricao or prazo.codigo
+        dias = data.get("prazo_entrega_dias")
+        if dias is not None:
+            data["prazo_entrega"] = str(dias)
+
 
 class CotacaoSerializer(serializers.ModelSerializer):
     itens = CotacaoItemSerializer(many=True, read_only=True)
@@ -648,6 +672,7 @@ class CotacaoSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
     pedido_compra_gerado_id = serializers.SerializerMethodField()
+    status_operacional = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotacao
@@ -675,3 +700,29 @@ class CotacaoSerializer(serializers.ModelSerializer):
     def get_pedido_compra_gerado_id(self, obj):
         pedido = getattr(obj, "pedido_compra_gerado", None)
         return getattr(pedido, "id", None)
+
+    def get_status_operacional(self, obj):
+        labels_finais = {
+            "AGUARDANDO_APROVACAO": "Aguardando aprovação",
+            "APROVADA": "Aprovada",
+            "REJEITADA": "Rejeitada",
+            "CANCELADA": "Cancelada",
+            "PEDIDO_GERADO": "Pedido de compra gerado",
+            "ENCERRADA": "Encerrada",
+        }
+        if obj.status in labels_finais:
+            return labels_finais[obj.status]
+        itens_count = obj.itens.count()
+        if not itens_count:
+            return "Em elaboração — sem itens"
+        fornecedores = list(obj.fornecedores_participantes.all())
+        if not fornecedores:
+            return "Aguardando fornecedores"
+        ativos = [f for f in fornecedores if f.status_participacao not in {"RECUSOU", "DESCLASSIFICADO"}]
+        total = len(ativos)
+        recebidas = sum(1 for f in ativos if f.status_participacao == "PROPOSTA_RECEBIDA")
+        if total and recebidas < total:
+            return f"Aguardando propostas — {recebidas} de {total} recebidas"
+        if recebidas:
+            return "Pronta para análise"
+        return "Aguardando propostas"

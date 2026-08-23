@@ -6,12 +6,14 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.serializers import CotacaoSerializer
+from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -131,6 +133,51 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(resp.data["status"], "EM_ELABORACAO")
         self.assertEqual(resp.data["prioridade"], "NORMAL")
         self.assertEqual(resp.data["responsavel"], self.user.id)
+
+    def test_cotacao_status_operacional_derivado(self):
+        cotacao = self.criar_cotacao()
+        self.assertEqual(CotacaoSerializer(cotacao).data["status_operacional"], "Em elaboração — sem itens")
+        CotacaoItem.objects.create(cotacao=cotacao, descricao="Item", quantidade_cotar=Decimal("1.000"), unidade=self.unidade, origem="AVULSO")
+        self.assertEqual(CotacaoSerializer(cotacao).data["status_operacional"], "Aguardando fornecedores")
+        fornecedor_a = self.criar_fornecedor()
+        fornecedor_b = self.criar_fornecedor(documento="44888888000191", nome="Fornecedor B")
+        participante_a = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor_a)
+        CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor_b)
+        self.assertEqual(CotacaoSerializer(cotacao).data["status_operacional"], "Aguardando propostas — 0 de 2 recebidas")
+        participante_a.status_participacao = "PROPOSTA_RECEBIDA"
+        participante_a.save(update_fields=["status_participacao"])
+        self.assertEqual(CotacaoSerializer(cotacao).data["status_operacional"], "Aguardando propostas — 1 de 2 recebidas")
+        cotacao.status = "CANCELADA"
+        cotacao.save(update_fields=["status"])
+        self.assertEqual(CotacaoSerializer(cotacao).data["status_operacional"], "Cancelada")
+
+    def test_pedido_gerado_herda_pagamento_e_prazo_da_proposta(self):
+        cotacao = self.criar_cotacao()
+        item = CotacaoItem.objects.create(cotacao=cotacao, descricao="Item", quantidade_cotar=Decimal("2.000"), unidade=self.unidade, origem="AVULSO")
+        fornecedor = self.criar_fornecedor()
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30D", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        proposta = CotacaoProposta.objects.create(
+            cotacao=cotacao,
+            cotacao_fornecedor=participante,
+            prazo_pagamento=prazo,
+            condicao_pagamento="30 dias",
+            prazo_entrega_dias=15,
+            prazo_entrega="15",
+        )
+        CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=item, quantidade_ofertada=Decimal("2.000"), preco_unitario=Decimal("10.00"))
+        proposta.recomputar_totais()
+        proposta.save(update_fields=["total_itens", "total_proposta"])
+        cotacao.proposta_vencedora = proposta
+        view = CotacaoViewSet()
+        cotacao.snapshot_proposta_aprovada = view._snapshot_proposta(proposta)
+        cotacao.save(update_fields=["proposta_vencedora", "snapshot_proposta_aprovada"])
+        request = APIRequestFactory().post("/")
+        request.user = self.user
+        pedido = view._gerar_pedido_da_cotacao(cotacao, request)
+        self.assertEqual(pedido.prazo_pagamento, prazo)
+        self.assertEqual(pedido.forma_pagamento, "30 dias")
+        self.assertEqual(pedido.previsao_entrega, pedido.emissao + timedelta(days=15))
 
     def test_api_bloqueia_loja_fora_do_escopo(self):
         client = APIClient()

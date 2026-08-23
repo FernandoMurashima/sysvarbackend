@@ -479,7 +479,15 @@ class CotacaoProposta(models.Model):
     data_proposta = models.DateField(default=timezone.localdate)
     validade_proposta = models.DateField(null=True, blank=True)
     prazo_entrega = models.CharField(max_length=120, blank=True, default='')
+    prazo_entrega_dias = models.PositiveIntegerField(null=True, blank=True)
     condicao_pagamento = models.CharField(max_length=160, blank=True, default='')
+    prazo_pagamento = models.ForeignKey(
+        'financeiro.PrazoPagamento',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='cotacoes_propostas',
+    )
     frete = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     outras_despesas = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     desconto_geral = models.DecimalField(max_digits=14, decimal_places=2, default=0)

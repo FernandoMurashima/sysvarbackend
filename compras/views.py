@@ -7,7 +7,6 @@ from django.db import transaction
 from django.db.models import Avg, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from accounts.permissions import HasModuleRole
@@ -374,7 +373,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 
 # ----------------- Pedido -----------------
 class CotacaoViewSet(BaseViewSet):
-    queryset = Cotacao.objects.select_related("empresa", "loja", "responsavel").all()
+    queryset = Cotacao.objects.select_related("empresa", "loja", "responsavel").prefetch_related("itens", "fornecedores_participantes").all()
     serializer_class = CotacaoSerializer
 
     def get_queryset(self):
@@ -591,7 +590,10 @@ class CotacaoViewSet(BaseViewSet):
             "outras_despesas": str(proposta.outras_despesas),
             "desconto_geral": str(proposta.desconto_geral),
             "condicao_pagamento": proposta.condicao_pagamento,
+            "prazo_pagamento": proposta.prazo_pagamento_id,
+            "condicao_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
             "prazo_entrega": proposta.prazo_entrega,
+            "prazo_entrega_dias": proposta.prazo_entrega_dias,
             "validade_proposta": proposta.validade_proposta.isoformat() if proposta.validade_proposta else None,
             "total_final": str(proposta.total_proposta),
             "justificativa_vencedor": proposta.cotacao.justificativa_vencedor,
@@ -620,15 +622,23 @@ class CotacaoViewSet(BaseViewSet):
         if existente:
             return existente
         snapshot = cotacao.snapshot_proposta_aprovada or {}
-        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor").get(pk=cotacao.proposta_vencedora_id)
+        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor", "prazo_pagamento").get(pk=cotacao.proposta_vencedora_id)
+        prazo_dias = snapshot.get("prazo_entrega_dias")
+        if prazo_dias is None:
+            try:
+                prazo_dias = int(snapshot.get("prazo_entrega") or 0)
+            except (TypeError, ValueError):
+                prazo_dias = None
+        previsao_entrega = timezone.localdate() + timedelta(days=int(prazo_dias)) if prazo_dias is not None else None
         pedido = PedidoCompra.objects.create(
             empresa=cotacao.empresa,
             loja=cotacao.loja,
             fornecedor=proposta.cotacao_fornecedor.fornecedor,
             tipo=self._tipo_pedido_cotacao(cotacao.tipo_compra),
             emissao=timezone.localdate(),
-            previsao_entrega=parse_date(str(snapshot.get("prazo_entrega"))) if str(snapshot.get("prazo_entrega") or "").count("-") == 2 else None,
-            forma_pagamento=snapshot.get("condicao_pagamento") or "",
+            previsao_entrega=previsao_entrega,
+            forma_pagamento=snapshot.get("condicao_pagamento_legivel") or snapshot.get("condicao_pagamento") or "",
+            prazo_pagamento_id=snapshot.get("prazo_pagamento") or None,
             frete=Decimal(str(snapshot.get("frete") or 0)),
             outras_despesas=Decimal(str(snapshot.get("outras_despesas") or 0)),
             total_desconto=Decimal(str(snapshot.get("desconto_geral") or 0)),
@@ -712,7 +722,7 @@ class CotacaoViewSet(BaseViewSet):
             raise ValidationError({"status": "Somente cotações aguardando aprovação podem ser aprovadas."})
         if not cotacao.proposta_vencedora_id:
             raise ValidationError({"proposta_vencedora": "Selecione uma proposta vencedora."})
-        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor").get(pk=cotacao.proposta_vencedora_id)
+        proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor", "prazo_pagamento").get(pk=cotacao.proposta_vencedora_id)
         cotacao.status = "APROVADA"
         cotacao.aprovado_por = request.user
         cotacao.aprovado_em = timezone.now()
@@ -767,7 +777,7 @@ class CotacaoViewSet(BaseViewSet):
         cotacao = self.get_object()
         itens = list(cotacao.itens.select_related("produto", "unidade").order_by("id"))
         propostas = list(
-            CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor")
+            CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor", "prazo_pagamento")
             .prefetch_related("itens", "itens__cotacao_item")
             .filter(cotacao=cotacao, ativa=True)
             .order_by("cotacao_fornecedor__fornecedor__nome_fornecedor", "id")
@@ -808,8 +818,11 @@ class CotacaoViewSet(BaseViewSet):
                 "diferenca_percentual": Decimal("0") if menor_total in (None, 0) else ((total - menor_total) / menor_total * Decimal("100")).quantize(Decimal("0.01")),
                 "economia_vs_mais_cara": Decimal("0") if maior_total is None else (maior_total - total),
                 "prazo_entrega": proposta.prazo_entrega,
+                "prazo_entrega_dias": proposta.prazo_entrega_dias,
                 "melhor_prazo": melhor_prazo is not None and str(proposta.prazo_entrega).isdigit() and int(proposta.prazo_entrega) == melhor_prazo,
                 "condicao_pagamento": proposta.condicao_pagamento,
+                "prazo_pagamento": proposta.prazo_pagamento_id,
+                "condicao_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
                 "validade_proposta": proposta.validade_proposta,
                 "itens": [{
                     "cotacao_item": item.id,
