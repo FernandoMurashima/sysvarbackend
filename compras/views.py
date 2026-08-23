@@ -624,6 +624,7 @@ class CotacaoViewSet(BaseViewSet):
                     "modelo_referencia": item.modelo_referencia,
                     "garantia": item.garantia,
                     "prazo_entrega_item": item.prazo_entrega_item,
+                    "unidade": item.cotacao_item.unidade_id,
                     "total_item": str(item.total_item),
                 }
                 for item in proposta.itens.select_related("cotacao_item").all()
@@ -673,15 +674,17 @@ class CotacaoViewSet(BaseViewSet):
                 pedido=pedido,
                 produto=getattr(cot_item, "produto", None),
                 descricao_livre=(getattr(cot_item, "descricao", "") if not getattr(cot_item, "produto_id", None) else ""),
+                unidade_id=item.get("unidade") or getattr(cot_item, "unidade_id", None),
                 qtd=Decimal(str(item.get("quantidade_ofertada") or 0)),
                 preco_unit=Decimal(str(item.get("preco_unitario") or 0)).quantize(Decimal("0.01")),
                 desconto_valor=Decimal(str(item.get("desconto_item") or 0)),
                 observacoes=item.get("observacao") or "",
             )
             pedido_item.recalcular_totais()
-            pedido_item.save(update_fields=["qtd", "preco_unit", "desconto_valor", "total_item", "observacoes"])
+            pedido_item.save(update_fields=["qtd", "preco_unit", "desconto_valor", "total_item", "observacoes", "unidade"])
         pedido.recomputa_totais()
         pedido.save(update_fields=["total_itens", "total_desconto", "frete", "outras_despesas", "total_pedido"])
+        _sincronizar_parcelas_planejadas(pedido, request, motivo="pedido_gerado_por_cotacao")
         _audit("pedidocompra", pedido.pk, {"acao": "gerado_por_cotacao", "cotacao": cotacao.pk, "usuario": request.user.pk}, request, action="pedido_gerado_por_cotacao")
         return pedido
 

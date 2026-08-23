@@ -157,6 +157,7 @@ class CotacaoBaseTests(TestCase):
         fornecedor = self.criar_fornecedor()
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30D", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
         forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOL", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(
             cotacao=cotacao,
@@ -179,6 +180,8 @@ class CotacaoBaseTests(TestCase):
         pedido = view._gerar_pedido_da_cotacao(cotacao, request)
         self.assertEqual(pedido.prazo_pagamento, prazo)
         self.assertEqual(pedido.forma_pagamento, forma.codigo)
+        self.assertEqual(pedido.itens.get().unidade, self.unidade)
+        self.assertEqual(list(PedidoCompraParcela.objects.filter(pedido=pedido).values_list("valor", flat=True)), [pedido.total_pedido])
         self.assertEqual(pedido.previsao_entrega, pedido.emissao + timedelta(days=15))
 
     def test_api_bloqueia_loja_fora_do_escopo(self):
@@ -637,6 +640,7 @@ class CotacaoBaseTests(TestCase):
         item = self.criar_item_cotacao(cotacao)
         proposta = self.criar_proposta_com_item(cotacao, item, "44688888000191", "12.00", qtd="2.000", frete=frete)
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"30D{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
         forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"BOL{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
         proposta.outras_despesas = Decimal("4.00")
         proposta.desconto_geral = Decimal("3.00")
@@ -666,7 +670,9 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(pedido.forma_pagamento, proposta.forma_pagamento)
         self.assertNotEqual(pedido.forma_pagamento, "30 dias")
         self.assertEqual(pedido.prazo_pagamento, proposta.prazo_pagamento)
+        self.assertEqual(pedido.itens.get().unidade, self.unidade)
         self.assertEqual(pedido.previsao_entrega, pedido.emissao + timedelta(days=15))
+        self.assertEqual(list(PedidoCompraParcela.objects.filter(pedido=pedido, status="PLAN").values_list("valor", flat=True)), [pedido.total_pedido])
         snapshot = cotacao.snapshot_proposta_aprovada
         self.assertEqual(snapshot["forma_pagamento"], proposta.forma_pagamento)
         self.assertEqual(snapshot["forma_pagamento_legivel"], "Boleto")
@@ -683,6 +689,22 @@ class CotacaoBaseTests(TestCase):
         item = pedido.itens.get()
         self.assertEqual(item.qtd, Decimal("2.000"))
         self.assertEqual(item.preco_unit, Decimal("12.00"))
+
+        natureza = Nat_Lancamento.objects.create(
+            empresa=self.empresa,
+            codigo=f"COT{cotacao.id}",
+            categoria_principal="Compras",
+            subcategoria="Pedido",
+            descricao="Compra por cotação",
+            tipo="SAIDA",
+            status="ATIVO",
+            tipo_natureza="D",
+        )
+        resp = client.post(f"/api/compras/pedidos/{pedido.id}/aprovar/", {"idnatureza": natureza.idnatureza}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, "AP")
+        self.assertEqual(PedidoCompraParcela.objects.filter(pedido=pedido, status="GERADA", pagar_item_id__isnull=False).count(), 1)
 
     def test_api_cotacao_aprovacao_nao_duplica_pedido(self):
         client, cotacao, _proposta, resp = self.aprovar_cotacao_com_pedido()
@@ -713,6 +735,7 @@ class CotacaoBaseTests(TestCase):
         item = self.criar_item_cotacao(cotacao)
         proposta = self.criar_proposta_com_item(cotacao, item, "44699999000191", "12.00")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30DFALHA", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
         forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLFALHA", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
         proposta.forma_pagamento = forma.codigo
         proposta.prazo_pagamento = prazo

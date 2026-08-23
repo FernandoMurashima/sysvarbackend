@@ -40,10 +40,15 @@ TIPOS_COMPRA_PRODUTO = ("1", "2", "4")
 class PedidoCompraItemSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
     produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    unidade_descricao = serializers.SerializerMethodField()
 
     class Meta:
         model = PedidoCompraItem
         fields = "__all__"
+
+    def get_unidade_descricao(self, obj):
+        unidade = getattr(obj, "unidade", None) or getattr(getattr(obj, "produto", None), "unidade", None)
+        return getattr(unidade, "Descricao", "") or ""
 
     def validate(self, attrs):
         pedido = attrs.get("pedido") or getattr(self.instance, "pedido", None)
@@ -85,6 +90,8 @@ class PedidoCompraItemSerializer(serializers.ModelSerializer):
             if qtd is None or Decimal(qtd) <= 0:
                 raise serializers.ValidationError({"qtd": "Informe uma quantidade maior que zero."})
             unidade = getattr(produto, "unidade", None)
+            if unidade and not attrs.get("unidade", getattr(self.instance, "unidade", None)):
+                attrs["unidade"] = unidade
             if unidade and not unidade.permite_decimal and Decimal(qtd) != Decimal(qtd).to_integral_value():
                 raise serializers.ValidationError({
                     "qtd": f"A unidade {unidade.Descricao} não aceita quantidade decimal."

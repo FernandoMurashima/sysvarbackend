@@ -609,6 +609,7 @@ class PedidoCompraItem(models.Model):
 
     # Uso/Consumo
     descricao_livre = models.CharField(max_length=200, null=True, blank=True)
+    unidade = models.ForeignKey('produto.Unidade', on_delete=models.PROTECT, null=True, blank=True, related_name='itens_pedido_compra')
 
     # Números
     qtd = models.DecimalField(max_digits=12, decimal_places=3, default=0, validators=[MinValueValidator(0)])
