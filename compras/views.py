@@ -588,6 +588,13 @@ class CotacaoViewSet(BaseViewSet):
         return proposta.total_proposta != menor_total
 
     def _snapshot_proposta(self, proposta):
+        forma = None
+        if FIN_OK and proposta.forma_pagamento:
+            forma = (
+                FormaPagamento.objects
+                .filter(Q(empresa=proposta.cotacao.empresa) | Q(empresa__isnull=True), codigo=proposta.forma_pagamento, ativo=True)
+                .first()
+            )
         return {
             "proposta": proposta.id,
             "fornecedor": proposta.cotacao_fornecedor.fornecedor_id,
@@ -595,8 +602,11 @@ class CotacaoViewSet(BaseViewSet):
             "frete": str(proposta.frete),
             "outras_despesas": str(proposta.outras_despesas),
             "desconto_geral": str(proposta.desconto_geral),
+            "forma_pagamento": proposta.forma_pagamento or "",
+            "forma_pagamento_legivel": getattr(forma, "descricao", "") or "",
             "condicao_pagamento": proposta.condicao_pagamento,
             "prazo_pagamento": proposta.prazo_pagamento_id,
+            "prazo_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
             "condicao_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
             "prazo_entrega": proposta.prazo_entrega,
             "prazo_entrega_dias": proposta.prazo_entrega_dias,
@@ -629,6 +639,12 @@ class CotacaoViewSet(BaseViewSet):
             return existente
         snapshot = cotacao.snapshot_proposta_aprovada or {}
         proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor", "prazo_pagamento").get(pk=cotacao.proposta_vencedora_id)
+        forma_pagamento = snapshot.get("forma_pagamento") or proposta.forma_pagamento
+        prazo_pagamento = snapshot.get("prazo_pagamento") or proposta.prazo_pagamento_id
+        if not forma_pagamento:
+            raise ValidationError({"forma_pagamento": "Informe a forma de pagamento da proposta vencedora."})
+        if not prazo_pagamento:
+            raise ValidationError({"prazo_pagamento": "Informe o prazo de pagamento da proposta vencedora."})
         prazo_dias = snapshot.get("prazo_entrega_dias")
         if prazo_dias is None:
             try:
@@ -643,8 +659,8 @@ class CotacaoViewSet(BaseViewSet):
             tipo=self._tipo_pedido_cotacao(cotacao.tipo_compra),
             emissao=timezone.localdate(),
             previsao_entrega=previsao_entrega,
-            forma_pagamento=snapshot.get("condicao_pagamento_legivel") or snapshot.get("condicao_pagamento") or "",
-            prazo_pagamento_id=snapshot.get("prazo_pagamento") or None,
+            forma_pagamento=forma_pagamento,
+            prazo_pagamento_id=prazo_pagamento,
             frete=Decimal(str(snapshot.get("frete") or 0)),
             outras_despesas=Decimal(str(snapshot.get("outras_despesas") or 0)),
             total_desconto=Decimal(str(snapshot.get("desconto_geral") or 0)),
@@ -729,6 +745,10 @@ class CotacaoViewSet(BaseViewSet):
         if not cotacao.proposta_vencedora_id:
             raise ValidationError({"proposta_vencedora": "Selecione uma proposta vencedora."})
         proposta = CotacaoProposta.objects.select_related("cotacao_fornecedor", "cotacao_fornecedor__fornecedor", "prazo_pagamento").get(pk=cotacao.proposta_vencedora_id)
+        if not proposta.forma_pagamento:
+            raise ValidationError({"forma_pagamento": "Informe a forma de pagamento da proposta vencedora."})
+        if not proposta.prazo_pagamento_id:
+            raise ValidationError({"prazo_pagamento": "Informe o prazo de pagamento da proposta vencedora."})
         cotacao.status = "APROVADA"
         cotacao.aprovado_por = request.user
         cotacao.aprovado_em = timezone.now()
@@ -809,6 +829,13 @@ class CotacaoViewSet(BaseViewSet):
         melhor_prazo = min(prazos)[0] if prazos else None
         rows = []
         for proposta in propostas:
+            forma = None
+            if FIN_OK and proposta.forma_pagamento:
+                forma = (
+                    FormaPagamento.objects
+                    .filter(Q(empresa=proposta.cotacao.empresa) | Q(empresa__isnull=True), codigo=proposta.forma_pagamento, ativo=True)
+                    .first()
+                )
             total = proposta.total_proposta or Decimal("0")
             rows.append({
                 "proposta": proposta.id,
@@ -826,8 +853,11 @@ class CotacaoViewSet(BaseViewSet):
                 "prazo_entrega": proposta.prazo_entrega,
                 "prazo_entrega_dias": proposta.prazo_entrega_dias,
                 "melhor_prazo": melhor_prazo is not None and str(proposta.prazo_entrega).isdigit() and int(proposta.prazo_entrega) == melhor_prazo,
+                "forma_pagamento": proposta.forma_pagamento or "",
+                "forma_pagamento_legivel": getattr(forma, "descricao", "") or "",
                 "condicao_pagamento": proposta.condicao_pagamento,
                 "prazo_pagamento": proposta.prazo_pagamento_id,
+                "prazo_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
                 "condicao_pagamento_legivel": getattr(proposta.prazo_pagamento, "descricao", "") or proposta.condicao_pagamento,
                 "validade_proposta": proposta.validade_proposta,
                 "itens": [{

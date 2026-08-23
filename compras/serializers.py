@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import Q
 from decimal import Decimal
 
 from accounts.services.effective_access import EffectiveAccessService
@@ -26,8 +27,9 @@ from .models import (
 )
 
 try:
-    from financeiro.models import Pagar, PrazoPagamento
+    from financeiro.models import FormaPagamento, Pagar, PrazoPagamento
 except Exception:
+    FormaPagamento = None
     Pagar = None
     PrazoPagamento = None
 
@@ -572,6 +574,7 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
     itens = CotacaoPropostaItemSerializer(many=True, required=False)
     fornecedor_nome = serializers.CharField(source="cotacao_fornecedor.fornecedor.nome_fornecedor", read_only=True)
     prazo_pagamento_descricao = serializers.CharField(source="prazo_pagamento.descricao", read_only=True)
+    forma_pagamento_descricao = serializers.SerializerMethodField()
     condicao_pagamento_legivel = serializers.SerializerMethodField()
 
     class Meta:
@@ -583,6 +586,20 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
         if obj.prazo_pagamento_id:
             return obj.prazo_pagamento.descricao or obj.prazo_pagamento.codigo
         return obj.condicao_pagamento or ""
+
+    def get_forma_pagamento_descricao(self, obj):
+        forma = self._forma_pagamento_obj(obj)
+        return getattr(forma, "descricao", "") or ""
+
+    def _forma_pagamento_obj(self, obj):
+        codigo = (getattr(obj, "forma_pagamento", None) or "").strip()
+        cotacao = getattr(obj, "cotacao", None)
+        if not codigo or not FormaPagamento:
+            return None
+        qs = FormaPagamento.objects.filter(codigo=codigo, ativo=True)
+        if cotacao:
+            qs = qs.filter(Q(empresa=cotacao.empresa) | Q(empresa__isnull=True))
+        return qs.first()
 
     def validate(self, attrs):
         cotacao = attrs.get("cotacao", getattr(self.instance, "cotacao", None))
@@ -605,6 +622,13 @@ class CotacaoPropostaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor não participa desta cotação."})
         if CotacaoProposta.objects.filter(cotacao_fornecedor=participante, ativa=True).exclude(pk=getattr(self.instance, "pk", None)).exists():
             raise serializers.ValidationError({"cotacao_fornecedor": "Fornecedor já possui proposta ativa nesta cotação."})
+        forma_pagamento = (attrs.get("forma_pagamento", getattr(self.instance, "forma_pagamento", None)) or "").strip()
+        if forma_pagamento and FormaPagamento:
+            forma_qs = FormaPagamento.objects.filter(codigo=forma_pagamento, ativo=True)
+            if cotacao:
+                forma_qs = forma_qs.filter(Q(empresa=cotacao.empresa) | Q(empresa__isnull=True))
+            if not forma_qs.exists():
+                raise serializers.ValidationError({"forma_pagamento": "Forma de pagamento não encontrada para a empresa."})
         prazo_pagamento = attrs.get("prazo_pagamento", getattr(self.instance, "prazo_pagamento", None))
         if prazo_pagamento and cotacao and prazo_pagamento.empresa_id and prazo_pagamento.empresa_id != cotacao.empresa_id:
             raise serializers.ValidationError({"prazo_pagamento": "Condição de pagamento pertence a outra empresa."})
@@ -673,6 +697,11 @@ class CotacaoSerializer(serializers.ModelSerializer):
     responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
     pedido_compra_gerado_id = serializers.SerializerMethodField()
     status_operacional = serializers.SerializerMethodField()
+    forma_pagamento_vencedora = serializers.SerializerMethodField()
+    forma_pagamento_vencedora_legivel = serializers.SerializerMethodField()
+    prazo_pagamento_vencedor = serializers.SerializerMethodField()
+    prazo_pagamento_vencedor_legivel = serializers.SerializerMethodField()
+    prazo_entrega_vencedor_dias = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotacao
@@ -700,6 +729,40 @@ class CotacaoSerializer(serializers.ModelSerializer):
     def get_pedido_compra_gerado_id(self, obj):
         pedido = getattr(obj, "pedido_compra_gerado", None)
         return getattr(pedido, "id", None)
+
+    def _snapshot_ou_proposta_vencedora(self, obj):
+        snapshot = obj.snapshot_proposta_aprovada or {}
+        proposta = getattr(obj, "proposta_vencedora", None)
+        return snapshot, proposta
+
+    def get_forma_pagamento_vencedora(self, obj):
+        snapshot, proposta = self._snapshot_ou_proposta_vencedora(obj)
+        return snapshot.get("forma_pagamento") or getattr(proposta, "forma_pagamento", None) or ""
+
+    def get_forma_pagamento_vencedora_legivel(self, obj):
+        snapshot, proposta = self._snapshot_ou_proposta_vencedora(obj)
+        if snapshot.get("forma_pagamento_legivel"):
+            return snapshot.get("forma_pagamento_legivel")
+        forma = CotacaoPropostaSerializer()._forma_pagamento_obj(proposta) if proposta else None
+        return getattr(forma, "descricao", "") or ""
+
+    def get_prazo_pagamento_vencedor(self, obj):
+        snapshot, proposta = self._snapshot_ou_proposta_vencedora(obj)
+        return snapshot.get("prazo_pagamento") or getattr(proposta, "prazo_pagamento_id", None)
+
+    def get_prazo_pagamento_vencedor_legivel(self, obj):
+        snapshot, proposta = self._snapshot_ou_proposta_vencedora(obj)
+        return (
+            snapshot.get("prazo_pagamento_legivel")
+            or snapshot.get("condicao_pagamento_legivel")
+            or getattr(getattr(proposta, "prazo_pagamento", None), "descricao", "")
+            or getattr(proposta, "condicao_pagamento", "")
+            or ""
+        )
+
+    def get_prazo_entrega_vencedor_dias(self, obj):
+        snapshot, proposta = self._snapshot_ou_proposta_vencedora(obj)
+        return snapshot.get("prazo_entrega_dias") if snapshot else getattr(proposta, "prazo_entrega_dias", None)
 
     def get_status_operacional(self, obj):
         labels_finais = {

@@ -480,6 +480,7 @@ class CotacaoProposta(models.Model):
     validade_proposta = models.DateField(null=True, blank=True)
     prazo_entrega = models.CharField(max_length=120, blank=True, default='')
     prazo_entrega_dias = models.PositiveIntegerField(null=True, blank=True)
+    forma_pagamento = models.CharField(max_length=30, null=True, blank=True)
     condicao_pagamento = models.CharField(max_length=160, blank=True, default='')
     prazo_pagamento = models.ForeignKey(
         'financeiro.PrazoPagamento',

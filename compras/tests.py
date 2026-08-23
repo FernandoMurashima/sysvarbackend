@@ -157,9 +157,11 @@ class CotacaoBaseTests(TestCase):
         fornecedor = self.criar_fornecedor()
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30D", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOL", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(
             cotacao=cotacao,
             cotacao_fornecedor=participante,
+            forma_pagamento=forma.codigo,
             prazo_pagamento=prazo,
             condicao_pagamento="30 dias",
             prazo_entrega_dias=15,
@@ -176,7 +178,7 @@ class CotacaoBaseTests(TestCase):
         request.user = self.user
         pedido = view._gerar_pedido_da_cotacao(cotacao, request)
         self.assertEqual(pedido.prazo_pagamento, prazo)
-        self.assertEqual(pedido.forma_pagamento, "30 dias")
+        self.assertEqual(pedido.forma_pagamento, forma.codigo)
         self.assertEqual(pedido.previsao_entrega, pedido.emissao + timedelta(days=15))
 
     def test_api_bloqueia_loja_fora_do_escopo(self):
@@ -411,6 +413,33 @@ class CotacaoBaseTests(TestCase):
         participante.refresh_from_db()
         self.assertEqual(participante.status_participacao, "PROPOSTA_RECEBIDA")
 
+    def test_api_cotacao_proposta_guarda_forma_prazo_pagamento_e_entrega_separados(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        cotacao = self.criar_cotacao()
+        item = self.criar_item_cotacao(cotacao)
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30DPROP", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLPROP", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        resp = client.post(
+            "/api/compras/cotacao-propostas/",
+            self.proposta_payload(cotacao, participante, item, forma_pagamento=forma.codigo, prazo_pagamento=prazo.Idprazo, prazo_entrega_dias=15),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["forma_pagamento"], forma.codigo)
+        self.assertEqual(resp.data["forma_pagamento_descricao"], "Boleto")
+        self.assertEqual(resp.data["prazo_pagamento"], prazo.Idprazo)
+        self.assertEqual(resp.data["prazo_pagamento_descricao"], "30 dias")
+        self.assertEqual(resp.data["prazo_entrega_dias"], 15)
+        self.assertNotEqual(resp.data["forma_pagamento"], "30 dias")
+
+        resp = client.get(f"/api/compras/cotacao-propostas/{resp.data['id']}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["forma_pagamento"], forma.codigo)
+        self.assertEqual(resp.data["prazo_pagamento"], prazo.Idprazo)
+        self.assertEqual(resp.data["prazo_entrega_dias"], 15)
+
     def test_api_cotacao_proposta_exige_fornecedor_participante(self):
         client = APIClient()
         client.force_authenticate(self.user)
@@ -607,11 +636,17 @@ class CotacaoBaseTests(TestCase):
         cotacao = self.criar_cotacao()
         item = self.criar_item_cotacao(cotacao)
         proposta = self.criar_proposta_com_item(cotacao, item, "44688888000191", "12.00", qtd="2.000", frete=frete)
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"30D{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"BOL{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
         proposta.outras_despesas = Decimal("4.00")
         proposta.desconto_geral = Decimal("3.00")
+        proposta.forma_pagamento = forma.codigo
+        proposta.prazo_pagamento = prazo
         proposta.condicao_pagamento = "30 dias"
+        proposta.prazo_entrega_dias = 15
+        proposta.prazo_entrega = "15"
         proposta.recomputar_totais()
-        proposta.save(update_fields=["outras_despesas", "desconto_geral", "condicao_pagamento", "total_itens", "total_proposta"])
+        proposta.save(update_fields=["outras_despesas", "desconto_geral", "forma_pagamento", "prazo_pagamento", "condicao_pagamento", "prazo_entrega_dias", "prazo_entrega", "total_itens", "total_proposta"])
         client.force_authenticate(self.user)
         client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
         client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
@@ -628,7 +663,19 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(pedido.cotacao_origem, cotacao)
         self.assertEqual(pedido.fornecedor, proposta.cotacao_fornecedor.fornecedor)
         self.assertEqual(pedido.loja, cotacao.loja)
-        self.assertEqual(pedido.forma_pagamento, "30 dias")
+        self.assertEqual(pedido.forma_pagamento, proposta.forma_pagamento)
+        self.assertNotEqual(pedido.forma_pagamento, "30 dias")
+        self.assertEqual(pedido.prazo_pagamento, proposta.prazo_pagamento)
+        self.assertEqual(pedido.previsao_entrega, pedido.emissao + timedelta(days=15))
+        snapshot = cotacao.snapshot_proposta_aprovada
+        self.assertEqual(snapshot["forma_pagamento"], proposta.forma_pagamento)
+        self.assertEqual(snapshot["forma_pagamento_legivel"], "Boleto")
+        self.assertEqual(snapshot["prazo_pagamento"], proposta.prazo_pagamento_id)
+        self.assertEqual(snapshot["prazo_pagamento_legivel"], "30 dias")
+        self.assertEqual(snapshot["prazo_entrega_dias"], 15)
+        self.assertEqual(resp.data["forma_pagamento_vencedora"], proposta.forma_pagamento)
+        self.assertEqual(resp.data["prazo_pagamento_vencedor"], proposta.prazo_pagamento_id)
+        self.assertEqual(resp.data["prazo_entrega_vencedor_dias"], 15)
         self.assertEqual(pedido.frete, Decimal("7.00"))
         self.assertEqual(pedido.outras_despesas, Decimal("4.00"))
         self.assertEqual(pedido.total_desconto, Decimal("3.00"))
@@ -665,6 +712,12 @@ class CotacaoBaseTests(TestCase):
         cotacao = self.criar_cotacao()
         item = self.criar_item_cotacao(cotacao)
         proposta = self.criar_proposta_com_item(cotacao, item, "44699999000191", "12.00")
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30DFALHA", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLFALHA", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        proposta.forma_pagamento = forma.codigo
+        proposta.prazo_pagamento = prazo
+        proposta.condicao_pagamento = prazo.descricao
+        proposta.save(update_fields=["forma_pagamento", "prazo_pagamento", "condicao_pagamento"])
         client.force_authenticate(self.user)
         client.post(f"/api/compras/cotacoes/{cotacao.id}/selecionar-vencedor/", {"proposta": proposta.id, "justificativa": "Única proposta"}, format="json")
         client.post(f"/api/compras/cotacoes/{cotacao.id}/enviar-aprovacao/", {}, format="json")
