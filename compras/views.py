@@ -22,6 +22,7 @@ from .models import (
     CotacaoProposta,
     CotacaoRequisicao,
     OrdemServico,
+    OrdemServicoMaterial,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -40,6 +41,7 @@ from .serializers import (
     CotacaoFornecedorSerializer,
     CotacaoPropostaSerializer,
     CotacaoSerializer,
+    OrdemServicoMaterialSerializer,
     OrdemServicoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
@@ -54,7 +56,12 @@ from .serializers import (
     RequisicaoServicoCategoriaSerializer,
     RequisicaoSetorSerializer,
 )
-from .services_requisicao import garantir_ordem_servico_requisicao, resolver_responsabilidade_requisicao
+from .services_requisicao import (
+    atualizar_status_material_os,
+    garantir_ordem_servico_requisicao,
+    loja_almoxarifado_central,
+    resolver_responsabilidade_requisicao,
+)
 
 # Integração Financeiro
 FIN_OK = True
@@ -2286,6 +2293,122 @@ class OrdemServicoViewSet(BaseViewSet):
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Exclusão física de Ordem de Serviço não é permitida."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class OrdemServicoMaterialViewSet(BaseViewSet):
+    queryset = OrdemServicoMaterial.objects.select_related(
+        "ordem_servico",
+        "ordem_servico__empresa",
+        "ordem_servico__loja",
+        "ordem_servico__setor_solicitante",
+        "ordem_servico__setor_responsavel",
+        "produto",
+        "unidade",
+    ).all()
+    serializer_class = OrdemServicoMaterialSerializer
+    permission_classes = [HasRequisicaoProcessAccess]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(ordem_servico__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        access = EffectiveAccessService(self.request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (self.request.user.is_superuser or access.is_company_master()):
+            qs = qs.filter(ordem_servico__loja_id__in=allowed)
+        if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
+            if _can_request_requisicao(self.request.user):
+                qs = qs.filter(ordem_servico__requisicao__requisitante=self.request.user)
+            else:
+                return qs.none()
+        ordem_servico = self.request.query_params.get("ordem_servico")
+        if ordem_servico:
+            qs = qs.filter(ordem_servico_id=ordem_servico)
+        return qs
+
+    def perform_create(self, serializer):
+        if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
+            raise PermissionDenied("Usuário sem permissão para registrar material da OS.")
+        material = serializer.save()
+        atualizar_status_material_os(material)
+        if material.qtd_pendente > 0 and material.ordem_servico.status == "ABERTA":
+            material.ordem_servico.status = "AGUARDANDO_MATERIAL"
+            material.ordem_servico.save(update_fields=["status", "atualizado_em"])
+        _audit("ordemservicomaterial", material.pk, {"created": True, "ordem_servico": material.ordem_servico_id}, self.request, action="create")
+
+    def perform_update(self, serializer):
+        if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
+            raise PermissionDenied("Usuário sem permissão para alterar material da OS.")
+        before = {"status": serializer.instance.status, "qtd_necessaria": str(serializer.instance.qtd_necessaria)}
+        material = serializer.save()
+        atualizar_status_material_os(material)
+        after = {"status": material.status, "qtd_necessaria": str(material.qtd_necessaria)}
+        _audit("ordemservicomaterial", material.pk, {"updated": True, "before": before, "after": after}, self.request, action="update")
+
+    def destroy(self, request, *args, **kwargs):
+        material = self.get_object()
+        if Decimal(material.qtd_atendida or 0) > 0:
+            return Response({"detail": "Material já atendido não pode ser removido."}, status=status.HTTP_400_BAD_REQUEST)
+        _audit("ordemservicomaterial", material.pk, {"deleted": True, "ordem_servico": material.ordem_servico_id}, request, action="delete")
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"])
+    def atender(self, request, pk=None):
+        if not _can_manage_requisicao(request.user) and not _is_requisicao_admin(request.user):
+            raise PermissionDenied("Usuário sem permissão para atender material da OS.")
+        with transaction.atomic():
+            material = OrdemServicoMaterial.objects.select_for_update().select_related("ordem_servico", "produto").get(pk=self.get_object().pk)
+            if material.status == "CANCELADA":
+                return Response({"detail": "Material cancelado não pode ser atendido."}, status=status.HTTP_400_BAD_REQUEST)
+            if not material.produto_id:
+                return Response({"produto": "Informe um produto para atender pelo Almoxarifado."}, status=status.HTTP_400_BAD_REQUEST)
+            qtd = Decimal(str(request.data.get("quantidade") or "0"))
+            if qtd <= 0:
+                return Response({"quantidade": "Informe uma quantidade positiva."}, status=status.HTTP_400_BAD_REQUEST)
+            pendente = Decimal(material.qtd_pendente or 0)
+            if qtd > pendente:
+                return Response({"quantidade": "Quantidade não pode ultrapassar o pendente."}, status=status.HTTP_400_BAD_REQUEST)
+
+            loja_estoque = loja_almoxarifado_central(material.ordem_servico.empresa)
+            estoque = ProdutoUsoConsumoEstoque.objects.select_for_update().filter(
+                empresa=material.ordem_servico.empresa,
+                produto=material.produto,
+                loja=loja_estoque,
+            ).first()
+            disponivel = Decimal(getattr(estoque, "saldo", 0) or 0)
+            if qtd > disponivel:
+                return Response({"quantidade": "Estoque insuficiente no Almoxarifado para a quantidade informada.", "disponivel": str(disponivel)}, status=status.HTTP_400_BAD_REQUEST)
+
+            anterior = disponivel
+            posterior = disponivel - qtd
+            estoque.saldo = posterior
+            estoque.save(update_fields=["saldo", "atualizado_em"])
+            os_obj = material.ordem_servico
+            ProdutoUsoConsumoMovimentacao.objects.create(
+                empresa=os_obj.empresa,
+                produto=material.produto,
+                loja=loja_estoque,
+                tipo=ProdutoUsoConsumoMovimentacao.TIPO_CONSUMO_INTERNO,
+                quantidade=qtd,
+                saldo_anterior=anterior,
+                saldo_posterior=posterior,
+                usuario=request.user,
+                motivo="Atendimento de material da OS",
+                destino=f"{os_obj.setor_solicitante.nome} / {os_obj.loja.nome_loja}",
+                documento=f"OS {os_obj.id}",
+                origem=f"ORDEM_SERVICO:{os_obj.id};MATERIAL:{material.id}",
+            )
+            material.qtd_atendida = Decimal(material.qtd_atendida or 0) + qtd
+            material.save(update_fields=["qtd_atendida", "qtd_pendente", "status", "atualizado_em"])
+            atualizar_status_material_os(material)
+            if os_obj.materiais.filter(status__in=["PENDENTE", "DISPONIVEL", "EM_COMPRA"]).exists() and os_obj.status not in {"CONCLUIDA", "CANCELADA"}:
+                os_obj.status = "AGUARDANDO_MATERIAL"
+                os_obj.save(update_fields=["status", "atualizado_em"])
+            _audit("ordemservicomaterial", material.pk, {"attended": True, "qtd": str(qtd), "saldo_anterior": str(anterior), "saldo_posterior": str(posterior)}, request, action="atender")
+        return Response(self.get_serializer(material).data)
 
 
 class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):

@@ -11,7 +11,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, OrdemServico, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoMatrizResponsabilidade, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, OrdemServico, OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoMatrizResponsabilidade, RequisicaoServicoCategoria, RequisicaoSetor
 from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
@@ -253,7 +253,7 @@ class CotacaoBaseTests(TestCase):
         cotacao_id = resp.data["id"]
         resp = client.post("/api/compras/cotacao-itens/", {
             "cotacao": cotacao_id,
-            "produto": self.produto.Idproduto,
+            "produto": self.produto.pkproduto,
             "quantidade_cotar": "1.000",
             "unidade": self.unidade.Idunidade,
             "origem": "AVULSO",
@@ -819,7 +819,7 @@ class CotacaoBaseTests(TestCase):
         client = APIClient()
         client.force_authenticate(self.user)
         cotacao = self.criar_cotacao()
-        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "AVULSO", "produto": self.produto.Idproduto, "quantidade_cotar": "2.000"}, format="json")
+        resp = client.post("/api/compras/cotacao-itens/", {"cotacao": cotacao.id, "origem": "AVULSO", "produto": self.produto.pkproduto, "quantidade_cotar": "2.000"}, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["descricao"], self.produto.descricao)
         self.assertEqual(resp.data["unidade"], self.unidade.Idunidade)
@@ -955,7 +955,7 @@ class CotacaoBaseTests(TestCase):
         req2, _ = self._req_aprovada_com_produto(18, Decimal("3.000"))
         resp = client.get("/api/compras/cotacoes/necessidades/")
         self.assertEqual(resp.status_code, 200, resp.data)
-        grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.pkproduto)
         self.assertEqual(grupo["numero_requisicoes"], 2)
         self.assertEqual(set(grupo["requisicoes_ids"]), {req1.id, req2.id})
         self.assertEqual(Decimal(str(grupo["quantidade_pendente"])), Decimal("5.000"))
@@ -1002,7 +1002,7 @@ class CotacaoBaseTests(TestCase):
         nomes = [row["nome"] for row in resp.data]
         self.assertIn(self.produto.descricao, nomes)
         self.assertNotIn("Outra empresa", nomes)
-        grupo = next(row for row in resp.data if row["produto"] == self.produto.Idproduto)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.pkproduto)
         self.assertEqual(set(grupo["requisicoes_ids"]), {req_permitida.id})
 
     def test_api_cotacao_enxerga_requisicoes_de_outro_usuario_sem_permissao_requisicoes(self):
@@ -1168,7 +1168,7 @@ class CotacaoBaseTests(TestCase):
         resp = client.get("/api/compras/cotacoes/necessidades/")
         self.assertEqual(resp.status_code, 200, resp.data)
         produtos = {row["produto"] for row in resp.data}
-        self.assertIn(self.produto.Idproduto, produtos)
+        self.assertIn(self.produto.pkproduto, produtos)
         self.assertNotIn(produto_com_estoque.Idproduto, produtos)
         self.assertNotIn(produto_b.Idproduto, produtos)
         self.assertEqual(item_verde.qtd_solicitada, Decimal("2.000"))
@@ -1763,6 +1763,81 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         os_b = OrdemServico.objects.get(requisicao=req_b)
         self.client.force_authenticate(self.solicitante)
         resp = self.client.get(f"/api/compras/ordens-servico/{os_b.id}/")
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_ordem_servico_material_atende_pelo_almoxarifado_central(self):
+        loja_filial = Loja.objects.create(empresa=self.empresa, nome_loja="Filial OS", apelido_loja="FOS", cnpj="55999999000190")
+        self.solicitante.lojas.add(loja_filial)
+        self.aprovador.lojas.add(loja_filial)
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("10.000")})
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=loja_filial, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(loja=loja_filial.id, tipo_requisicao="MANUTENCAO", justificativa="Troca de lâmpadas")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post("/api/compras/ordens-servico-materiais/", {
+            "ordem_servico": os.id,
+            "produto": self.produto.pk,
+            "qtd_necessaria": "4.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["status"], "DISPONIVEL")
+        material_id = resp.data["id"]
+        resp = self.client.post(f"/api/compras/ordens-servico-materiais/{material_id}/atender/", {"quantidade": "4.000"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "ATENDIDA")
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=self.produto, loja=self.loja).saldo, Decimal("6.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=self.produto, loja=loja_filial).saldo, Decimal("0.000"))
+        mov = ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"OS {os.id}").latest("id")
+        self.assertEqual(mov.loja_id, self.loja.id)
+        self.assertIn(f"MATERIAL:{material_id}", mov.origem)
+
+    def test_ordem_servico_material_permite_atendimento_parcial_e_limita_pendente(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("2.000")})
+        req = self.criar_requisicao(tipo_requisicao="TI")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post("/api/compras/ordens-servico-materiais/", {
+            "ordem_servico": os.id,
+            "produto": self.produto.pk,
+            "qtd_necessaria": "4.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["status"], "PENDENTE")
+        material_id = resp.data["id"]
+        resp = self.client.post(f"/api/compras/ordens-servico-materiais/{material_id}/atender/", {"quantidade": "5.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/ordens-servico-materiais/{material_id}/atender/", {"quantidade": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(resp.data["qtd_atendida"]), Decimal("2.000"))
+        self.assertEqual(Decimal(resp.data["qtd_pendente"]), Decimal("2.000"))
+        self.assertEqual(resp.data["status"], "PENDENTE")
+        os.refresh_from_db()
+        self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
+
+    def test_ordem_servico_material_estoque_zero_permanece_pendente_e_sem_afetar_os_vazia(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.assertEqual(os.status, "ABERTA")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post("/api/compras/ordens-servico-materiais/", {
+            "ordem_servico": os.id,
+            "produto": self.produto.pk,
+            "qtd_necessaria": "1.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["status"], "PENDENTE")
+        os.refresh_from_db()
+        self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
+
+    def test_ordem_servico_material_multiempresa_preservado(self):
+        self.client.force_authenticate(self.outro)
+        RequisicaoMatrizResponsabilidade.objects.create(empresa=self.empresa_b, tipo_requisicao="TI", setor_atendimento=self.setor_b, setor_aquisicao=self.setor_b)
+        req_b = self.criar_requisicao(loja=self.loja_b.id, setor=self.setor_b.id, tipo_requisicao="TI")
+        os_b = OrdemServico.objects.get(requisicao=req_b)
+        material = OrdemServicoMaterial.objects.create(ordem_servico=os_b, descricao="Cabo HDMI", qtd_necessaria=Decimal("1.000"))
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.get(f"/api/compras/ordens-servico-materiais/{material.id}/")
         self.assertEqual(resp.status_code, 404, resp.data)
 
     def test_loja_deve_pertencer_a_empresa_correta(self):

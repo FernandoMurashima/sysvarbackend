@@ -132,6 +132,14 @@ STATUS_ORDEM_SERVICO = (
     ('CANCELADA', 'Cancelada'),
 )
 
+STATUS_NECESSIDADE_MATERIAL_OS = (
+    ('PENDENTE', 'Pendente'),
+    ('DISPONIVEL', 'Disponível'),
+    ('EM_COMPRA', 'Em compra'),
+    ('ATENDIDA', 'Atendida'),
+    ('CANCELADA', 'Cancelada'),
+)
+
 TIPO_SERVICO_REQUISICAO = (
     ('PREVENTIVA', 'Preventiva'),
     ('CORRETIVA', 'Corretiva'),
@@ -376,6 +384,54 @@ class OrdemServico(models.Model):
 
     def __str__(self):
         return f'OS {self.id} - REQ {self.requisicao_id}'
+
+
+class OrdemServicoMaterial(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    ordem_servico = models.ForeignKey(OrdemServico, on_delete=models.CASCADE, related_name='materiais')
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, null=True, blank=True, related_name='necessidades_os')
+    descricao = models.CharField(max_length=200, blank=True, default='')
+    unidade = models.ForeignKey('produto.Unidade', on_delete=models.PROTECT, null=True, blank=True, related_name='necessidades_os')
+    qtd_necessaria = models.DecimalField(max_digits=14, decimal_places=3, validators=[MinValueValidator(0)])
+    qtd_atendida = models.DecimalField(max_digits=14, decimal_places=3, default=0, validators=[MinValueValidator(0)])
+    qtd_pendente = models.DecimalField(max_digits=14, decimal_places=3, default=0, validators=[MinValueValidator(0)])
+    status = models.CharField(max_length=20, choices=STATUS_NECESSIDADE_MATERIAL_OS, default='PENDENTE', db_index=True)
+    observacoes = models.TextField(blank=True, default='')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_ordem_servico_material'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['ordem_servico', 'status']),
+            models.Index(fields=['produto']),
+        ]
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if not self.produto_id and not (self.descricao or '').strip():
+            raise ValidationError({'descricao': 'Informe o produto ou a descrição do material.'})
+        if self.produto_id and self.produto.empresa_id and self.produto.empresa_id != self.ordem_servico.empresa_id:
+            raise ValidationError({'produto': 'Produto pertence a outra empresa.'})
+        if self.unidade_id and self.unidade.empresa_id and self.unidade.empresa_id != self.ordem_servico.empresa_id:
+            raise ValidationError({'unidade': 'Unidade pertence a outra empresa.'})
+
+    def save(self, *args, **kwargs):
+        from decimal import Decimal
+        if self.produto_id:
+            self.descricao = self.descricao or self.produto.descricao
+            if not self.unidade_id and self.produto.unidade_id:
+                self.unidade = self.produto.unidade
+        self.qtd_pendente = max(Decimal(self.qtd_necessaria or 0) - Decimal(self.qtd_atendida or 0), Decimal("0"))
+        if self.qtd_pendente == 0 and self.qtd_necessaria:
+            self.status = 'ATENDIDA'
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.descricao or f'Material OS {self.id}'
 
 
 class RequisicaoItem(models.Model):

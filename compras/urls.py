@@ -4,6 +4,7 @@ from .views import (
     CotacaoFornecedorViewSet,
     CotacaoItemViewSet,
     CotacaoPropostaViewSet,
+    OrdemServicoMaterialViewSet,
     OrdemServicoViewSet,
     PedidoCompraViewSet, PedidoCompraItemViewSet,
     PedidoCompraEntregaViewSet, PedidoCompraParcelaViewSet,
@@ -20,6 +21,7 @@ router.register('cotacao-itens', CotacaoItemViewSet)
 router.register('cotacao-propostas', CotacaoPropostaViewSet)
 router.register('pedidos', PedidoCompraViewSet)
 router.register('ordens-servico', OrdemServicoViewSet)
+router.register('ordens-servico-materiais', OrdemServicoMaterialViewSet)
 router.register('itens', PedidoCompraItemViewSet)
 router.register('entregas', PedidoCompraEntregaViewSet)
 router.register('parcelas', PedidoCompraParcelaViewSet)

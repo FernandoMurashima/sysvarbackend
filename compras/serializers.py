@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from accounts.services.effective_access import EffectiveAccessService
 from compras.services_necessidade import indicador_requisicao_item
+from compras.services_requisicao import estoque_disponivel_material_os
 
 from .models import (
     Cotacao,
@@ -14,6 +15,7 @@ from .models import (
     CotacaoPropostaItem,
     CotacaoRequisicao,
     OrdemServico,
+    OrdemServicoMaterial,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -504,6 +506,50 @@ class RequisicaoSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class OrdemServicoMaterialSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    estoque_disponivel = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdemServicoMaterial
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "qtd_atendida",
+            "qtd_pendente",
+            "status",
+            "criado_em",
+            "atualizado_em",
+        )
+
+    def get_estoque_disponivel(self, obj):
+        try:
+            return estoque_disponivel_material_os(obj)
+        except Exception:
+            return Decimal("0")
+
+    def validate(self, attrs):
+        instance = self.instance
+        ordem_servico = attrs.get("ordem_servico", getattr(instance, "ordem_servico", None))
+        if not ordem_servico:
+            raise serializers.ValidationError({"ordem_servico": "Informe a Ordem de Serviço."})
+        if ordem_servico.tipo not in {"MANUTENCAO", "TI"}:
+            raise serializers.ValidationError({"ordem_servico": "Somente OS de Manutenção ou TI aceita necessidade de material."})
+        if instance and Decimal(instance.qtd_atendida or 0) > 0:
+            protected = set(attrs.keys()) - {"observacoes"}
+            if protected:
+                raise serializers.ValidationError("Materiais já atendidos não podem ser alterados.")
+        produto = attrs.get("produto", getattr(instance, "produto", None))
+        unidade = attrs.get("unidade", getattr(instance, "unidade", None))
+        if produto and produto.empresa_id and produto.empresa_id != ordem_servico.empresa_id:
+            raise serializers.ValidationError({"produto": "Produto pertence a outra empresa."})
+        if unidade and unidade.empresa_id and unidade.empresa_id != ordem_servico.empresa_id:
+            raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
+        return attrs
+
+
 class OrdemServicoSerializer(serializers.ModelSerializer):
     requisicao_numero = serializers.IntegerField(source="requisicao.numero", read_only=True)
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
@@ -512,6 +558,7 @@ class OrdemServicoSerializer(serializers.ModelSerializer):
     responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
     tipo_label = serializers.CharField(source="get_tipo_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
+    materiais = OrdemServicoMaterialSerializer(many=True, read_only=True)
 
     class Meta:
         model = OrdemServico
