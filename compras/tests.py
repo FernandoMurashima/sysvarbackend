@@ -1970,6 +1970,50 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(req.status, "CONCLUIDA")
         self.assertNotEqual(req_os.ordem_servico.status, "CONCLUIDA")
 
+    def test_nf_disponibiliza_requisicao_em_compra_para_atendimento_parcial(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="4.000")
+        self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
+        aguardar = self.client.post(f"/api/compras/requisicao-itens/{item_id}/aguardar-cotacao/", {}, format="json")
+        self.assertEqual(aguardar.status_code, 200, aguardar.data)
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        add = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"REQ:{item_id}"]}, format="json")
+        self.assertEqual(add.status_code, 200, add.data)
+        cot_item = CotacaoItem.objects.get(cotacao=cotacao)
+        fornecedor = self.fornecedor
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"PRP{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FRP{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, forma_pagamento=forma.codigo, prazo_pagamento=prazo, total_proposta=Decimal("20.00"))
+        CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=cot_item, quantidade_ofertada=Decimal("2.000"), preco_unitario=Decimal("10.00"), total_item=Decimal("20.00"))
+        cotacao.proposta_vencedora = proposta
+        view = CotacaoViewSet()
+        request = APIRequestFactory().post("/")
+        request.user = self.aprovador
+        cotacao.snapshot_proposta_aprovada = view._snapshot_proposta(proposta)
+        cotacao.status = "APROVADA"
+        cotacao.save(update_fields=["proposta_vencedora", "snapshot_proposta_aprovada", "status", "atualizado_em"])
+        pedido = view._gerar_pedido_da_cotacao(cotacao, request)
+        pedido.status = "AP"
+        pedido.save(update_fields=["status"])
+        pedido_item = pedido.itens.get()
+        nota = NotaFiscalEntrada.objects.create(pedido_compra=pedido, modelo="55", serie="1", numero=f"8{pedido.id}", dt_emissao=timezone.localdate(), dt_entrada=timezone.localdate(), criado_por=self.aprovador)
+        NotaFiscalEntradaItem.objects.create(nota=nota, pedido_item=pedido_item, qtd_recebida=Decimal("2.000"), preco_unit_nf=Decimal("10.00"), total_item=Decimal("20.00"))
+        fechar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/", {}, format="json")
+        self.assertEqual(fechar.status_code, 200, fechar.data)
+        req_item = RequisicaoItem.objects.get(pk=item_id)
+        self.assertEqual(req_item.status, "APROVADO")
+        req.refresh_from_db()
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+        self.assertTrue(CotacaoItem.objects.filter(cotacao=cotacao, requisicao_item_origem_id=item_id).exists())
+        atender = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "2.000"}, format="json")
+        self.assertEqual(atender.status_code, 200, atender.data)
+        self.assertEqual(atender.data["status"], "ATENDIDO_PARCIALMENTE")
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=self.produto, loja=self.loja).saldo, Decimal("0.000"))
+
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {
             "loja": self.loja_b.id,
