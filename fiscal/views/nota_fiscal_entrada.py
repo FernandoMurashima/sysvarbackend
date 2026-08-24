@@ -603,6 +603,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _recalcular_necessidades_vinculadas(self, nota):
         status_compra_requisicao = {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}
+        status_req_compra = {"AGUARDANDO_COTACAO", "EM_PROCESSO_COMPRA"}
         req_ids = set()
         os_material_ids = set()
         for item in nota.pedido_compra.itens.all():
@@ -613,6 +614,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 if token.startswith("OS_MATERIAL:"):
                     os_material_ids.add(int(token.split(":", 1)[1]))
         req_atualizadas = 0
+        requisicoes = set()
         for req_item in RequisicaoItem.objects.select_related("requisicao", "produto").filter(pk__in=req_ids):
             indicador = indicador_requisicao_item(req_item)
             estoque_atual = Decimal(indicador.get("estoque_atual") or 0)
@@ -620,14 +622,15 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 req_item.status = "APROVADO"
                 req_item.save(update_fields=["status", "atualizado_em"])
                 req_atualizadas += 1
-            req = req_item.requisicao
-            if req.status == "EM_PROCESSO_COMPRA":
-                itens_atendiveis = req.itens.select_related("produto")
-                for item_req in itens_atendiveis:
-                    if item_req.status in {"APROVADO", "ATENDIDO_PARCIALMENTE"} and Decimal(indicador_requisicao_item(item_req).get("estoque_atual") or 0) > 0:
-                        req.status = "EM_ATENDIMENTO"
-                        req.save(update_fields=["status", "atualizado_em"])
-                        break
+            requisicoes.add(req_item.requisicao)
+        for req in requisicoes:
+            if req.status not in status_req_compra:
+                continue
+            for item_req in req.itens.select_related("produto"):
+                if item_req.status in {"APROVADO", "ATENDIDO_PARCIALMENTE"} and Decimal(indicador_requisicao_item(item_req).get("estoque_atual") or 0) > 0:
+                    req.status = "EM_ATENDIMENTO"
+                    req.save(update_fields=["status", "atualizado_em"])
+                    break
         os_atualizadas = 0
         for material in OrdemServicoMaterial.objects.select_related("ordem_servico", "produto").filter(pk__in=os_material_ids):
             before = material.status
