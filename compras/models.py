@@ -67,6 +67,7 @@ TIPO_COMPRA_COTACAO = (
 
 ORIGEM_ITEM_COTACAO = (
     ('REQUISICAO', 'Requisição'),
+    ('OS', 'Ordem de Serviço'),
     ('AVULSO', 'Avulso'),
 )
 
@@ -580,6 +581,7 @@ class CotacaoItem(models.Model):
     permite_alternativo = models.BooleanField(default=True)
     observacao = models.TextField(blank=True, default='')
     requisicao_item_origem = models.ForeignKey(RequisicaoItem, on_delete=models.SET_NULL, null=True, blank=True, related_name='itens_cotacao')
+    ordem_servico_material_origem = models.ForeignKey(OrdemServicoMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='itens_cotacao')
     origem = models.CharField(max_length=10, choices=ORIGEM_ITEM_COTACAO, default='AVULSO', db_index=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
@@ -604,6 +606,9 @@ class CotacaoItem(models.Model):
         if self.requisicao_item_origem_id and self.cotacao_id and self.requisicao_item_origem.requisicao.empresa_id != self.cotacao.empresa_id:
             from django.core.exceptions import ValidationError
             raise ValidationError({'requisicao_item_origem': 'Item de requisição pertence a outra empresa.'})
+        if self.ordem_servico_material_origem_id and self.cotacao_id and self.ordem_servico_material_origem.ordem_servico.empresa_id != self.cotacao.empresa_id:
+            from django.core.exceptions import ValidationError
+            raise ValidationError({'ordem_servico_material_origem': 'Material da OS pertence a outra empresa.'})
 
     def __str__(self):
         return self.descricao or f'Item cotação {self.id}'

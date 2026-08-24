@@ -58,6 +58,7 @@ from .serializers import (
 )
 from .services_requisicao import (
     atualizar_status_material_os,
+    estoque_disponivel_material_os,
     garantir_ordem_servico_requisicao,
     loja_almoxarifado_central,
     resolver_responsabilidade_requisicao,
@@ -461,6 +462,124 @@ class CotacaoViewSet(BaseViewSet):
             origem="REQUISICAO",
         )
 
+    def _copiar_material_os(self, cotacao, material, quantidade):
+        return CotacaoItem.objects.create(
+            cotacao=cotacao,
+            produto=material.produto,
+            descricao=material.produto.descricao if material.produto_id else material.descricao,
+            quantidade_cotar=quantidade,
+            unidade=material.unidade,
+            observacao=material.observacoes,
+            ordem_servico_material_origem=material,
+            origem="OS",
+        )
+
+    def _cobertura_compra_origem(self, tipo, origem_id):
+        filtros = {
+            "cotacao__status__in": ["EM_ELABORACAO", "ABERTA", "PROPOSTAS_RECEBIDAS", "EM_ANALISE", "AGUARDANDO_APROVACAO", "APROVADA", "PEDIDO_GERADO"],
+        }
+        if tipo == "REQ":
+            filtros.update({"origem": "REQUISICAO", "requisicao_item_origem_id": origem_id})
+        else:
+            filtros.update({"origem": "OS", "ordem_servico_material_origem_id": origem_id})
+        return CotacaoItem.objects.filter(**filtros).aggregate(total=Sum("quantidade_cotar"))["total"] or Decimal("0")
+
+    def _estoque_central_origem(self, origem):
+        if not origem.get("produto"):
+            return Decimal("0")
+        try:
+            return origem["resolver_estoque"]()
+        except ValidationError:
+            return Decimal("0")
+
+    def _origens_necessidade_compra(self, request):
+        categoria = request.query_params.get("categoria")
+        loja = request.query_params.get("loja")
+        setor = request.query_params.get("setor")
+        search = (request.query_params.get("search") or "").strip()
+        rows = []
+        itens = RequisicaoItem.objects.select_related(
+            "requisicao", "requisicao__loja", "requisicao__setor", "produto", "unidade", "categoria_material"
+        ).filter(requisicao__in=self._requisicoes_disponiveis_qs(), qtd_pendente__gt=0)
+        if categoria:
+            itens = itens.filter(categoria_material_id=categoria)
+        if loja:
+            itens = itens.filter(requisicao__loja_id=loja)
+        if setor:
+            itens = itens.filter(requisicao__setor_id=setor)
+        if search:
+            itens = itens.filter(Q(produto__descricao__icontains=search) | Q(descricao__icontains=search) | Q(titulo_servico__icontains=search))
+        for item in itens.order_by("produto_id", "id"):
+            pendente = Decimal(item.qtd_pendente or 0)
+            em_compra = self._cobertura_compra_origem("REQ", item.id)
+            row = {
+                "tipo_origem": "REQ",
+                "origem_id": item.id,
+                "documento_origem": f"REQ {item.requisicao.numero}",
+                "documento_id": item.requisicao_id,
+                "requisicao": item.requisicao_id,
+                "produto": item.produto_id,
+                "nome": item.produto.descricao if item.produto_id else (item.descricao or item.titulo_servico or f"Item {item.id}"),
+                "unidade": item.unidade_id,
+                "unidade_nome": getattr(item.unidade, "Descricao", None),
+                "quantidade_total_solicitada": Decimal(item.qtd_solicitada or 0),
+                "quantidade_pendente": pendente,
+                "quantidade_em_compra": em_compra,
+                "loja_nome": item.requisicao.loja.nome_loja,
+                "setor_nome": item.requisicao.setor.nome,
+                "numero": item.requisicao.numero,
+                "resolver_estoque": lambda item=item: estoque_disponivel_requisicao_item(item),
+            }
+            row["estoque_central"] = self._estoque_central_origem(row)
+            row.pop("resolver_estoque", None)
+            rows.append(row)
+
+        materiais = OrdemServicoMaterial.objects.select_related(
+            "ordem_servico", "ordem_servico__loja", "ordem_servico__setor_solicitante", "produto", "unidade"
+        ).filter(
+            ordem_servico__status__in=["ABERTA", "EM_TRIAGEM", "EM_ATENDIMENTO", "AGUARDANDO_MATERIAL", "AGUARDANDO_TERCEIRO"],
+            status__in=["PENDENTE", "DISPONIVEL", "EM_COMPRA"],
+            qtd_pendente__gt=0,
+        )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            materiais = materiais.filter(ordem_servico__empresa_id=empresa_id)
+        elif not request.user.is_superuser:
+            materiais = materiais.none()
+        allowed = _cotacao_store_filter_ids(request.user)
+        if allowed is not None:
+            materiais = materiais.filter(ordem_servico__loja_id__in=allowed)
+        if loja:
+            materiais = materiais.filter(ordem_servico__loja_id=loja)
+        if setor:
+            materiais = materiais.filter(ordem_servico__setor_solicitante_id=setor)
+        if search:
+            materiais = materiais.filter(Q(produto__descricao__icontains=search) | Q(descricao__icontains=search))
+        for material in materiais.order_by("produto_id", "id"):
+            pendente = Decimal(material.qtd_pendente or 0)
+            em_compra = self._cobertura_compra_origem("OS", material.id)
+            row = {
+                "tipo_origem": "OS",
+                "origem_id": material.id,
+                "documento_origem": f"OS {material.ordem_servico_id}",
+                "documento_id": material.ordem_servico_id,
+                "produto": material.produto_id,
+                "nome": material.produto.descricao if material.produto_id else material.descricao,
+                "unidade": material.unidade_id,
+                "unidade_nome": getattr(material.unidade, "Descricao", None),
+                "quantidade_total_solicitada": Decimal(material.qtd_necessaria or 0),
+                "quantidade_pendente": pendente,
+                "quantidade_em_compra": em_compra,
+                "loja_nome": material.ordem_servico.loja.nome_loja,
+                "setor_nome": material.ordem_servico.setor_solicitante.nome,
+                "numero": material.ordem_servico_id,
+                "resolver_estoque": lambda material=material: estoque_disponivel_material_os(material),
+            }
+            row["estoque_central"] = self._estoque_central_origem(row)
+            row.pop("resolver_estoque", None)
+            rows.append(row)
+        return rows
+
     @action(detail=False, methods=["get"], url_path="requisicoes-disponiveis")
     def requisicoes_disponiveis(self, request):
         rows = []
@@ -482,69 +601,55 @@ class CotacaoViewSet(BaseViewSet):
 
     @action(detail=False, methods=["get"], url_path="necessidades")
     def necessidades(self, request):
-        itens = RequisicaoItem.objects.select_related(
-            "requisicao", "requisicao__loja", "requisicao__setor", "produto", "unidade", "categoria_material"
-        ).filter(
-            requisicao__in=self._requisicoes_disponiveis_qs(),
-            qtd_pendente__gt=0,
-        )
-        categoria = request.query_params.get("categoria")
-        loja = request.query_params.get("loja")
-        setor = request.query_params.get("setor")
-        search = (request.query_params.get("search") or "").strip()
-        if categoria:
-            itens = itens.filter(categoria_material_id=categoria)
-        if loja:
-            itens = itens.filter(requisicao__loja_id=loja)
-        if setor:
-            itens = itens.filter(requisicao__setor_id=setor)
-        if search:
-            itens = itens.filter(Q(produto__descricao__icontains=search) | Q(descricao__icontains=search) | Q(titulo_servico__icontains=search))
-
         grupos = {}
-        for item in itens.order_by("produto_id", "id"):
-            if item.produto_id and estoque_disponivel_requisicao_item(item) >= Decimal(item.qtd_pendente or 0):
-                continue
-            if item.produto_id:
-                key = f"produto:{item.produto_id}"
-                nome = item.produto.descricao
+        for origem in self._origens_necessidade_compra(request):
+            if origem["produto"]:
+                key = f"produto:{origem['produto']}"
+                nome = origem["nome"]
             else:
-                key = f"livre:{item.id}"
-                nome = item.descricao or item.titulo_servico or f"Item {item.id}"
+                key = f"{origem['tipo_origem'].lower()}:{origem['origem_id']}"
+                nome = origem["nome"]
             grupo = grupos.setdefault(key, {
                 "key": key,
-                "produto": item.produto_id,
+                "produto": origem["produto"],
                 "nome": nome,
                 "quantidade_total_solicitada": Decimal("0"),
                 "quantidade_pendente": Decimal("0"),
+                "estoque_central": Decimal("0"),
+                "quantidade_em_compra": Decimal("0"),
                 "requisicoes_ids": set(),
                 "lojas": set(),
                 "setores": set(),
                 "origens": [],
             })
-            grupo["quantidade_total_solicitada"] += item.qtd_solicitada or Decimal("0")
-            grupo["quantidade_pendente"] += item.qtd_pendente or Decimal("0")
-            grupo["requisicoes_ids"].add(item.requisicao_id)
-            grupo["lojas"].add(item.requisicao.loja.nome_loja)
-            grupo["setores"].add(item.requisicao.setor.nome)
+            grupo["quantidade_total_solicitada"] += origem["quantidade_total_solicitada"]
+            grupo["quantidade_pendente"] += origem["quantidade_pendente"]
+            grupo["estoque_central"] = max(grupo["estoque_central"], origem["estoque_central"])
+            grupo["quantidade_em_compra"] += origem["quantidade_em_compra"]
+            if origem["tipo_origem"] == "REQ":
+                grupo["requisicoes_ids"].add(origem["documento_id"])
+            grupo["lojas"].add(origem["loja_nome"])
+            grupo["setores"].add(origem["setor_nome"])
             grupo["origens"].append({
-                "requisicao": item.requisicao_id,
-                "numero": item.requisicao.numero,
-                "loja_nome": item.requisicao.loja.nome_loja,
-                "setor_nome": item.requisicao.setor.nome,
-                "quantidade_solicitada": item.qtd_solicitada,
-                "quantidade_pendente": item.qtd_pendente,
+                **origem,
+                "key": f"{origem['tipo_origem']}:{origem['origem_id']}",
             })
 
         rows = []
         for grupo in grupos.values():
             requisicoes_ids = sorted(grupo["requisicoes_ids"])
+            sem_cobertura = max(grupo["quantidade_pendente"] - grupo["estoque_central"] - grupo["quantidade_em_compra"], Decimal("0"))
+            if sem_cobertura <= 0:
+                continue
             rows.append({
                 "key": grupo["key"],
                 "produto": grupo["produto"],
                 "nome": grupo["nome"],
                 "quantidade_total_solicitada": grupo["quantidade_total_solicitada"],
                 "quantidade_pendente": grupo["quantidade_pendente"],
+                "estoque_central": grupo["estoque_central"],
+                "quantidade_em_compra": grupo["quantidade_em_compra"],
+                "quantidade_sem_cobertura": sem_cobertura,
                 "numero_requisicoes": len(requisicoes_ids),
                 "requisicoes_ids": requisicoes_ids,
                 "lojas": sorted(grupo["lojas"]),
@@ -575,6 +680,56 @@ class CotacaoViewSet(BaseViewSet):
             CotacaoRequisicao.objects.create(cotacao=cotacao, requisicao=req)
             for item in req.itens.all():
                 self._copiar_item_requisicao(cotacao, item)
+        return Response(self.get_serializer(cotacao).data)
+
+    @transaction.atomic
+    @action(detail=True, methods=["post"], url_path="adicionar-necessidades")
+    def adicionar_necessidades(self, request, pk=None):
+        cotacao = self.get_object()
+        if cotacao.status != "EM_ELABORACAO":
+            raise ValidationError({"cotacao": "Somente cotações em elaboração podem receber necessidades."})
+        keys = request.data.get("necessidades") or request.data.get("origens") or []
+        if not keys:
+            raise ValidationError({"necessidades": "Informe as necessidades a incluir."})
+        selecionadas = set(str(k) for k in keys)
+        origens = [o for o in self._origens_necessidade_compra(request) if f"{o['tipo_origem']}:{o['origem_id']}" in selecionadas or (o["produto"] and f"produto:{o['produto']}" in selecionadas)]
+        encontrados = {f"{o['tipo_origem']}:{o['origem_id']}" for o in origens}
+        atomicas = {k for k in selecionadas if not k.startswith("produto:")}
+        if not atomicas.issubset(encontrados):
+            raise ValidationError({"necessidades": "Uma ou mais necessidades não estão disponíveis para cotação."})
+
+        por_produto = {}
+        for origem in origens:
+            key = f"produto:{origem['produto']}" if origem["produto"] else f"{origem['tipo_origem']}:{origem['origem_id']}"
+            por_produto.setdefault(key, []).append(origem)
+
+        criados = 0
+        for grupo in por_produto.values():
+            estoque_restante = max(max((o["estoque_central"] for o in grupo), default=Decimal("0")), Decimal("0"))
+            for origem in sorted(grupo, key=lambda o: (o["tipo_origem"], o["origem_id"])):
+                pendente_compra = max(origem["quantidade_pendente"] - origem["quantidade_em_compra"], Decimal("0"))
+                coberto_estoque = min(estoque_restante, pendente_compra)
+                estoque_restante -= coberto_estoque
+                quantidade_cotar = pendente_compra - coberto_estoque
+                if quantidade_cotar <= 0:
+                    continue
+                if origem["tipo_origem"] == "REQ":
+                    item = RequisicaoItem.objects.select_related("requisicao", "produto", "unidade").get(pk=origem["origem_id"])
+                    cot_item = self._copiar_item_requisicao(cotacao, item)
+                    cot_item.quantidade_cotar = quantidade_cotar
+                    cot_item.save(update_fields=["quantidade_cotar", "atualizado_em"])
+                    if item.status in {"PENDENTE", "APROVADO", "AGUARDANDO_COTACAO"}:
+                        item.status = "EM_COTACAO"
+                        item.save(update_fields=["status", "atualizado_em"])
+                else:
+                    material = OrdemServicoMaterial.objects.select_related("ordem_servico", "produto", "unidade").get(pk=origem["origem_id"])
+                    self._copiar_material_os(cotacao, material, quantidade_cotar)
+                    if material.status in {"PENDENTE", "DISPONIVEL"}:
+                        material.status = "EM_COMPRA"
+                        material.save(update_fields=["status", "atualizado_em"])
+                criados += 1
+        if not criados:
+            raise ValidationError({"necessidades": "Necessidades já cobertas por estoque ou compra em andamento."})
         return Response(self.get_serializer(cotacao).data)
 
     @transaction.atomic

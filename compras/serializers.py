@@ -598,6 +598,7 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
     unidade_descricao = serializers.CharField(source="unidade.Descricao", read_only=True)
     requisicao_origem_numero = serializers.IntegerField(source="requisicao_item_origem.requisicao.numero", read_only=True)
+    ordem_servico_origem_id = serializers.IntegerField(source="ordem_servico_material_origem.ordem_servico_id", read_only=True)
 
     class Meta:
         model = CotacaoItem
@@ -610,6 +611,7 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
         unidade = attrs.get("unidade", getattr(self.instance, "unidade", None))
         origem = attrs.get("origem", getattr(self.instance, "origem", "AVULSO"))
         req_item = attrs.get("requisicao_item_origem", getattr(self.instance, "requisicao_item_origem", None))
+        material_os = attrs.get("ordem_servico_material_origem", getattr(self.instance, "ordem_servico_material_origem", None))
         quantidade = attrs.get("quantidade_cotar", getattr(self.instance, "quantidade_cotar", None))
         descricao = attrs.get("descricao", getattr(self.instance, "descricao", ""))
         if not cotacao:
@@ -620,6 +622,8 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"quantidade_cotar": "Informe uma quantidade maior que zero."})
         if origem == "REQUISICAO" and not req_item:
             raise serializers.ValidationError({"requisicao_item_origem": "Informe o item de requisição de origem."})
+        if origem == "OS" and not material_os:
+            raise serializers.ValidationError({"ordem_servico_material_origem": "Informe o material da OS de origem."})
         if produto:
             if produto.empresa_id != cotacao.empresa_id:
                 raise serializers.ValidationError({"produto": "Produto pertence a outra empresa."})
@@ -635,6 +639,8 @@ class CotacaoItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"unidade": "Unidade pertence a outra empresa."})
         if req_item and req_item.requisicao.empresa_id != cotacao.empresa_id:
             raise serializers.ValidationError({"requisicao_item_origem": "Item de requisição pertence a outra empresa."})
+        if material_os and material_os.ordem_servico.empresa_id != cotacao.empresa_id:
+            raise serializers.ValidationError({"ordem_servico_material_origem": "Material da OS pertence a outra empresa."})
         return attrs
 
 

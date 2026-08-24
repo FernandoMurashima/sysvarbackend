@@ -1840,6 +1840,69 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         resp = self.client.get(f"/api/compras/ordens-servico-materiais/{material.id}/")
         self.assertEqual(resp.status_code, 404, resp.data)
 
+    def test_necessidades_compra_unifica_requisicao_e_material_os(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="3.000")
+        self.aprovar(req)
+        req_os = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        os = OrdemServico.objects.get(requisicao=req_os)
+        material = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("2.000"))
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.pk)
+        self.assertEqual(Decimal(grupo["quantidade_pendente"]), Decimal("5.000"))
+        self.assertEqual(Decimal(grupo["quantidade_sem_cobertura"]), Decimal("5.000"))
+        self.assertEqual({o["tipo_origem"] for o in grupo["origens"]}, {"REQ", "OS"})
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        resp = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"REQ:{item_id}", f"OS:{material.id}"]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO").count(), 1)
+        self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="OS").count(), 1)
+
+    def test_necessidade_liquida_desconta_estoque_e_cotacao_existente(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("4.000")})
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="14.000")
+        self.aprovar(req)
+        cotacao_existente = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        CotacaoItem.objects.create(cotacao=cotacao_existente, produto=self.produto, unidade=self.unidade, descricao=self.produto.descricao, quantidade_cotar=Decimal("6.000"), origem="REQUISICAO", requisicao_item_origem_id=item_id)
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.pk)
+        self.assertEqual(Decimal(grupo["quantidade_pendente"]), Decimal("14.000"))
+        self.assertEqual(Decimal(grupo["estoque_central"]), Decimal("4.000"))
+        self.assertEqual(Decimal(grupo["quantidade_em_compra"]), Decimal("6.000"))
+        self.assertEqual(Decimal(grupo["quantidade_sem_cobertura"]), Decimal("4.000"))
+
+    def test_necessidade_totalmente_coberta_nao_disponibiliza_nova_cotacao(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("4.000")})
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="5.000")
+        self.aprovar(req)
+        cotacao_existente = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        CotacaoItem.objects.create(cotacao=cotacao_existente, produto=self.produto, unidade=self.unidade, descricao=self.produto.descricao, quantidade_cotar=Decimal("1.000"), origem="REQUISICAO", requisicao_item_origem_id=item_id)
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(any(row["produto"] == self.produto.pk for row in resp.data))
+        resp = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"REQ:{item_id}"]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_necessidade_compra_multiempresa_preservado(self):
+        self.client.force_authenticate(self.outro)
+        req_b = self.criar_requisicao(loja=self.loja_b.id, setor=self.setor_b.id, tipo_requisicao="USO_CONSUMO")
+        RequisicaoItem.objects.create(requisicao=req_b, tipo="MATERIAL", origem="LIVRE", descricao="Item B", unidade=None, qtd_solicitada=Decimal("2.000"), qtd_pendente=Decimal("2.000"))
+        req_b.status = "APROVADA"
+        req_b.save(update_fields=["status", "atualizado_em"])
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(any(o["documento_id"] == req_b.id for row in resp.data for o in row["origens"]))
+
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {
             "loja": self.loja_b.id,
