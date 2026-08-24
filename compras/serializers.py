@@ -217,6 +217,7 @@ class RequisicaoServicoCategoriaSerializer(serializers.ModelSerializer):
 
 class RequisicaoSetorSerializer(serializers.ModelSerializer):
     empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
 
     class Meta:
         model = RequisicaoSetor
@@ -227,6 +228,15 @@ class RequisicaoSetorSerializer(serializers.ModelSerializer):
         if not (value or "").strip():
             raise serializers.ValidationError("Nome do setor é obrigatório.")
         return value.strip()
+
+    def validate(self, attrs):
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None)) or getattr(user, "empresa", None)
+        if loja and empresa and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({"loja": "Loja física do setor pertence a outra empresa."})
+        return attrs
 
 
 class RequisicaoMatrizResponsabilidadeSerializer(serializers.ModelSerializer):

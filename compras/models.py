@@ -175,6 +175,7 @@ class RequisicaoServicoCategoria(models.Model):
 
 class RequisicaoSetor(models.Model):
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='setores_requisicao', db_index=True)
+    loja = models.ForeignKey(Loja, on_delete=models.PROTECT, null=True, blank=True, related_name='setores_requisicao')
     nome = models.CharField(max_length=80)
     descricao = models.TextField(blank=True, default='')
     ativo = models.BooleanField(default=True, db_index=True)

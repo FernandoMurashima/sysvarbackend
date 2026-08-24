@@ -73,7 +73,7 @@ except Exception:
 from cadastros.models import Nat_Lancamento
 from cadastros.models import Loja
 from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
-from .services_necessidade import estoque_disponivel_requisicao_item
+from .services_necessidade import estoque_disponivel_requisicao_item, loja_estoque_requisicao_item
 
 
 # ----------------- Auditoria robusta -----------------
@@ -2196,7 +2196,8 @@ class RequisicaoItemViewSet(BaseViewSet):
         saldo = Decimal(item.qtd_pendente or 0)
         if qtd > saldo:
             return Response({"quantidade": "Quantidade não pode ultrapassar o saldo pendente."}, status=status.HTTP_400_BAD_REQUEST)
-        estoque = ProdutoUsoConsumoEstoque.objects.select_for_update().filter(empresa=req.empresa, produto=item.produto, loja=req.loja).first()
+        loja_estoque = loja_estoque_requisicao_item(item)
+        estoque = ProdutoUsoConsumoEstoque.objects.select_for_update().filter(empresa=req.empresa, produto=item.produto, loja=loja_estoque).first()
         disponivel = Decimal(getattr(estoque, "saldo", 0) or 0)
         if qtd > disponivel:
             return Response({"quantidade": "Estoque insuficiente para a quantidade informada.", "disponivel": str(disponivel)}, status=status.HTTP_400_BAD_REQUEST)
@@ -2209,16 +2210,16 @@ class RequisicaoItemViewSet(BaseViewSet):
         ProdutoUsoConsumoMovimentacao.objects.create(
             empresa=req.empresa,
             produto=item.produto,
-            loja=req.loja,
+            loja=loja_estoque,
             tipo=ProdutoUsoConsumoMovimentacao.TIPO_CONSUMO_INTERNO,
             quantidade=qtd,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
             usuario=request.user,
             motivo="Atendimento de requisição",
-            destino=req.setor,
+            destino=f"{req.setor.nome} / {req.loja.nome_loja}",
             documento=f"REQ {req.numero}",
-            origem="REQUISICAO",
+            origem=f"REQUISICAO:{req.id};ALMOXARIFADO:{getattr(req.setor_responsavel, 'nome', '')}",
         )
         item.qtd_atendida = Decimal(item.qtd_atendida or 0) + qtd
         item.qtd_pendente = max(Decimal(item.qtd_solicitada or 0) - item.qtd_atendida, Decimal("0"))
