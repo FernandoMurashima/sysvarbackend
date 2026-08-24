@@ -7,8 +7,10 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
-from compras.models import PedidoCompra, PedidoCompraEntrega
-from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe
+from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
+from compras.services_necessidade import indicador_requisicao_item
+from compras.services_requisicao import atualizar_status_material_os
+from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
 
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
@@ -262,12 +264,14 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         financeiro = self._vincular_financeiro(nota)
         recebimento = self._atualizar_recebimento_pedido(nota)
+        necessidades = self._recalcular_necessidades_vinculadas(nota)
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="fechar")
         data = self.get_serializer(nota).data
         data["financeiro"] = financeiro
         data["estoque"] = estoque
         data["custos_produtos"] = custos_produtos
         data["recebimento_pedido"] = recebimento
+        data["necessidades"] = necessidades
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cancelar")
@@ -295,12 +299,14 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         nota.status = NotaFiscalEntrada.Status.CANCELADA
         nota.save(update_fields=["status", "atualizado_em"])
         recebimento = self._atualizar_recebimento_pedido(nota)
+        necessidades = self._recalcular_necessidades_vinculadas(nota)
         _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="cancelar")
         data = self.get_serializer(nota).data
         data["estoque"] = estoque
         data["financeiro"] = financeiro
         data["custos"] = custos
         data["recebimento_pedido"] = recebimento
+        data["necessidades"] = necessidades
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="itens-pedido")
@@ -436,6 +442,14 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     documento=documento,
                     sinal=1,
                 )
+            elif self._pedido_item_material_interno(item_nf.pedido_item):
+                movimentos += self._movimentar_item_estoque_uso_consumo(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
+                    documento=documento,
+                    sinal=1,
+                )
             else:
                 movimentos += self._movimentar_item_estoque_nao_revenda(
                     nota=nota,
@@ -459,6 +473,14 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     nota=nota,
                     item_nf=item_nf,
                     tipo=EstoqueMovimentacao.TIPO_SAIDA,
+                    documento=documento,
+                    sinal=-1,
+                )
+            elif self._pedido_item_material_interno(item_nf.pedido_item):
+                movimentos += self._movimentar_item_estoque_uso_consumo(
+                    nota=nota,
+                    item_nf=item_nf,
+                    tipo=ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_SAIDA,
                     documento=documento,
                     sinal=-1,
                 )
@@ -502,6 +524,17 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 produto = pedido_item.produto if pedido_item else None
                 if not produto:
                     continue
+                if self._pedido_item_material_interno(pedido_item):
+                    saldo = Decimal(
+                        ProdutoUsoConsumoEstoque.objects.filter(produto=produto, loja=nota.pedido_compra.loja, empresa=nota.pedido_compra.empresa)
+                        .values_list("saldo", flat=True)
+                        .first()
+                        or 0
+                    )
+                    qtd = Decimal(item_nf.qtd_recebida or 0)
+                    if saldo - qtd < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+                        raise ValueError(f"Saldo insuficiente do produto {produto.descricao} para cancelar a nota.")
+                    continue
                 codigo = self._codigo_estoque_produto(produto)
                 saldo = Decimal(
                     Estoque.objects.filter(CodigodeBarra=codigo, Idloja=nota.pedido_compra.loja)
@@ -512,6 +545,77 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 qtd = Decimal(item_nf.qtd_recebida or 0)
                 if saldo - qtd < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
                     raise ValueError(f"Saldo insuficiente do produto {produto.descricao} para cancelar a nota.")
+
+    def _pedido_item_material_interno(self, pedido_item):
+        if not pedido_item or not pedido_item.produto_id or pedido_item.produto.tipo_produto != "2":
+            return False
+        cotacao = getattr(pedido_item.pedido, "cotacao_origem", None)
+        if not cotacao:
+            return False
+        marcador_req = f"REQ_ITEM:"
+        marcador_os = f"OS_MATERIAL:"
+        return marcador_req in (pedido_item.observacoes or "") or marcador_os in (pedido_item.observacoes or "")
+
+    def _movimentar_item_estoque_uso_consumo(self, nota, item_nf, tipo, documento, sinal):
+        pedido_item = item_nf.pedido_item
+        produto = pedido_item.produto if pedido_item else None
+        if not produto or produto.tipo_produto != "2":
+            return 0
+        qtd = _q3(item_nf.qtd_recebida or 0)
+        if qtd <= 0:
+            return 0
+        estoque, _ = ProdutoUsoConsumoEstoque.objects.select_for_update().get_or_create(
+            empresa=nota.pedido_compra.empresa,
+            loja=nota.pedido_compra.loja,
+            produto=produto,
+            defaults={"saldo": Decimal("0")},
+        )
+        anterior = Decimal(estoque.saldo or 0)
+        posterior = anterior + (qtd * Decimal(sinal))
+        if posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+            raise ValueError(f"Saldo insuficiente do produto {produto.descricao} para cancelar/movimentar a nota.")
+        estoque.saldo = posterior
+        estoque.save(update_fields=["saldo", "atualizado_em"])
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=nota.pedido_compra.empresa,
+            produto=produto,
+            loja=nota.pedido_compra.loja,
+            tipo=tipo,
+            quantidade=qtd,
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            usuario=getattr(nota, "criado_por", None),
+            motivo="Nota fiscal de entrada",
+            destino=nota.pedido_compra.loja.nome_loja,
+            documento=documento,
+            origem=f"NFE:{nota.pk};PEDIDO:{nota.pedido_compra_id}",
+        )
+        return 1
+
+    def _recalcular_necessidades_vinculadas(self, nota):
+        req_ids = set()
+        os_material_ids = set()
+        for item in nota.pedido_compra.itens.all():
+            obs = item.observacoes or ""
+            for token in obs.split():
+                if token.startswith("REQ_ITEM:"):
+                    req_ids.add(int(token.split(":", 1)[1]))
+                if token.startswith("OS_MATERIAL:"):
+                    os_material_ids.add(int(token.split(":", 1)[1]))
+        req_atualizadas = 0
+        for req_item in RequisicaoItem.objects.select_related("requisicao", "produto").filter(pk__in=req_ids):
+            indicador = indicador_requisicao_item(req_item)
+            if indicador.get("codigo") == "DISPONIVEL" and req_item.status in {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}:
+                req_item.status = "APROVADO"
+                req_item.save(update_fields=["status", "atualizado_em"])
+                req_atualizadas += 1
+        os_atualizadas = 0
+        for material in OrdemServicoMaterial.objects.select_related("ordem_servico", "produto").filter(pk__in=os_material_ids):
+            before = material.status
+            atualizar_status_material_os(material)
+            if material.status != before:
+                os_atualizadas += 1
+        return {"requisicao_itens": req_atualizadas, "materiais_os": os_atualizadas}
 
     def _movimentar_item_estoque_nao_revenda(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item

@@ -47,7 +47,6 @@ def cotacoes_pedidos_relacionados(item):
     cot_itens = CotacaoItem.objects.select_related("cotacao").filter(
         requisicao_item_origem=item,
         cotacao__empresa_id=item.requisicao.empresa_id,
-        cotacao__loja_id=item.requisicao.loja_id,
         cotacao__status__in=COTACAO_COMPRA_EM_ANDAMENTO,
     )
     cotacoes = []

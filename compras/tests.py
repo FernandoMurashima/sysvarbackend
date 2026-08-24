@@ -15,6 +15,7 @@ from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoPropo
 from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
 
@@ -1902,6 +1903,57 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         resp = self.client.get("/api/compras/cotacoes/necessidades/")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertFalse(any(o["documento_id"] == req_b.id for row in resp.data for o in row["origens"]))
+
+    def test_cotacao_pedido_nf_material_interno_recebe_no_almoxarifado(self):
+        loja_filial = Loja.objects.create(empresa=self.empresa, nome_loja="Filial Compra Interna", apelido_loja="FCI", cnpj="55888888000190")
+        self.solicitante.lojas.add(loja_filial)
+        self.aprovador.lojas.add(loja_filial)
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=loja_filial, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(loja=loja_filial.id, tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="4.000")
+        self.aprovar(req)
+        req_os = self.criar_requisicao(loja=loja_filial.id, tipo_requisicao="MANUTENCAO")
+        os = OrdemServico.objects.get(requisicao=req_os)
+        material_os = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("2.000"))
+        self.client.force_authenticate(self.aprovador)
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=loja_filial, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        add = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"REQ:{item_id}", f"OS:{material_os.id}"]}, format="json")
+        self.assertEqual(add.status_code, 200, add.data)
+        cot_itens = list(CotacaoItem.objects.filter(cotacao=cotacao).order_by("id"))
+        fornecedor = self.fornecedor
+        participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"PCI{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FPCI{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, forma_pagamento=forma.codigo, prazo_pagamento=prazo, total_proposta=Decimal("120.00"))
+        for cot_item in cot_itens:
+            CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=cot_item, quantidade_ofertada=Decimal("6.000"), preco_unitario=Decimal("10.00"), total_item=Decimal("60.00"))
+        cotacao.proposta_vencedora = proposta
+        view = CotacaoViewSet()
+        request = APIRequestFactory().post("/")
+        request.user = self.aprovador
+        cotacao.snapshot_proposta_aprovada = view._snapshot_proposta(proposta)
+        cotacao.status = "APROVADA"
+        cotacao.save(update_fields=["proposta_vencedora", "snapshot_proposta_aprovada", "status", "atualizado_em"])
+        pedido = view._gerar_pedido_da_cotacao(cotacao, request)
+        self.assertEqual(pedido.loja_id, self.loja.id)
+        self.assertNotEqual(pedido.loja_id, loja_filial.id)
+        pedido.status = "AP"
+        pedido.save(update_fields=["status"])
+        pedido_item = pedido.itens.order_by("id").first()
+        nota = NotaFiscalEntrada.objects.create(pedido_compra=pedido, modelo="55", serie="1", numero=f"9{pedido.id}", dt_emissao=timezone.localdate(), dt_entrada=timezone.localdate(), criado_por=self.aprovador)
+        for pedido_item in pedido.itens.all():
+            NotaFiscalEntradaItem.objects.create(nota=nota, pedido_item=pedido_item, qtd_recebida=Decimal("6.000"), preco_unit_nf=Decimal("10.00"), total_item=Decimal("60.00"))
+        self.client.force_authenticate(self.aprovador)
+        fechar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/", {}, format="json")
+        self.assertEqual(fechar.status_code, 200, fechar.data)
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=self.produto, loja=self.loja).saldo, Decimal("12.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=self.produto, loja=loja_filial).saldo, Decimal("0.000"))
+        req_item = RequisicaoItem.objects.get(pk=item_id)
+        self.assertEqual(req_item.status, "APROVADO")
+        material_os.refresh_from_db()
+        self.assertEqual(material_os.status, "DISPONIVEL")
 
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {

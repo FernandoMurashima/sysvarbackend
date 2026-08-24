@@ -801,6 +801,17 @@ class CotacaoViewSet(BaseViewSet):
     def _tipo_pedido_cotacao(self, tipo_compra):
         return {"REVENDA": "1", "USO_CONSUMO": "2", "INSUMO": "4"}.get(tipo_compra, "2")
 
+    def _cotacao_tem_material_interno(self, cotacao):
+        return cotacao.itens.filter(
+            Q(origem="OS", ordem_servico_material_origem__produto__tipo_produto="2")
+            | Q(origem="REQUISICAO", requisicao_item_origem__requisicao__tipo_requisicao="USO_CONSUMO", requisicao_item_origem__produto__tipo_produto="2")
+        ).exists()
+
+    def _loja_destino_pedido_cotacao(self, cotacao):
+        if self._cotacao_tem_material_interno(cotacao):
+            return loja_almoxarifado_central(cotacao.empresa)
+        return cotacao.loja
+
     def _gerar_pedido_da_cotacao(self, cotacao, request):
         existente = getattr(cotacao, "pedido_compra_gerado", None)
         if existente:
@@ -820,9 +831,10 @@ class CotacaoViewSet(BaseViewSet):
             except (TypeError, ValueError):
                 prazo_dias = None
         previsao_entrega = timezone.localdate() + timedelta(days=int(prazo_dias)) if prazo_dias is not None else None
+        loja_destino = self._loja_destino_pedido_cotacao(cotacao)
         pedido = PedidoCompra.objects.create(
             empresa=cotacao.empresa,
-            loja=cotacao.loja,
+            loja=loja_destino,
             fornecedor=proposta.cotacao_fornecedor.fornecedor,
             tipo=self._tipo_pedido_cotacao(cotacao.tipo_compra),
             emissao=timezone.localdate(),
@@ -832,7 +844,7 @@ class CotacaoViewSet(BaseViewSet):
             frete=Decimal(str(snapshot.get("frete") or 0)),
             outras_despesas=Decimal(str(snapshot.get("outras_despesas") or 0)),
             total_desconto=Decimal(str(snapshot.get("desconto_geral") or 0)),
-            observacoes=f"Origem: Cotação {cotacao.numero}",
+            observacoes=f"Origem: Cotação {cotacao.numero}; destino recebimento: {loja_destino.nome_loja}",
             cotacao_origem=cotacao,
         )
         for item in snapshot.get("itens", []):
@@ -845,8 +857,11 @@ class CotacaoViewSet(BaseViewSet):
                 qtd=Decimal(str(item.get("quantidade_ofertada") or 0)),
                 preco_unit=Decimal(str(item.get("preco_unitario") or 0)).quantize(Decimal("0.01")),
                 desconto_valor=Decimal(str(item.get("desconto_item") or 0)),
-                observacoes=item.get("observacao") or "",
+                observacoes=(item.get("observacao") or "")[:180],
             )
+            if cot_item and cot_item.origem in {"REQUISICAO", "OS"}:
+                origem_txt = f"REQ_ITEM:{cot_item.requisicao_item_origem_id}" if cot_item.origem == "REQUISICAO" else f"OS_MATERIAL:{cot_item.ordem_servico_material_origem_id}"
+                pedido_item.observacoes = (f"{pedido_item.observacoes or ''} {origem_txt}").strip()[:255]
             pedido_item.recalcular_totais()
             pedido_item.save(update_fields=["qtd", "preco_unit", "desconto_valor", "total_item", "observacoes", "unidade"])
         pedido.recomputa_totais()

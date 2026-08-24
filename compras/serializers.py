@@ -155,6 +155,8 @@ class PedidoCompraSerializer(serializers.ModelSerializer):
     idnatureza = serializers.SerializerMethodField()
     natureza_label = serializers.SerializerMethodField()
     cotacao_origem_numero = serializers.IntegerField(source="cotacao_origem.numero", read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    destino_recebimento = serializers.CharField(source="loja.nome_loja", read_only=True)
 
     # proteção: forma de pagamento setada via ação específica
     forma_pagamento = serializers.CharField(read_only=True)

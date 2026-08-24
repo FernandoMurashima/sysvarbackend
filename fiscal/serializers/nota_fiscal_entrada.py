@@ -84,6 +84,8 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
 
 class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     itens = NotaFiscalEntradaItemSerializer(many=True, read_only=True)
+    destino_recebimento = serializers.CharField(source="pedido_compra.loja.nome_loja", read_only=True)
+    loja_estoque_id = serializers.IntegerField(source="pedido_compra.loja_id", read_only=True)
 
     class Meta:
         model = NotaFiscalEntrada
