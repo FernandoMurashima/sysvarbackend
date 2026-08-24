@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from rest_framework.exceptions import ValidationError
 
-from .models import RequisicaoMatrizResponsabilidade
+from .models import OrdemServico, RequisicaoMatrizResponsabilidade
 
 
 TIPO_REQUISICAO_LABELS = {
@@ -34,3 +34,22 @@ def resolver_responsabilidade_requisicao(empresa, tipo_requisicao):
         setor_atendimento=matriz.setor_atendimento,
         setor_aquisicao=matriz.setor_aquisicao,
     )
+
+
+def garantir_ordem_servico_requisicao(requisicao):
+    if requisicao.tipo_requisicao not in {"MANUTENCAO", "TI"}:
+        return None
+    descricao = (requisicao.justificativa or requisicao.observacoes or "").strip()
+    ordem, _ = OrdemServico.objects.get_or_create(
+        requisicao=requisicao,
+        defaults={
+            "empresa": requisicao.empresa,
+            "loja": requisicao.loja,
+            "setor_solicitante": requisicao.setor,
+            "setor_responsavel": requisicao.setor_responsavel,
+            "tipo": requisicao.tipo_requisicao,
+            "origem": "REQUISICAO",
+            "descricao": descricao,
+        },
+    )
+    return ordem

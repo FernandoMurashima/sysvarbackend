@@ -122,6 +122,16 @@ STATUS_ITEM_REQUISICAO = (
     ('CANCELADO', 'Cancelado'),
 )
 
+STATUS_ORDEM_SERVICO = (
+    ('ABERTA', 'Aberta'),
+    ('EM_TRIAGEM', 'Em triagem'),
+    ('EM_ATENDIMENTO', 'Em atendimento'),
+    ('AGUARDANDO_MATERIAL', 'Aguardando material'),
+    ('AGUARDANDO_TERCEIRO', 'Aguardando terceiro'),
+    ('CONCLUIDA', 'Concluída'),
+    ('CANCELADA', 'Cancelada'),
+)
+
 TIPO_SERVICO_REQUISICAO = (
     ('PREVENTIVA', 'Preventiva'),
     ('CORRETIVA', 'Corretiva'),
@@ -308,6 +318,64 @@ class RequisicaoMatrizResponsabilidade(models.Model):
 
     def __str__(self):
         return f'{self.empresa_id} - {self.get_tipo_requisicao_display()}'
+
+
+class OrdemServico(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    requisicao = models.OneToOneField(Requisicao, on_delete=models.PROTECT, related_name='ordem_servico')
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='ordens_servico', db_index=True)
+    loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='ordens_servico', db_index=True)
+    setor_solicitante = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, related_name='ordens_servico_solicitadas')
+    setor_responsavel = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, related_name='ordens_servico_responsaveis')
+    tipo = models.CharField(max_length=20, choices=TIPO_REQUISICAO, db_index=True)
+    origem = models.CharField(max_length=20, default='REQUISICAO', db_index=True)
+    descricao = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=30, choices=STATUS_ORDEM_SERVICO, default='ABERTA', db_index=True)
+    responsavel = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='ordens_servico_responsavel')
+    diagnostico = models.TextField(blank=True, default='')
+    solucao = models.TextField(blank=True, default='')
+    previsao_atendimento = models.DateTimeField(null=True, blank=True)
+    data_inicio = models.DateTimeField(null=True, blank=True)
+    data_conclusao = models.DateTimeField(null=True, blank=True)
+    observacoes = models.TextField(blank=True, default='')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_ordem_servico'
+        ordering = ['-criado_em', '-id']
+        indexes = [
+            models.Index(fields=['empresa', 'status']),
+            models.Index(fields=['empresa', 'tipo']),
+            models.Index(fields=['loja', 'status']),
+            models.Index(fields=['setor_responsavel', 'status']),
+        ]
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if self.tipo not in {'MANUTENCAO', 'TI'}:
+            raise ValidationError({'tipo': 'Ordem de Serviço só pode ser gerada para Manutenção ou TI.'})
+        if self.requisicao_id:
+            if self.requisicao.empresa_id != self.empresa_id:
+                raise ValidationError({'requisicao': 'Requisição pertence a outra empresa.'})
+            if self.requisicao.tipo_requisicao not in {'MANUTENCAO', 'TI'}:
+                raise ValidationError({'requisicao': 'Requisição não gera Ordem de Serviço.'})
+        if self.loja_id and self.loja.empresa_id != self.empresa_id:
+            raise ValidationError({'loja': 'Loja pertence a outra empresa.'})
+        if self.setor_solicitante_id and self.setor_solicitante.empresa_id != self.empresa_id:
+            raise ValidationError({'setor_solicitante': 'Setor solicitante pertence a outra empresa.'})
+        if self.setor_responsavel_id and self.setor_responsavel.empresa_id != self.empresa_id:
+            raise ValidationError({'setor_responsavel': 'Setor responsável pertence a outra empresa.'})
+
+    def save(self, *args, **kwargs):
+        if self.status == 'CONCLUIDA' and not self.data_conclusao:
+            self.data_conclusao = timezone.now()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'OS {self.id} - REQ {self.requisicao_id}'
 
 
 class RequisicaoItem(models.Model):

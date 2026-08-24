@@ -21,6 +21,7 @@ from .models import (
     CotacaoItem,
     CotacaoProposta,
     CotacaoRequisicao,
+    OrdemServico,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -39,6 +40,7 @@ from .serializers import (
     CotacaoFornecedorSerializer,
     CotacaoPropostaSerializer,
     CotacaoSerializer,
+    OrdemServicoSerializer,
     PedidoCompraSerializer,
     PedidoCompraItemSerializer,
     PedidoCompraEntregaSerializer,
@@ -52,7 +54,7 @@ from .serializers import (
     RequisicaoServicoCategoriaSerializer,
     RequisicaoSetorSerializer,
 )
-from .services_requisicao import resolver_responsabilidade_requisicao
+from .services_requisicao import garantir_ordem_servico_requisicao, resolver_responsabilidade_requisicao
 
 # Integração Financeiro
 FIN_OK = True
@@ -1970,7 +1972,10 @@ class RequisicaoViewSet(BaseViewSet):
         responsabilidade = resolver_responsabilidade_requisicao(empresa, tipo)
         proximo = (Requisicao.objects.select_for_update().filter(empresa=empresa).aggregate(max_num=Max("numero"))["max_num"] or 0) + 1
         obj = serializer.save(empresa=empresa, numero=proximo, requisitante=self.request.user, criado_por=self.request.user, setor_responsavel=responsabilidade.setor_atendimento)
+        ordem = garantir_ordem_servico_requisicao(obj)
         _historico(obj, self.request, "CRIACAO", "", obj.status, observacao="Requisição criada.")
+        if ordem:
+            _historico(obj, self.request, "STATUS", "", obj.status, observacao=f"Ordem de Serviço {ordem.id} gerada.")
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -1986,8 +1991,11 @@ class RequisicaoViewSet(BaseViewSet):
         responsabilidade = resolver_responsabilidade_requisicao(obj.empresa, tipo)
         before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade, "tipo_requisicao": obj.tipo_requisicao, "setor_responsavel": obj.setor_responsavel_id}
         updated = serializer.save(empresa=obj.empresa, setor_responsavel=responsabilidade.setor_atendimento)
+        ordem = garantir_ordem_servico_requisicao(updated)
         after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade, "tipo_requisicao": updated.tipo_requisicao, "setor_responsavel": updated.setor_responsavel_id}
         _historico(updated, self.request, "EDICAO", updated.status, updated.status, valor_anterior=before, valor_novo=after, observacao="Requisição editada.")
+        if ordem:
+            _historico(updated, self.request, "STATUS", updated.status, updated.status, observacao=f"Ordem de Serviço {ordem.id} vinculada.")
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Exclusão física de requisição não é permitida. Utilize cancelamento."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -2229,6 +2237,55 @@ class RequisicaoItemViewSet(BaseViewSet):
         req.save(update_fields=["status", "atualizado_em"])
         _historico(req, request, "ATENDIMENTO", before_req, req.status, item=item, valor_anterior={"item_status": before_item, "saldo_estoque": str(anterior)}, valor_novo={"item_status": item.status, "qtd_atendida": str(item.qtd_atendida), "saldo_estoque": str(posterior)}, observacao=request.data.get("observacao", ""))
         return Response(self.get_serializer(item).data)
+
+
+class OrdemServicoViewSet(BaseViewSet):
+    queryset = OrdemServico.objects.select_related("empresa", "loja", "setor_solicitante", "setor_responsavel", "requisicao", "responsavel").all()
+    serializer_class = OrdemServicoSerializer
+    permission_classes = [HasRequisicaoProcessAccess]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        access = EffectiveAccessService(self.request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (self.request.user.is_superuser or access.is_company_master()):
+            qs = qs.filter(loja_id__in=allowed)
+        if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
+            if _can_request_requisicao(self.request.user):
+                qs = qs.filter(requisicao__requisitante=self.request.user)
+            else:
+                return qs.none()
+        status_q = self.request.query_params.get("status")
+        tipo = self.request.query_params.get("tipo") or self.request.query_params.get("tipo_requisicao")
+        loja = self.request.query_params.get("loja")
+        responsavel = self.request.query_params.get("responsavel")
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if responsavel:
+            qs = qs.filter(responsavel_id=responsavel)
+        return qs
+
+    def perform_create(self, serializer):
+        raise ValidationError({"detail": "Ordem de Serviço é gerada a partir da Requisição."})
+
+    def perform_update(self, serializer):
+        obj = serializer.instance
+        before = {"status": obj.status, "responsavel": obj.responsavel_id}
+        updated = serializer.save()
+        after = {"status": updated.status, "responsavel": updated.responsavel_id}
+        _audit("ordemservico", updated.pk, {"updated": True, "before": before, "after": after}, self.request, action="update")
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Exclusão física de Ordem de Serviço não é permitida."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class RequisicaoHistoricoViewSet(viewsets.ReadOnlyModelViewSet):

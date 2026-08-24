@@ -11,7 +11,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
-from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoMatrizResponsabilidade, RequisicaoServicoCategoria, RequisicaoSetor
+from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, OrdemServico, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoMatrizResponsabilidade, RequisicaoServicoCategoria, RequisicaoSetor
 from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
@@ -1712,6 +1712,58 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["tipo_requisicao"], "USO_CONSUMO")
         self.assertIsNone(resp.data["setor_responsavel"])
+
+    def test_requisicao_manutencao_gera_ordem_servico(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO", justificativa="Ar condicionado sem gelar")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.assertEqual(os.empresa_id, self.empresa.id)
+        self.assertEqual(os.loja_id, self.loja.id)
+        self.assertEqual(os.setor_solicitante_id, self.setor.id)
+        self.assertEqual(os.setor_responsavel_id, self.manutencao.id)
+        self.assertEqual(os.tipo, "MANUTENCAO")
+        self.assertEqual(os.origem, "REQUISICAO")
+        self.assertIn("Ar condicionado", os.descricao)
+
+    def test_requisicao_ti_gera_ordem_servico(self):
+        req = self.criar_requisicao(tipo_requisicao="TI", justificativa="Computador sem rede")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.assertEqual(os.setor_responsavel_id, self.ti.id)
+        self.assertEqual(os.tipo, "TI")
+
+    def test_requisicao_uso_consumo_nao_gera_ordem_servico(self):
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+
+    def test_ordem_servico_nao_duplica_para_mesma_requisicao(self):
+        req = self.criar_requisicao(tipo_requisicao="TI")
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Atualiza"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(OrdemServico.objects.filter(requisicao=req).count(), 1)
+
+    def test_ordem_servico_status_e_conclusao(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        os = OrdemServico.objects.get(requisicao=req)
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {
+            "status": "EM_ATENDIMENTO",
+            "diagnostico": "Falha no compressor",
+            "solucao": "Troca programada",
+        }, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "EM_ATENDIMENTO")
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"status": "CONCLUIDA"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIsNotNone(resp.data["data_conclusao"])
+        self.client.force_authenticate(self.solicitante)
+
+    def test_ordem_servico_multiempresa_preservado(self):
+        self.client.force_authenticate(self.outro)
+        RequisicaoMatrizResponsabilidade.objects.create(empresa=self.empresa_b, tipo_requisicao="TI", setor_atendimento=self.setor_b, setor_aquisicao=self.setor_b)
+        req_b = self.criar_requisicao(loja=self.loja_b.id, setor=self.setor_b.id, tipo_requisicao="TI")
+        os_b = OrdemServico.objects.get(requisicao=req_b)
+        self.client.force_authenticate(self.solicitante)
+        resp = self.client.get(f"/api/compras/ordens-servico/{os_b.id}/")
+        self.assertEqual(resp.status_code, 404, resp.data)
 
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {

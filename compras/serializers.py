@@ -13,6 +13,7 @@ from .models import (
     CotacaoProposta,
     CotacaoPropostaItem,
     CotacaoRequisicao,
+    OrdemServico,
     PedidoCompra,
     PedidoCompraItem,
     PedidoCompraEntrega,
@@ -465,6 +466,8 @@ class RequisicaoSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     setor_nome = serializers.CharField(source="setor.nome", read_only=True)
     setor_responsavel_nome = serializers.CharField(source="setor_responsavel.nome", read_only=True)
+    ordem_servico_id = serializers.IntegerField(source="ordem_servico.id", read_only=True)
+    ordem_servico_status = serializers.CharField(source="ordem_servico.status", read_only=True)
 
     class Meta:
         model = Requisicao
@@ -498,6 +501,40 @@ class RequisicaoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"setor": "Setor pertence a outra empresa."})
         if setor and (not setor.ativo or not setor.pode_fazer_requisicao):
             raise serializers.ValidationError({"setor": "Setor inativo ou não habilitado para requisições."})
+        return attrs
+
+
+class OrdemServicoSerializer(serializers.ModelSerializer):
+    requisicao_numero = serializers.IntegerField(source="requisicao.numero", read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    setor_solicitante_nome = serializers.CharField(source="setor_solicitante.nome", read_only=True)
+    setor_responsavel_nome = serializers.CharField(source="setor_responsavel.nome", read_only=True)
+    responsavel_nome = serializers.CharField(source="responsavel.username", read_only=True)
+    tipo_label = serializers.CharField(source="get_tipo_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = OrdemServico
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "requisicao",
+            "empresa",
+            "loja",
+            "setor_solicitante",
+            "setor_responsavel",
+            "tipo",
+            "origem",
+            "descricao",
+            "data_conclusao",
+            "criado_em",
+            "atualizado_em",
+        )
+
+    def validate(self, attrs):
+        responsavel = attrs.get("responsavel", getattr(self.instance, "responsavel", None))
+        if responsavel and responsavel.empresa_id and responsavel.empresa_id != self.instance.empresa_id:
+            raise serializers.ValidationError({"responsavel": "Responsável pertence a outra empresa."})
         return attrs
 
 
