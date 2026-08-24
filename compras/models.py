@@ -138,6 +138,12 @@ FINALIDADE_ITEM_REQUISICAO = (
     ('OUTRO', 'Outro'),
 )
 
+TIPO_REQUISICAO = (
+    ('USO_CONSUMO', 'Uso e Consumo'),
+    ('MANUTENCAO', 'Manutenção'),
+    ('TI', 'TI'),
+)
+
 ACAO_HISTORICO_REQUISICAO = (
     ('CRIACAO', 'Criação'),
     ('EDICAO', 'Edição'),
@@ -174,6 +180,10 @@ class RequisicaoSetor(models.Model):
     ativo = models.BooleanField(default=True, db_index=True)
     pode_fazer_requisicao = models.BooleanField(default=True)
     recebe_requisicoes = models.BooleanField(default=True)
+    central_uso_consumo = models.BooleanField(default=False)
+    central_manutencao = models.BooleanField(default=False)
+    central_ti = models.BooleanField(default=False)
+    responsavel_compras = models.BooleanField(default=False)
     controla_estoque_uso_consumo = models.BooleanField(default=False)
     data_cadastro = models.DateTimeField(default=timezone.now)
 
@@ -236,6 +246,8 @@ class Requisicao(models.Model):
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='requisicoes_compra', db_index=True)
     loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='requisicoes_compra', db_index=True)
     setor = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, related_name='requisicoes', db_index=True)
+    tipo_requisicao = models.CharField(max_length=20, choices=TIPO_REQUISICAO, default='USO_CONSUMO', db_index=True)
+    setor_responsavel = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, null=True, blank=True, related_name='requisicoes_atendimento', db_index=True)
     requisitante = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='requisicoes_solicitadas')
     data_requisicao = models.DateField(default=timezone.localdate, db_index=True)
     data_necessaria = models.DateField(null=True, blank=True, db_index=True)
@@ -256,11 +268,45 @@ class Requisicao(models.Model):
         indexes = [
             models.Index(fields=['empresa', 'status']),
             models.Index(fields=['empresa', 'loja']),
+            models.Index(fields=['empresa', 'tipo_requisicao']),
             models.Index(fields=['requisitante', 'data_requisicao']),
         ]
 
     def __str__(self):
         return f'Requisição {self.numero}'
+
+
+class RequisicaoMatrizResponsabilidade(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='matrizes_requisicao', db_index=True)
+    tipo_requisicao = models.CharField(max_length=20, choices=TIPO_REQUISICAO, db_index=True)
+    setor_atendimento = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, related_name='matrizes_atendimento')
+    setor_aquisicao = models.ForeignKey(RequisicaoSetor, on_delete=models.PROTECT, related_name='matrizes_aquisicao')
+    ativo = models.BooleanField(default=True, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'compras_requisicao_matriz_responsabilidade'
+        ordering = ['tipo_requisicao']
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'tipo_requisicao'], name='uq_req_matriz_empresa_tipo'),
+        ]
+        indexes = [models.Index(fields=['empresa', 'ativo']), models.Index(fields=['empresa', 'tipo_requisicao'])]
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if self.setor_atendimento_id and self.setor_atendimento.empresa_id != self.empresa_id:
+            raise ValidationError({'setor_atendimento': 'Setor responsável pelo atendimento pertence a outra empresa.'})
+        if self.setor_aquisicao_id and self.setor_aquisicao.empresa_id != self.empresa_id:
+            raise ValidationError({'setor_aquisicao': 'Setor responsável pela aquisição pertence a outra empresa.'})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.empresa_id} - {self.get_tipo_requisicao_display()}'
 
 
 class RequisicaoItem(models.Model):

@@ -22,6 +22,7 @@ from .models import (
     RequisicaoItem,
     RequisicaoFinalidadeAquisicao,
     RequisicaoMaterialCategoria,
+    RequisicaoMatrizResponsabilidade,
     RequisicaoServicoCategoria,
     RequisicaoSetor,
 )
@@ -228,6 +229,46 @@ class RequisicaoSetorSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
+class RequisicaoMatrizResponsabilidadeSerializer(serializers.ModelSerializer):
+    empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
+    tipo_requisicao_label = serializers.CharField(source="get_tipo_requisicao_display", read_only=True)
+    setor_atendimento_nome = serializers.CharField(source="setor_atendimento.nome", read_only=True)
+    setor_aquisicao_nome = serializers.CharField(source="setor_aquisicao.nome", read_only=True)
+
+    class Meta:
+        model = RequisicaoMatrizResponsabilidade
+        fields = "__all__"
+        read_only_fields = ("empresa", "criado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
+        if not empresa:
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            empresa = getattr(user, "empresa", None)
+        setor_atendimento = attrs.get("setor_atendimento", getattr(self.instance, "setor_atendimento", None))
+        setor_aquisicao = attrs.get("setor_aquisicao", getattr(self.instance, "setor_aquisicao", None))
+        tipo = attrs.get("tipo_requisicao", getattr(self.instance, "tipo_requisicao", None))
+        ativo = attrs.get("ativo", getattr(self.instance, "ativo", True))
+        if not tipo:
+            raise serializers.ValidationError({"tipo_requisicao": "Informe o tipo da requisição."})
+        if not setor_atendimento:
+            raise serializers.ValidationError({"setor_atendimento": "Informe o setor responsável pelo atendimento."})
+        if not setor_aquisicao:
+            raise serializers.ValidationError({"setor_aquisicao": "Informe o setor responsável pela aquisição."})
+        if empresa and setor_atendimento and setor_atendimento.empresa_id != empresa.id:
+            raise serializers.ValidationError({"setor_atendimento": "Setor responsável pelo atendimento pertence a outra empresa."})
+        if empresa and setor_aquisicao and setor_aquisicao.empresa_id != empresa.id:
+            raise serializers.ValidationError({"setor_aquisicao": "Setor responsável pela aquisição pertence a outra empresa."})
+        if ativo and empresa and tipo:
+            qs = RequisicaoMatrizResponsabilidade.objects.filter(empresa=empresa, tipo_requisicao=tipo, ativo=True)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"tipo_requisicao": "Já existe matriz ativa para este tipo nesta empresa."})
+        return attrs
+
+
 class RequisicaoMaterialCategoriaSerializer(serializers.ModelSerializer):
     empresa_nome = serializers.CharField(source="empresa.nome", read_only=True)
 
@@ -413,6 +454,7 @@ class RequisicaoSerializer(serializers.ModelSerializer):
     requisitante_nome = serializers.CharField(source="requisitante.username", read_only=True)
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     setor_nome = serializers.CharField(source="setor.nome", read_only=True)
+    setor_responsavel_nome = serializers.CharField(source="setor_responsavel.nome", read_only=True)
 
     class Meta:
         model = Requisicao
@@ -422,6 +464,7 @@ class RequisicaoSerializer(serializers.ModelSerializer):
             "empresa",
             "requisitante",
             "status",
+            "setor_responsavel",
             "criado_por",
             "aprovado_por",
             "aprovado_em",

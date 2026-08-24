@@ -30,6 +30,7 @@ from .models import (
     RequisicaoItem,
     RequisicaoFinalidadeAquisicao,
     RequisicaoMaterialCategoria,
+    RequisicaoMatrizResponsabilidade,
     RequisicaoServicoCategoria,
     RequisicaoSetor,
 )
@@ -47,9 +48,11 @@ from .serializers import (
     RequisicaoSerializer,
     RequisicaoFinalidadeAquisicaoSerializer,
     RequisicaoMaterialCategoriaSerializer,
+    RequisicaoMatrizResponsabilidadeSerializer,
     RequisicaoServicoCategoriaSerializer,
     RequisicaoSetorSerializer,
 )
+from .services_requisicao import resolver_responsabilidade_requisicao
 
 # Integração Financeiro
 FIN_OK = True
@@ -1604,6 +1607,10 @@ class RequisicaoSetorViewSet(BaseViewSet):
         pode_fazer = self.request.query_params.get("pode_fazer_requisicao")
         if pode_fazer is not None:
             qs = qs.filter(pode_fazer_requisicao=str(pode_fazer).lower() in {"1", "true", "sim"})
+        for field in ("recebe_requisicoes", "central_uso_consumo", "central_manutencao", "central_ti", "responsavel_compras"):
+            value = self.request.query_params.get(field)
+            if value is not None:
+                qs = qs.filter(**{field: str(value).lower() in {"1", "true", "sim"}})
         return qs
 
     def perform_create(self, serializer):
@@ -1644,6 +1651,89 @@ class RequisicaoSetorViewSet(BaseViewSet):
         obj.ativo = False
         obj.save(update_fields=["ativo"])
         _audit("requisicaosetor", obj.pk, {"ativo": [before, False]}, request, action="inativar")
+        return Response(self.get_serializer(obj).data)
+
+
+class RequisicaoMatrizResponsabilidadeViewSet(BaseViewSet):
+    queryset = RequisicaoMatrizResponsabilidade.objects.select_related("empresa", "setor_atendimento", "setor_aquisicao").all().order_by("tipo_requisicao")
+    serializer_class = RequisicaoMatrizResponsabilidadeSerializer
+    permission_classes = [HasRequisicaoProcessAccess]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        empresa = self.request.query_params.get("empresa")
+        if self.request.user.is_superuser and empresa:
+            qs = qs.filter(empresa_id=empresa)
+        tipo = self.request.query_params.get("tipo_requisicao")
+        if tipo:
+            qs = qs.filter(tipo_requisicao=tipo)
+        ativo = self.request.query_params.get("ativo")
+        if ativo is not None:
+            qs = qs.filter(ativo=str(ativo).lower() in {"1", "true", "sim"})
+        return qs
+
+    def perform_create(self, serializer):
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa_payload = self.request.data.get("empresa")
+        if empresa_id and empresa_payload and int(empresa_payload) != int(empresa_id):
+            raise ValidationError({"empresa": "Usuário não pode criar matriz para outra empresa."})
+        empresa = self.request.user.empresa if empresa_id else serializer.validated_data.get("empresa")
+        obj = serializer.save(empresa=empresa)
+        _audit("requisicaomatrizresponsabilidade", obj.pk, {"created": True}, self.request, action="create")
+
+    def perform_update(self, serializer):
+        empresa_id = self._empresa_id_usuario()
+        obj = serializer.instance
+        if empresa_id and obj.empresa_id != int(empresa_id):
+            raise ValidationError({"empresa": "Matriz pertence a outra empresa."})
+        updated = serializer.save(empresa=obj.empresa)
+        _audit("requisicaomatrizresponsabilidade", updated.pk, {"updated": True}, self.request, action="update")
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Exclusão física de matriz não é permitida. Utilize inativação."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    @action(detail=False, methods=["get"], url_path="resolver")
+    def resolver(self, request):
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa = request.user.empresa if empresa_id else None
+        if request.user.is_superuser and request.query_params.get("empresa"):
+            from cadastros.models import Empresa
+            empresa = get_object_or_404(Empresa, pk=request.query_params.get("empresa"))
+        tipo = request.query_params.get("tipo_requisicao")
+        resp = resolver_responsabilidade_requisicao(empresa, tipo)
+        return Response({
+            "tipo_requisicao": tipo,
+            "setor_atendimento": resp.setor_atendimento.id,
+            "setor_atendimento_nome": resp.setor_atendimento.nome,
+            "setor_aquisicao": resp.setor_aquisicao.id,
+            "setor_aquisicao_nome": resp.setor_aquisicao.nome,
+        })
+
+    @action(detail=True, methods=["post"], url_path="ativar")
+    def ativar(self, request, pk=None):
+        obj = self.get_object()
+        before = obj.ativo
+        obj.ativo = True
+        obj.save(update_fields=["ativo", "atualizado_em"])
+        _audit("requisicaomatrizresponsabilidade", obj.pk, {"ativo": [before, True]}, request, action="ativar")
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=True, methods=["post"], url_path="inativar")
+    def inativar(self, request, pk=None):
+        obj = self.get_object()
+        before = obj.ativo
+        obj.ativo = False
+        obj.save(update_fields=["ativo", "atualizado_em"])
+        _audit("requisicaomatrizresponsabilidade", obj.pk, {"ativo": [before, False]}, request, action="inativar")
         return Response(self.get_serializer(obj).data)
 
 
@@ -1778,7 +1868,7 @@ class RequisicaoFinalidadeAquisicaoViewSet(BaseViewSet):
 
 
 class RequisicaoViewSet(BaseViewSet):
-    queryset = Requisicao.objects.select_related("empresa", "loja", "setor", "requisitante", "criado_por").prefetch_related("itens", "historico").all()
+    queryset = Requisicao.objects.select_related("empresa", "loja", "setor", "setor_responsavel", "requisitante", "criado_por").prefetch_related("itens", "historico").all()
     serializer_class = RequisicaoSerializer
     permission_classes = [HasRequisicaoProcessAccess]
 
@@ -1800,6 +1890,9 @@ class RequisicaoViewSet(BaseViewSet):
             qs = qs.filter(loja_id=loja)
         if prioridade:
             qs = qs.filter(prioridade=prioridade)
+        tipo_requisicao = self.request.query_params.get("tipo_requisicao")
+        if tipo_requisicao:
+            qs = qs.filter(tipo_requisicao=tipo_requisicao)
         if search:
             f = Q(setor__nome__icontains=search) | Q(justificativa__icontains=search) | Q(requisitante__username__icontains=search)
             if str(search).isdigit():
@@ -1873,8 +1966,10 @@ class RequisicaoViewSet(BaseViewSet):
         _ensure_default_requisicao_setores(empresa.pk)
         _ensure_default_requisicao_material_categorias(empresa.pk)
         _ensure_default_requisicao_finalidades(empresa.pk)
+        tipo = serializer.validated_data.get("tipo_requisicao", "USO_CONSUMO")
+        responsabilidade = resolver_responsabilidade_requisicao(empresa, tipo)
         proximo = (Requisicao.objects.select_for_update().filter(empresa=empresa).aggregate(max_num=Max("numero"))["max_num"] or 0) + 1
-        obj = serializer.save(empresa=empresa, numero=proximo, requisitante=self.request.user, criado_por=self.request.user)
+        obj = serializer.save(empresa=empresa, numero=proximo, requisitante=self.request.user, criado_por=self.request.user, setor_responsavel=responsabilidade.setor_atendimento)
         _historico(obj, self.request, "CRIACAO", "", obj.status, observacao="Requisição criada.")
 
     @transaction.atomic
@@ -1887,9 +1982,11 @@ class RequisicaoViewSet(BaseViewSet):
             raise ValidationError({"loja": "A loja informada pertence a outra empresa."})
         if not EffectiveAccessService(self.request.user).can_access_store(loja):
             raise ValidationError({"loja": "Usuário sem acesso à loja informada."})
-        before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade}
-        updated = serializer.save(empresa=obj.empresa)
-        after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade}
+        tipo = serializer.validated_data.get("tipo_requisicao", obj.tipo_requisicao)
+        responsabilidade = resolver_responsabilidade_requisicao(obj.empresa, tipo)
+        before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade, "tipo_requisicao": obj.tipo_requisicao, "setor_responsavel": obj.setor_responsavel_id}
+        updated = serializer.save(empresa=obj.empresa, setor_responsavel=responsabilidade.setor_atendimento)
+        after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade, "tipo_requisicao": updated.tipo_requisicao, "setor_responsavel": updated.setor_responsavel_id}
         _historico(updated, self.request, "EDICAO", updated.status, updated.status, valor_anterior=before, valor_novo=after, observacao="Requisição editada.")
 
     def destroy(self, request, *args, **kwargs):

@@ -8,7 +8,8 @@ from .views import (
     PedidoCompraEntregaViewSet, PedidoCompraParcelaViewSet,
     RequisicaoHistoricoViewSet, RequisicaoItemViewSet,
     RequisicaoFinalidadeAquisicaoViewSet, RequisicaoMaterialCategoriaViewSet,
-    RequisicaoServicoCategoriaViewSet, RequisicaoSetorViewSet, RequisicaoViewSet,
+    RequisicaoMatrizResponsabilidadeViewSet, RequisicaoServicoCategoriaViewSet,
+    RequisicaoSetorViewSet, RequisicaoViewSet,
 )
 
 router = DefaultRouter()
@@ -25,6 +26,7 @@ router.register('requisicao-itens', RequisicaoItemViewSet)
 router.register('requisicao-historico', RequisicaoHistoricoViewSet)
 router.register('requisicao-servico-categorias', RequisicaoServicoCategoriaViewSet)
 router.register('requisicao-setores', RequisicaoSetorViewSet)
+router.register('requisicao-matriz-responsabilidade', RequisicaoMatrizResponsabilidadeViewSet)
 router.register('requisicao-material-categorias', RequisicaoMaterialCategoriaViewSet)
 router.register('requisicao-finalidades-aquisicao', RequisicaoFinalidadeAquisicaoViewSet)
 
