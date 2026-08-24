@@ -630,6 +630,7 @@ class ProdutoUsoConsumoEstoqueSerializer(serializers.ModelSerializer):
 class ProdutoUsoConsumoMovimentacaoSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
     produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
+    produto_tipo = serializers.CharField(source='produto.tipo_produto', read_only=True)
     loja_nome = serializers.CharField(source='loja.nome_loja', read_only=True)
     usuario_nome = serializers.SerializerMethodField()
 

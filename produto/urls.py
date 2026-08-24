@@ -5,6 +5,7 @@ from .views import (
     CodigosViewSet, ProdutoViewSet, ProdutoDetalheViewSet, ProdutoImagemViewSet, TabelaprecoProdutoViewSet, PromocaoViewSet,
     FichaTecnicaViewSet, FichaTecnicaItemViewSet, OrdemProducaoViewSet, OrdemProducaoItemViewSet,
     PackViewSet, PackItemViewSet, EstoqueViewSet, EstoqueMovimentacaoViewSet, ProdutoUsoConsumoEstoqueViewSet,
+    ProdutoUsoConsumoMovimentacaoViewSet,
     InventarioEstoqueViewSet, InventarioEstoqueItemViewSet
 )
 
@@ -37,6 +38,7 @@ router.register('pack-item', PackItemViewSet)
 router.register('estoque', EstoqueViewSet)
 router.register('estoque-movimentacao', EstoqueMovimentacaoViewSet)
 router.register('produto-uso-consumo-estoque', ProdutoUsoConsumoEstoqueViewSet)
+router.register('produto-uso-consumo-movimentacao', ProdutoUsoConsumoMovimentacaoViewSet)
 router.register('inventario-estoque', InventarioEstoqueViewSet)
 router.register('inventario-estoque-item', InventarioEstoqueItemViewSet)
 

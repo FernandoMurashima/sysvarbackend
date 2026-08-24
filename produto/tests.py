@@ -21,6 +21,7 @@ from .models import (
     ProdutoInsumoHistorico,
     ProdutoUsoConsumoEstoque,
     ProdutoUsoConsumoHistorico,
+    ProdutoUsoConsumoMovimentacao,
     ProdutoVendaHistorico,
     Pack,
     PackItem,
@@ -151,6 +152,52 @@ class ProdutoVendaApiTests(TestCase):
         resp_zerados = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"saldo": "zerados"})
         results_zerados = resp_zerados.data["results"] if isinstance(resp_zerados.data, dict) else resp_zerados.data
         self.assertEqual([row["loja"] for row in results_zerados], [loja_filial.id])
+
+    def test_consulta_movimentacao_uso_consumo_filtra_tipo_produto_referencia_e_loja(self):
+        loja_filial = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja 2",
+            apelido_loja="L2",
+            cnpj="11222333000183",
+        )
+        produto_uso = self.produto(tipo_produto="2", descricao="Papel A4", descricao_reduzida="PAPEL")
+        produto_venda = self.produto(descricao="Produto venda")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7.000")
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=self.empresa,
+            produto=produto_uso,
+            loja=self.loja,
+            tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
+            quantidade="7.000",
+            saldo_anterior="0.000",
+            saldo_posterior="7.000",
+            documento="NFE:21:ENTRADA",
+            origem="NFE:21",
+            destino=self.loja.nome_loja,
+        )
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=self.empresa,
+            produto=produto_venda,
+            loja=loja_filial,
+            tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
+            quantidade="99.000",
+            saldo_anterior="0.000",
+            saldo_posterior="99.000",
+            documento="VENDA",
+        )
+
+        resp = self.client.get("/api/produto/produto-uso-consumo-movimentacao/", {"search": produto_uso.referencia})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        results = resp.data["results"] if isinstance(resp.data, dict) else resp.data
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["produto_tipo"], "2")
+        self.assertEqual(results[0]["loja"], self.loja.id)
+        self.assertEqual(results[0]["quantidade"], "7.000")
+        self.assertEqual(results[0]["saldo_posterior"], "7.000")
+
+        resp_loja = self.client.get("/api/produto/produto-uso-consumo-movimentacao/", {"loja": loja_filial.id})
+        results_loja = resp_loja.data["results"] if isinstance(resp_loja.data, dict) else resp_loja.data
+        self.assertEqual(results_loja, [])
 
     def test_produto_uso_consumo_multiplas_matrizes_nao_bloqueiam_cadastro(self):
         Loja.objects.create(empresa=self.empresa, nome_loja="Matriz A", apelido_loja="MA", cnpj="11222333000183", tipo_unidade=Loja.TIPO_MATRIZ)

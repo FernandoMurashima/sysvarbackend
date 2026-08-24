@@ -2299,6 +2299,54 @@ class ProdutoUsoConsumoEstoqueViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
 
+class ProdutoUsoConsumoMovimentacaoViewSet(viewsets.ReadOnlyModelViewSet):
+    required_module = "estoque"
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "Auxiliar", "Assistente", "Regular"]
+    queryset = ProdutoUsoConsumoMovimentacao.objects.select_related("empresa", "produto", "produto__unidade", "loja", "usuario")
+    serializer_class = ProdutoUsoConsumoMovimentacaoSerializer
+
+    def get_queryset(self):
+        qs = self.queryset.filter(produto__tipo_produto="2").order_by("-data_movimento", "-id")
+        user = self.request.user
+        empresa_id = getattr(user, "empresa_id", None)
+        empresa_param = self.request.query_params.get("empresa")
+        if user.is_superuser and empresa_param:
+            qs = qs.filter(empresa_id=empresa_param)
+        elif empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not user.is_superuser:
+            return qs.none()
+
+        access = EffectiveAccessService(user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (user.is_superuser or access.is_company_master()):
+            qs = qs.filter(loja_id__in=allowed)
+
+        loja = self.request.query_params.get("loja")
+        tipo = self.request.query_params.get("tipo")
+        search = (self.request.query_params.get("search") or "").strip()
+        data_inicio = self.request.query_params.get("data_inicio")
+        data_fim = self.request.query_params.get("data_fim")
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if tipo:
+            qs = qs.filter(tipo=tipo)
+        if search:
+            qs = qs.filter(
+                Q(produto__referencia__icontains=search)
+                | Q(produto__descricao__icontains=search)
+                | Q(produto__descricao_reduzida__icontains=search)
+                | Q(documento__icontains=search)
+                | Q(origem__icontains=search)
+            )
+        if data_inicio:
+            qs = qs.filter(data_movimento__date__gte=data_inicio)
+        if data_fim:
+            qs = qs.filter(data_movimento__date__lte=data_fim)
+        return qs
+
+
 class InventarioEstoqueViewSet(BaseViewSet):
     required_module = "estoque"
     queryset = InventarioEstoque.objects.all()
