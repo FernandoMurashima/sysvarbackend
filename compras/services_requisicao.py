@@ -91,7 +91,9 @@ def sincronizar_requisicao_com_ordem_servico(ordem_servico, usuario=None, regist
 
     itens_atualizados = 0
     if ordem_servico.status == "CONCLUIDA":
-        itens = requisicao.itens.filter(tipo="SERVICO").exclude(status__in=["SERVICO_CONCLUIDO", "CANCELADO", "REJEITADO"])
+        itens = requisicao.itens.exclude(
+            status__in=["SERVICO_CONCLUIDO", "ATENDIDO", "CANCELADO", "REJEITADO"]
+        )
         itens_atualizados = itens.update(status="SERVICO_CONCLUIDO")
         _registrar_historico_requisicao_os(
             requisicao,

@@ -1803,6 +1803,27 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(item.status, "SERVICO_CONCLUIDO")
         self.assertTrue(RequisicaoHistorico.objects.filter(requisicao=req, observacao=f"Atendida pela OS nº {os.id}.").exists())
 
+    def test_consulta_corrige_item_aprovado_de_requisicao_com_os_concluida(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        item_id = self.item_produto(req, qtd="1.000")
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        OrdemServico.objects.filter(pk=os.pk).update(status="CONCLUIDA")
+        Requisicao.objects.filter(pk=req.pk).update(status="CONCLUIDA")
+        RequisicaoItem.objects.filter(pk=item_id).update(status="APROVADO")
+        observacao = f"Atendida pela OS nº {os.id}."
+        RequisicaoHistorico.objects.create(requisicao=req, acao="STATUS", status_anterior="EM_ATENDIMENTO", status_novo="CONCLUIDA", observacao=observacao)
+        historico_antes = RequisicaoHistorico.objects.filter(requisicao=req, observacao=observacao).count()
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item = RequisicaoItem.objects.get(pk=item_id)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "CONCLUIDA")
+        self.assertEqual(item.status, "SERVICO_CONCLUIDO")
+        self.assertEqual(RequisicaoHistorico.objects.filter(requisicao=req, observacao=observacao).count(), historico_antes)
+
     def test_os_com_material_pendente_bloqueia_conclusao(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
