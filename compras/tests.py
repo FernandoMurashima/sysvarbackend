@@ -1803,6 +1803,27 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(item.status, "SERVICO_CONCLUIDO")
         self.assertTrue(RequisicaoHistorico.objects.filter(requisicao=req, observacao=f"Atendida pela OS nº {os.id}.").exists())
 
+    def test_os_com_material_pendente_bloqueia_conclusao(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        self.client.force_authenticate(self.aprovador)
+        material = self.client.post("/api/compras/ordens-servico-materiais/", {
+            "ordem_servico": os.id,
+            "produto": self.produto.pk,
+            "qtd_necessaria": "1.000",
+        }, format="json")
+        self.assertEqual(material.status_code, 201, material.data)
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"status": "CONCLUIDA"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(str(resp.data["detail"]), "Não é possível concluir a OS enquanto houver material pendente.")
+        os.refresh_from_db()
+        req.refresh_from_db()
+        self.assertNotEqual(os.status, "CONCLUIDA")
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+
     def test_os_aguardando_material_nao_coloca_requisicao_em_compra_e_conclui_apos_atendimento(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("2.000")})
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")

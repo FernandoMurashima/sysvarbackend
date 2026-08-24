@@ -2486,6 +2486,11 @@ class OrdemServicoViewSet(BaseViewSet):
     def perform_update(self, serializer):
         obj = serializer.instance
         before = {"status": obj.status, "responsavel": obj.responsavel_id}
+        if serializer.validated_data.get("status") == "CONCLUIDA":
+            pendente = obj.materiais.filter(qtd_pendente__gt=0).exclude(status="CANCELADA").exists()
+            status_pendente = obj.materiais.exclude(status__in=["ATENDIDA", "CANCELADA"]).exists()
+            if pendente or status_pendente:
+                raise ValidationError({"detail": "Não é possível concluir a OS enquanto houver material pendente."})
         updated = serializer.save()
         sincronizar_requisicao_com_ordem_servico(updated, usuario=self.request.user)
         after = {"status": updated.status, "responsavel": updated.responsavel_id}
