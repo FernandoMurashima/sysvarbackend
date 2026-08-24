@@ -1457,6 +1457,19 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 201, resp.data)
         return resp.data["id"]
 
+    def item_servico(self, req, titulo="Manutenção"):
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "SERVICO",
+            "origem": "SERVICO",
+            "titulo_servico": titulo,
+            "descricao_servico": titulo,
+            "categoria_servico": self.categoria.id,
+            "tipo_servico": "CORRETIVA",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        return resp.data["id"]
+
     def aprovar(self, req):
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
         self.client.force_authenticate(self.aprovador)
@@ -1743,6 +1756,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
 
     def test_ordem_servico_status_e_conclusao(self):
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
         os = OrdemServico.objects.get(requisicao=req)
         self.client.force_authenticate(self.aprovador)
         resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {
@@ -1756,6 +1771,66 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertIsNotNone(resp.data["data_conclusao"])
         self.client.force_authenticate(self.solicitante)
+
+    def test_os_em_atendimento_com_material_disponivel_mantem_requisicao_em_atendimento(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("1.000"))
+        os.status = "EM_ATENDIMENTO"
+        os.save(update_fields=["status", "atualizado_em"])
+        Requisicao.objects.filter(pk=req.pk).update(status="EM_PROCESSO_COMPRA")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+
+    def test_os_sem_material_conclui_requisicao_e_registra_historico(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        item_id = self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"status": "CONCLUIDA"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        req.refresh_from_db()
+        item = RequisicaoItem.objects.get(pk=item_id)
+        self.assertEqual(req.status, "CONCLUIDA")
+        self.assertEqual(item.status, "SERVICO_CONCLUIDO")
+        self.assertTrue(RequisicaoHistorico.objects.filter(requisicao=req, observacao=f"Atendida pela OS nº {os.id}.").exists())
+
+    def test_os_aguardando_material_nao_coloca_requisicao_em_compra_e_conclui_apos_atendimento(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("2.000")})
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        self.client.force_authenticate(self.aprovador)
+        material = self.client.post("/api/compras/ordens-servico-materiais/", {
+            "ordem_servico": os.id,
+            "produto": self.produto.pk,
+            "qtd_necessaria": "2.000",
+        }, format="json")
+        self.assertEqual(material.status_code, 201, material.data)
+        OrdemServico.objects.filter(pk=os.pk).update(status="AGUARDANDO_MATERIAL")
+        resp = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+        atender = self.client.post(f"/api/compras/ordens-servico-materiais/{material.data['id']}/atender/", {"quantidade": "2.000"}, format="json")
+        self.assertEqual(atender.status_code, 200, atender.data)
+        os.refresh_from_db()
+        req.refresh_from_db()
+        self.assertEqual(os.status, "EM_ATENDIMENTO")
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+        concluir = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"status": "CONCLUIDA"}, format="json")
+        self.assertEqual(concluir.status_code, 200, concluir.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "CONCLUIDA")
 
     def test_ordem_servico_multiempresa_preservado(self):
         self.client.force_authenticate(self.outro)

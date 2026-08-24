@@ -63,6 +63,7 @@ from .services_requisicao import (
     garantir_ordem_servico_requisicao,
     loja_almoxarifado_central,
     resolver_responsabilidade_requisicao,
+    sincronizar_requisicao_com_ordem_servico,
 )
 
 # Integração Financeiro
@@ -2108,6 +2109,10 @@ class RequisicaoViewSet(BaseViewSet):
     @transaction.atomic
     def retrieve(self, request, *args, **kwargs):
         obj = Requisicao.objects.select_for_update().get(pk=self.get_object().pk)
+        ordem = getattr(obj, "ordem_servico", None)
+        if ordem:
+            sincronizar_requisicao_com_ordem_servico(ordem, usuario=request.user)
+            obj.refresh_from_db()
         sincronizar_requisicao_disponivel_para_atendimento(obj)
         obj.refresh_from_db()
         serializer = self.get_serializer(obj)
@@ -2235,6 +2240,10 @@ class RequisicaoViewSet(BaseViewSet):
         obj.save(update_fields=["status", "aprovado_por", "aprovado_em", "atualizado_em"])
         obj.itens.filter(status="PENDENTE").update(status="APROVADO")
         _historico(obj, request, "APROVACAO", before, obj.status, observacao=request.data.get("observacao", ""))
+        ordem = garantir_ordem_servico_requisicao(obj)
+        if ordem:
+            sincronizar_requisicao_com_ordem_servico(ordem, usuario=request.user, registrar_inicio=True)
+            obj.refresh_from_db()
         return Response(self.get_serializer(obj).data)
 
     @action(detail=True, methods=["post"], url_path="rejeitar")
@@ -2464,6 +2473,13 @@ class OrdemServicoViewSet(BaseViewSet):
             qs = qs.filter(responsavel_id=responsavel)
         return qs
 
+    @transaction.atomic
+    def retrieve(self, request, *args, **kwargs):
+        obj = OrdemServico.objects.select_for_update().get(pk=self.get_object().pk)
+        sincronizar_requisicao_com_ordem_servico(obj, usuario=request.user)
+        obj.refresh_from_db()
+        return Response(self.get_serializer(obj).data)
+
     def perform_create(self, serializer):
         raise ValidationError({"detail": "Ordem de Serviço é gerada a partir da Requisição."})
 
@@ -2471,6 +2487,7 @@ class OrdemServicoViewSet(BaseViewSet):
         obj = serializer.instance
         before = {"status": obj.status, "responsavel": obj.responsavel_id}
         updated = serializer.save()
+        sincronizar_requisicao_com_ordem_servico(updated, usuario=self.request.user)
         after = {"status": updated.status, "responsavel": updated.responsavel_id}
         _audit("ordemservico", updated.pk, {"updated": True, "before": before, "after": after}, self.request, action="update")
 

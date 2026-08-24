@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 
 from produto.models import ProdutoUsoConsumoEstoque
 
-from .models import OrdemServico, RequisicaoMatrizResponsabilidade
+from .models import OrdemServico, RequisicaoHistorico, RequisicaoMatrizResponsabilidade
 
 
 TIPO_REQUISICAO_LABELS = {
@@ -60,6 +60,58 @@ def garantir_ordem_servico_requisicao(requisicao):
     return ordem
 
 
+def _registrar_historico_requisicao_os(requisicao, observacao, usuario=None, status_anterior="", status_novo=""):
+    if RequisicaoHistorico.objects.filter(requisicao=requisicao, observacao=observacao).exists():
+        return None
+    return RequisicaoHistorico.objects.create(
+        requisicao=requisicao,
+        usuario=usuario,
+        acao="STATUS",
+        status_anterior=status_anterior or "",
+        status_novo=status_novo or "",
+        observacao=observacao,
+    )
+
+
+def sincronizar_requisicao_com_ordem_servico(ordem_servico, usuario=None, registrar_inicio=False):
+    requisicao = ordem_servico.requisicao
+    if requisicao.tipo_requisicao not in {"MANUTENCAO", "TI"}:
+        return {"requisicao": False, "itens": 0}
+
+    if ordem_servico.status == "CANCELADA":
+        return {"requisicao": False, "itens": 0}
+
+    status_destino = "CONCLUIDA" if ordem_servico.status == "CONCLUIDA" else "EM_ATENDIMENTO"
+    status_anterior = requisicao.status
+    requisicao_atualizada = False
+    if requisicao.status != status_destino:
+        requisicao.status = status_destino
+        requisicao.save(update_fields=["status", "atualizado_em"])
+        requisicao_atualizada = True
+
+    itens_atualizados = 0
+    if ordem_servico.status == "CONCLUIDA":
+        itens = requisicao.itens.filter(tipo="SERVICO").exclude(status__in=["SERVICO_CONCLUIDO", "CANCELADO", "REJEITADO"])
+        itens_atualizados = itens.update(status="SERVICO_CONCLUIDO")
+        _registrar_historico_requisicao_os(
+            requisicao,
+            f"Atendida pela OS nº {ordem_servico.id}.",
+            usuario=usuario,
+            status_anterior=status_anterior,
+            status_novo="CONCLUIDA",
+        )
+    elif registrar_inicio:
+        _registrar_historico_requisicao_os(
+            requisicao,
+            f"Atendimento iniciado pela OS nº {ordem_servico.id}.",
+            usuario=usuario,
+            status_anterior=status_anterior,
+            status_novo=status_destino,
+        )
+
+    return {"requisicao": requisicao_atualizada, "itens": itens_atualizados}
+
+
 def loja_almoxarifado_central(empresa):
     responsabilidade = resolver_responsabilidade_requisicao(empresa, "USO_CONSUMO")
     setor = responsabilidade.setor_atendimento
@@ -104,4 +156,5 @@ def atualizar_status_material_ordem_servico(ordem_servico):
     elif not pendentes and ordem_servico.status == "AGUARDANDO_MATERIAL":
         ordem_servico.status = "EM_ATENDIMENTO"
         ordem_servico.save(update_fields=["status", "atualizado_em"])
+    sincronizar_requisicao_com_ordem_servico(ordem_servico)
     return ordem_servico
