@@ -58,6 +58,7 @@ from .serializers import (
 )
 from .services_requisicao import (
     atualizar_status_material_os,
+    atualizar_status_material_ordem_servico,
     estoque_disponivel_material_os,
     garantir_ordem_servico_requisicao,
     loja_almoxarifado_central,
@@ -83,7 +84,7 @@ except Exception:
 from cadastros.models import Nat_Lancamento
 from cadastros.models import Loja
 from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
-from .services_necessidade import estoque_disponivel_requisicao_item, loja_estoque_requisicao_item
+from .services_necessidade import estoque_disponivel_requisicao_item, indicador_requisicao_item, loja_estoque_requisicao_item
 
 
 # ----------------- Auditoria robusta -----------------
@@ -2369,9 +2370,13 @@ class RequisicaoItemViewSet(BaseViewSet):
         item = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
         self.check_object_permissions(request, item)
         req = get_object_or_404(Requisicao.objects.select_for_update(), pk=item.requisicao_id)
-        if req.status not in {"APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"}:
+        if req.status not in {"APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE", "EM_PROCESSO_COMPRA"}:
             return Response({"detail": "A requisição precisa estar aprovada para atendimento."}, status=status.HTTP_400_BAD_REQUEST)
-        if item.status in {"ATENDIDO", "CANCELADO", "REJEITADO", "AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "SERVICO_CONCLUIDO"}:
+        indicador = indicador_requisicao_item(item)
+        bloqueados = {"ATENDIDO", "CANCELADO", "REJEITADO", "SERVICO_CONCLUIDO"}
+        if item.status in {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"} and indicador.get("codigo") != "DISPONIVEL":
+            bloqueados.add(item.status)
+        if item.status in bloqueados:
             return Response({"detail": "Item não pode ser atendido neste status."}, status=status.HTTP_400_BAD_REQUEST)
         if item.tipo != "MATERIAL" or item.origem != "PRODUTO" or not item.produto_id:
             return Response({"detail": "Somente material cadastrado pode ser atendido pelo estoque nesta etapa."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2504,9 +2509,7 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
             raise PermissionDenied("Usuário sem permissão para registrar material da OS.")
         material = serializer.save()
         atualizar_status_material_os(material)
-        if material.qtd_pendente > 0 and material.ordem_servico.status == "ABERTA":
-            material.ordem_servico.status = "AGUARDANDO_MATERIAL"
-            material.ordem_servico.save(update_fields=["status", "atualizado_em"])
+        atualizar_status_material_ordem_servico(material.ordem_servico)
         _audit("ordemservicomaterial", material.pk, {"created": True, "ordem_servico": material.ordem_servico_id}, self.request, action="create")
 
     def perform_update(self, serializer):
@@ -2515,6 +2518,7 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
         before = {"status": serializer.instance.status, "qtd_necessaria": str(serializer.instance.qtd_necessaria)}
         material = serializer.save()
         atualizar_status_material_os(material)
+        atualizar_status_material_ordem_servico(material.ordem_servico)
         after = {"status": material.status, "qtd_necessaria": str(material.qtd_necessaria)}
         _audit("ordemservicomaterial", material.pk, {"updated": True, "before": before, "after": after}, self.request, action="update")
 
@@ -2574,9 +2578,7 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
             material.qtd_atendida = Decimal(material.qtd_atendida or 0) + qtd
             material.save(update_fields=["qtd_atendida", "qtd_pendente", "status", "atualizado_em"])
             atualizar_status_material_os(material)
-            if os_obj.materiais.filter(status__in=["PENDENTE", "DISPONIVEL", "EM_COMPRA"]).exists() and os_obj.status not in {"CONCLUIDA", "CANCELADA"}:
-                os_obj.status = "AGUARDANDO_MATERIAL"
-                os_obj.save(update_fields=["status", "atualizado_em"])
+            atualizar_status_material_ordem_servico(os_obj)
             _audit("ordemservicomaterial", material.pk, {"attended": True, "qtd": str(qtd), "saldo_anterior": str(anterior), "saldo_posterior": str(posterior)}, request, action="atender")
         return Response(self.get_serializer(material).data)
 

@@ -92,3 +92,16 @@ def atualizar_status_material_os(material):
         material.status = "PENDENTE"
     material.save(update_fields=["qtd_pendente", "status", "atualizado_em"])
     return material
+
+
+def atualizar_status_material_ordem_servico(ordem_servico):
+    if ordem_servico.status in {"CONCLUIDA", "CANCELADA"}:
+        return ordem_servico
+    pendentes = ordem_servico.materiais.filter(status__in={"PENDENTE", "DISPONIVEL", "EM_COMPRA"}).exists()
+    if pendentes and ordem_servico.status == "ABERTA":
+        ordem_servico.status = "AGUARDANDO_MATERIAL"
+        ordem_servico.save(update_fields=["status", "atualizado_em"])
+    elif not pendentes and ordem_servico.status == "AGUARDANDO_MATERIAL":
+        ordem_servico.status = "EM_ATENDIMENTO"
+        ordem_servico.save(update_fields=["status", "atualizado_em"])
+    return ordem_servico

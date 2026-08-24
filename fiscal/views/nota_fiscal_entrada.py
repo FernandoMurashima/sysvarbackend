@@ -609,6 +609,11 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 req_item.status = "APROVADO"
                 req_item.save(update_fields=["status", "atualizado_em"])
                 req_atualizadas += 1
+            req = req_item.requisicao
+            statuses = set(req.itens.values_list("status", flat=True))
+            if req.status == "EM_PROCESSO_COMPRA" and not (statuses & {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}):
+                req.status = "EM_ATENDIMENTO"
+                req.save(update_fields=["status", "atualizado_em"])
         os_atualizadas = 0
         for material in OrdemServicoMaterial.objects.select_related("ordem_servico", "produto").filter(pk__in=os_material_ids):
             before = material.status
