@@ -12,6 +12,7 @@ from auditoria.services import AuditService
 
 from .permissions import CanToggleProductFlags
 from accounts.permissions import HasEmpresaModulo, HasModuleRole
+from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Loja
 from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem
 
@@ -2254,6 +2255,48 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         estoque.reserva = reserva
         estoque.save(update_fields=['referencia', 'Estoque', 'reserva'])
         serializer.save(referencia=referencia or '', saldo_anterior=anterior, saldo_posterior=posterior)
+
+
+class ProdutoUsoConsumoEstoqueViewSet(viewsets.ReadOnlyModelViewSet):
+    required_module = "estoque"
+    permission_classes = [HasModuleRole]
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa", "Vendedor", "Auxiliar", "Assistente", "Regular"]
+    queryset = ProdutoUsoConsumoEstoque.objects.select_related("empresa", "produto", "produto__unidade", "loja")
+    serializer_class = ProdutoUsoConsumoEstoqueSerializer
+
+    def get_queryset(self):
+        qs = self.queryset.filter(produto__tipo_produto="2").order_by("produto__referencia", "loja__nome_loja")
+        user = self.request.user
+        empresa_id = getattr(user, "empresa_id", None)
+        empresa_param = self.request.query_params.get("empresa")
+        if user.is_superuser and empresa_param:
+            qs = qs.filter(empresa_id=empresa_param)
+        elif empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not user.is_superuser:
+            return qs.none()
+
+        access = EffectiveAccessService(user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (user.is_superuser or access.is_company_master()):
+            qs = qs.filter(loja_id__in=allowed)
+
+        loja = self.request.query_params.get("loja")
+        search = (self.request.query_params.get("search") or "").strip()
+        saldo = self.request.query_params.get("saldo")
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if search:
+            qs = qs.filter(
+                Q(produto__referencia__icontains=search)
+                | Q(produto__descricao__icontains=search)
+                | Q(produto__descricao_reduzida__icontains=search)
+            )
+        if saldo == "com_saldo":
+            qs = qs.filter(saldo__gt=0)
+        elif saldo == "zerados":
+            qs = qs.filter(saldo=0)
+        return qs
 
 
 class InventarioEstoqueViewSet(BaseViewSet):

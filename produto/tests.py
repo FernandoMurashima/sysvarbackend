@@ -19,6 +19,7 @@ from .models import (
     ProdutoDetalhe,
     ProdutoImagem,
     ProdutoInsumoHistorico,
+    ProdutoUsoConsumoEstoque,
     ProdutoUsoConsumoHistorico,
     ProdutoVendaHistorico,
     Pack,
@@ -56,7 +57,17 @@ class ProdutoVendaApiTests(TestCase):
             modulo=self.produtos_modulo,
             defaults={"contratado": True},
         )
+        self.estoque_modulo, _ = ModuloSistema.objects.get_or_create(
+            chave="estoque",
+            defaults={"nome": "Estoque", "categoria": ModuloSistema.CATEGORIA_BASICO, "basico": True},
+        )
+        EmpresaModulo.objects.update_or_create(
+            empresa=self.empresa,
+            modulo=self.estoque_modulo,
+            defaults={"contratado": True},
+        )
         UserModulePermission.objects.create(user=self.user, modulo=UserModulePermission.Module.PRODUTOS, acesso=UserModulePermission.Access.EDIT)
+        UserModulePermission.objects.create(user=self.user, modulo=UserModulePermission.Module.ESTOQUE, acesso=UserModulePermission.Access.VIEW)
         self.client.force_authenticate(self.user)
         self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
         self.colecao = Colecao.objects.create(empresa=self.empresa, Descricao="Colecao", Codigo="26", Estacao="01")
@@ -108,6 +119,38 @@ class ProdutoVendaApiTests(TestCase):
         self.assertFalse(hasattr(produto, "controla_estoque"))
         self.assertNotIn("controla_estoque", resp.data)
         self.assertTrue(ProdutoUsoConsumoHistorico.objects.filter(produto=produto, tipo_evento=ProdutoUsoConsumoHistorico.CRIACAO).exists())
+
+    def test_consulta_estoque_uso_consumo_filtra_tipo_produto_loja_saldo_e_referencia(self):
+        loja_filial = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja 2",
+            apelido_loja="L2",
+            cnpj="11222333000183",
+        )
+        produto_uso = self.produto(tipo_produto="2", descricao="Papel A4", descricao_reduzida="PAPEL")
+        produto_venda = self.produto(descricao="Produto venda")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=loja_filial, saldo="0.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_venda, loja=self.loja, saldo="99.000")
+
+        resp = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"search": produto_uso.referencia})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        results = resp.data["results"] if isinstance(resp.data, dict) else resp.data
+        self.assertEqual({row["produto_tipo"] for row in results}, {"2"})
+        self.assertEqual({row["loja"] for row in results}, {self.loja.id, loja_filial.id})
+
+        resp_loja = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"loja": self.loja.id})
+        results_loja = resp_loja.data["results"] if isinstance(resp_loja.data, dict) else resp_loja.data
+        self.assertEqual([row["loja"] for row in results_loja], [self.loja.id])
+        self.assertEqual(results_loja[0]["saldo"], "7.000")
+
+        resp_com_saldo = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"saldo": "com_saldo"})
+        results_com_saldo = resp_com_saldo.data["results"] if isinstance(resp_com_saldo.data, dict) else resp_com_saldo.data
+        self.assertEqual([row["loja"] for row in results_com_saldo], [self.loja.id])
+
+        resp_zerados = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"saldo": "zerados"})
+        results_zerados = resp_zerados.data["results"] if isinstance(resp_zerados.data, dict) else resp_zerados.data
+        self.assertEqual([row["loja"] for row in results_zerados], [loja_filial.id])
 
     def test_produto_uso_consumo_multiplas_matrizes_nao_bloqueiam_cadastro(self):
         Loja.objects.create(empresa=self.empresa, nome_loja="Matriz A", apelido_loja="MA", cnpj="11222333000183", tipo_unidade=Loja.TIPO_MATRIZ)
