@@ -10,7 +10,7 @@ from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
-from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, Tamanho, Unidade
+from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
@@ -721,7 +721,7 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         )
         self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
 
-    def criar_produto(self, tipo="2", descricao="Produto"):
+    def criar_produto(self, tipo="4", descricao="Produto"):
         return Produto.objects.create(empresa=self.empresa, tipo_produto=tipo, descricao=descricao, unidade=self.unidade)
 
     def criar_pedido(self, produto, qtd=Decimal("10.000"), preco=Decimal("10.00"), tipo="2"):
@@ -883,15 +883,19 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").count(), 1)
 
     def test_uso_consumo_estorna_estoque_e_recalcula_custos(self):
-        produto = self.criar_produto()
+        produto = self.criar_produto(tipo="2")
         pedido, item = self.criar_pedido(produto, qtd=Decimal("5.000"), preco=Decimal("20.00"))
         nota = self.criar_nota(pedido, item, "907", Decimal("5.000"), Decimal("20.00"))
         self.fechar(nota)
-        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("5.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("5.000"))
+        self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", produto=produto).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
         self.assertEqual(produto.__class__.objects.get(pk=produto.pk).custo_medio, Decimal("20.0000"))
 
         self.cancelar(nota)
-        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("0.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("0.000"))
+        self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", produto=produto).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").exists())
         self.assertEqual(produto.__class__.objects.get(pk=produto.pk).custo_medio, Decimal("0.0000"))
 
     def criar_revenda(self):
@@ -1365,7 +1369,7 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
         self.fechar(nota2)
         pedido.refresh_from_db()
         self.assertEqual(pedido.status, "AT")
-        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("100.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("100.000"))
 
         self.cancelar(nota1)
         pedido.refresh_from_db()
@@ -1375,8 +1379,8 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
         self.assertEqual(entrega.status, "PARC")
         self.assertTrue(Pagar.objects.filter(nfe_id=nota2.pk, Previsao=False).exists())
         self.assertEqual(Pagar.objects.get(pedido_compra=pedido.pk, nfe_id__isnull=True, Previsao=True).Valor_total, Decimal("400.00"))
-        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
-        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
+        self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
 
         nota3 = self.criar_nota_api(pedido, "8003")
         self.criar_item_api(nota3, item, Decimal("40.000"), Decimal("10.00"))
@@ -1386,7 +1390,7 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
         self.assertEqual(pedido.status, "AT")
         self.assertEqual(entrega.qtd_recebida, Decimal("100.000"))
         self.assertEqual(entrega.status, "RECB")
-        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra__startswith="29").Estoque, Decimal("100.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("100.000"))
         self.assertEqual(Pagar.objects.filter(nfe_id__in=[nota2.pk, nota3.pk], Previsao=False).count(), 2)
 
     def test_fluxo_revenda_pack_multitamanho_isolado_por_empresa_e_cancelamento(self):
@@ -1435,7 +1439,7 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
         self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=skus["M"].ean13).Estoque, Decimal("4.000"))
         self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=skus["G"].ean13).Estoque, Decimal("2.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", Idloja=self.loja).count(), 3)
-        self.assertEqual(self.estoque_produto(produto_b, self.loja_b).Estoque, Decimal("5.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa_b, produto=produto_b, loja=self.loja_b).saldo, Decimal("5.000"))
 
         self.cancelar(nota)
         pedido.refresh_from_db()
@@ -1445,7 +1449,7 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
             sku.refresh_from_db()
             self.assertEqual(sku.custo_medio, Decimal("0.0000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", Idloja=self.loja).count(), 3)
-        self.assertEqual(self.estoque_produto(produto_b, self.loja_b).Estoque, Decimal("5.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa_b, produto=produto_b, loja=self.loja_b).saldo, Decimal("5.000"))
         self.assertTrue(Pagar.objects.filter(nfe_id=nota_b.pk, Previsao=False).exists())
 
     def test_fluxos_uso_consumo_e_insumo_decimais_financeiro_custo_e_cancelamento(self):
@@ -1460,7 +1464,13 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
             produto.refresh_from_db()
             self.assertEqual(pedido.status, "AT")
             self.assertEqual(item.entregas.get().qtd_recebida, Decimal("3.500"))
-            self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("3.500"))
+            if tipo == "2":
+                self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("3.500"))
+                self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", produto=produto, loja=self.loja).exists())
+                self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+                self.assertFalse(Estoque.objects.filter(Idloja=self.loja, referencia=produto.referencia or "").exists())
+            else:
+                self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("3.500"))
             self.assertEqual(produto.custo_medio, Decimal("12.0000"))
             self.assertTrue(Pagar.objects.filter(nfe_id=nota.pk, Previsao=False).exists())
 
@@ -1469,7 +1479,12 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
             produto.refresh_from_db()
             self.assertEqual(pedido.status, "AP")
             self.assertEqual(item.entregas.get().qtd_recebida, Decimal("0.000"))
-            self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("0.000"))
+            if tipo == "2":
+                self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, produto=produto, loja=self.loja).saldo, Decimal("0.000"))
+                self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", produto=produto, loja=self.loja).exists())
+                self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").exists())
+            else:
+                self.assertEqual(self.estoque_produto(produto).Estoque, Decimal("0.000"))
             self.assertEqual(produto.custo_medio, Decimal("0.0000"))
             self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
             self.assertEqual(Pagar.objects.get(pedido_compra=pedido.pk, Previsao=True).Valor_total, Decimal("42.00"))

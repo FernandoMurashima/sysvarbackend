@@ -429,7 +429,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _movimentar_estoque_entrada(self, nota):
         documento = self._documento_estoque(nota, "ENTRADA")
-        if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists():
+        if (
+            EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists()
+            or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA).exists()
+        ):
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
 
         movimentos = 0
@@ -442,7 +445,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     documento=documento,
                     sinal=1,
                 )
-            elif self._pedido_item_material_interno(item_nf.pedido_item):
+            elif self._pedido_item_uso_consumo(item_nf.pedido_item):
                 movimentos += self._movimentar_item_estoque_uso_consumo(
                     nota=nota,
                     item_nf=item_nf,
@@ -463,7 +466,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _movimentar_estoque_cancelamento(self, nota):
         documento = self._documento_estoque(nota, "CANCEL")
-        if EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists():
+        if (
+            EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists()
+            or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_SAIDA).exists()
+        ):
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
 
         movimentos = 0
@@ -476,7 +482,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     documento=documento,
                     sinal=-1,
                 )
-            elif self._pedido_item_material_interno(item_nf.pedido_item):
+            elif self._pedido_item_uso_consumo(item_nf.pedido_item):
                 movimentos += self._movimentar_item_estoque_uso_consumo(
                     nota=nota,
                     item_nf=item_nf,
@@ -524,7 +530,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 produto = pedido_item.produto if pedido_item else None
                 if not produto:
                     continue
-                if self._pedido_item_material_interno(pedido_item):
+                if self._pedido_item_uso_consumo(pedido_item):
                     saldo = Decimal(
                         ProdutoUsoConsumoEstoque.objects.filter(produto=produto, loja=nota.pedido_compra.loja, empresa=nota.pedido_compra.empresa)
                         .values_list("saldo", flat=True)
@@ -555,6 +561,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         marcador_req = f"REQ_ITEM:"
         marcador_os = f"OS_MATERIAL:"
         return marcador_req in (pedido_item.observacoes or "") or marcador_os in (pedido_item.observacoes or "")
+
+    def _pedido_item_uso_consumo(self, pedido_item):
+        return bool(pedido_item and pedido_item.produto_id and pedido_item.produto.tipo_produto == "2")
 
     def _movimentar_item_estoque_uso_consumo(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
@@ -625,7 +634,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     def _movimentar_item_estoque_nao_revenda(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
         produto = pedido_item.produto if pedido_item else None
-        if not produto or produto.tipo_produto not in ("2", "4"):
+        if not produto or produto.tipo_produto != "4":
             return 0
 
         qtd = _q3(item_nf.qtd_recebida or 0)
