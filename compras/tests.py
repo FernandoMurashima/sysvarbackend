@@ -2058,6 +2058,37 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(atender.status_code, 200, atender.data)
         self.assertEqual(atender.data["status"], "ATENDIDO")
 
+    def test_consulta_sincroniza_requisicao_antiga_com_estoque_disponivel(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("3.000")})
+        req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
+        item_id = self.item_produto(req, qtd="3.000")
+        self.aprovar(req)
+        self.client.force_authenticate(self.aprovador)
+        aguardar = self.client.post(f"/api/compras/requisicao-itens/{item_id}/aguardar-cotacao/", {}, format="json")
+        self.assertEqual(aguardar.status_code, 200, aguardar.data)
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO", status="PEDIDO_GERADO")
+        cot_item = CotacaoItem.objects.create(cotacao=cotacao, produto=self.produto, descricao=self.produto.descricao, quantidade_cotar=Decimal("3.000"), unidade=self.unidade, requisicao_item_origem_id=item_id, origem="REQUISICAO")
+        pedido = PedidoCompra.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, tipo="2", status="AP", cotacao_origem=cotacao)
+        PedidoCompraItem.objects.create(pedido=pedido, produto=self.produto, qtd=Decimal("3.000"), preco_unit=Decimal("10.00"), total_item=Decimal("30.00"), unidade=self.unidade, observacoes=f"REQ_ITEM:{item_id}")
+        RequisicaoItem.objects.filter(pk=item_id).update(status="AGUARDANDO_COTACAO")
+        Requisicao.objects.filter(pk=req.pk).update(status="AGUARDANDO_COTACAO")
+        historico_antes = RequisicaoHistorico.objects.filter(requisicao=req).count()
+
+        self.client.force_authenticate(self.solicitante)
+        detalhe = self.client.get(f"/api/compras/requisicoes/{req.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        req.refresh_from_db()
+        req_item = RequisicaoItem.objects.get(pk=item_id)
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+        self.assertEqual(req_item.status, "APROVADO")
+        self.assertEqual(detalhe.data["itens"][0]["indicador_compra"]["codigo"], "DISPONIVEL")
+        self.assertTrue(CotacaoItem.objects.filter(pk=cot_item.pk, requisicao_item_origem=req_item).exists())
+        self.assertEqual(Cotacao.objects.get(pk=cotacao.pk).pedido_compra_gerado.id, pedido.id)
+
+        segunda_consulta = self.client.get(f"/api/compras/requisicoes/{req.id}/")
+        self.assertEqual(segunda_consulta.status_code, 200, segunda_consulta.data)
+        self.assertEqual(RequisicaoHistorico.objects.filter(requisicao=req).count(), historico_antes)
+
     def test_loja_deve_pertencer_a_empresa_correta(self):
         resp = self.client.post("/api/compras/requisicoes/", {
             "loja": self.loja_b.id,

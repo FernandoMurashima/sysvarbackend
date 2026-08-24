@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
 from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
-from compras.services_necessidade import indicador_requisicao_item
+from compras.services_necessidade import sincronizar_requisicao_disponivel_para_atendimento
 from compras.services_requisicao import atualizar_status_material_os
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
 
@@ -602,8 +602,6 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return 1
 
     def _recalcular_necessidades_vinculadas(self, nota):
-        status_compra_requisicao = {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}
-        status_req_compra = {"AGUARDANDO_COTACAO", "EM_PROCESSO_COMPRA"}
         req_ids = set()
         os_material_ids = set()
         for item in nota.pedido_compra.itens.all():
@@ -616,21 +614,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         req_atualizadas = 0
         requisicoes = set()
         for req_item in RequisicaoItem.objects.select_related("requisicao", "produto").filter(pk__in=req_ids):
-            indicador = indicador_requisicao_item(req_item)
-            estoque_atual = Decimal(indicador.get("estoque_atual") or 0)
-            if estoque_atual > 0 and req_item.status in status_compra_requisicao:
-                req_item.status = "APROVADO"
-                req_item.save(update_fields=["status", "atualizado_em"])
-                req_atualizadas += 1
             requisicoes.add(req_item.requisicao)
         for req in requisicoes:
-            if req.status not in status_req_compra:
-                continue
-            for item_req in req.itens.select_related("produto"):
-                if item_req.status in {"APROVADO", "ATENDIDO_PARCIALMENTE"} and Decimal(indicador_requisicao_item(item_req).get("estoque_atual") or 0) > 0:
-                    req.status = "EM_ATENDIMENTO"
-                    req.save(update_fields=["status", "atualizado_em"])
-                    break
+            resultado = sincronizar_requisicao_disponivel_para_atendimento(req)
+            req_atualizadas += resultado["itens"]
         os_atualizadas = 0
         for material in OrdemServicoMaterial.objects.select_related("ordem_servico", "produto").filter(pk__in=os_material_ids):
             before = material.status

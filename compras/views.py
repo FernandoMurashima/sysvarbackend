@@ -84,7 +84,7 @@ except Exception:
 from cadastros.models import Nat_Lancamento
 from cadastros.models import Loja
 from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
-from .services_necessidade import estoque_disponivel_requisicao_item, indicador_requisicao_item, loja_estoque_requisicao_item
+from .services_necessidade import estoque_disponivel_requisicao_item, indicador_requisicao_item, loja_estoque_requisicao_item, sincronizar_requisicao_disponivel_para_atendimento
 
 
 # ----------------- Auditoria robusta -----------------
@@ -2104,6 +2104,14 @@ class RequisicaoViewSet(BaseViewSet):
                 return qs.none()
             qs = qs.filter(allowed)
         return qs
+
+    @transaction.atomic
+    def retrieve(self, request, *args, **kwargs):
+        obj = Requisicao.objects.select_for_update().get(pk=self.get_object().pk)
+        sincronizar_requisicao_disponivel_para_atendimento(obj)
+        obj.refresh_from_db()
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["get"], url_path="lojas-permitidas")
     def lojas_permitidas(self, request):

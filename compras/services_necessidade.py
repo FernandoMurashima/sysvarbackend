@@ -7,6 +7,10 @@ from produto.models import ProdutoUsoConsumoEstoque
 from .models import CotacaoItem, PedidoCompraEntrega
 
 
+STATUS_ITEM_PROCESSO_COMPRA = {"AGUARDANDO_COTACAO", "EM_COTACAO", "PEDIDO_GERADO", "AGUARDANDO_RECEBIMENTO"}
+STATUS_REQUISICAO_PROCESSO_COMPRA = {"AGUARDANDO_COTACAO", "EM_PROCESSO_COMPRA"}
+
+
 COTACAO_COMPRA_EM_ANDAMENTO = {
     "EM_ELABORACAO",
     "ABERTA",
@@ -119,3 +123,32 @@ def indicador_requisicao_item(item):
         "cotacoes": cotacoes,
         "pedidos": pedidos,
     }
+
+
+def sincronizar_requisicao_disponivel_para_atendimento(requisicao):
+    itens_atualizados = 0
+    possui_item_atendivel = False
+    itens = requisicao.itens.select_related("produto", "requisicao", "requisicao__setor_responsavel", "requisicao__setor_responsavel__loja")
+    for item in itens:
+        if item.status in {"APROVADO", "ATENDIDO_PARCIALMENTE"} and Decimal(item.qtd_pendente or 0) > 0:
+            indicador = indicador_requisicao_item(item)
+            if indicador.get("codigo") == "DISPONIVEL":
+                possui_item_atendivel = True
+            continue
+        if item.status not in STATUS_ITEM_PROCESSO_COMPRA or Decimal(item.qtd_pendente or 0) <= 0:
+            continue
+        indicador = indicador_requisicao_item(item)
+        if indicador.get("codigo") != "DISPONIVEL":
+            continue
+        item.status = "APROVADO"
+        item.save(update_fields=["status", "atualizado_em"])
+        itens_atualizados += 1
+        possui_item_atendivel = True
+
+    requisicao_atualizada = False
+    if possui_item_atendivel and requisicao.status in STATUS_REQUISICAO_PROCESSO_COMPRA:
+        requisicao.status = "EM_ATENDIMENTO"
+        requisicao.save(update_fields=["status", "atualizado_em"])
+        requisicao_atualizada = True
+
+    return {"itens": itens_atualizados, "requisicao": requisicao_atualizada}
