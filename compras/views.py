@@ -210,6 +210,7 @@ class HasRequisicaoProcessAccess(BasePermission):
         "create": [REQ_FAZER],
         "partial_update": [REQ_FAZER],
         "update": [REQ_FAZER],
+        "destroy": [REQ_FAZER, REQ_ATENDER],
         "enviar": [REQ_FAZER],
         "salvar_enviar": [REQ_FAZER],
         "cancelar": [REQ_FAZER],
@@ -2107,7 +2108,7 @@ class RequisicaoViewSet(BaseViewSet):
             if _can_approve_requisicao(self.request.user):
                 allowed |= Q(status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
             if _can_manage_requisicao(self.request.user):
-                allowed |= Q(status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+                allowed |= Q(status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE", "CONCLUIDA"])
             if not allowed:
                 return qs.none()
             qs = qs.filter(allowed)
@@ -2318,7 +2319,7 @@ class RequisicaoItemViewSet(BaseViewSet):
             if _can_approve_requisicao(self.request.user):
                 visible |= Q(requisicao__status__in=["AGUARDANDO_APROVACAO", "SOLICITADA", "EM_ANALISE"])
             if _can_manage_requisicao(self.request.user):
-                visible |= Q(requisicao__status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE"])
+                visible |= Q(requisicao__status__in=["APROVADA", "EM_ATENDIMENTO", "ATENDIDA_PARCIALMENTE", "CONCLUIDA"])
             if not visible:
                 return qs.none()
             qs = qs.filter(visible)
@@ -2493,6 +2494,8 @@ class OrdemServicoViewSet(BaseViewSet):
 
     def perform_update(self, serializer):
         obj = serializer.instance
+        if obj.status == "CONCLUIDA":
+            raise ValidationError({"detail": "Ordem de Serviço concluída não pode mais ser alterada."})
         before = {"status": obj.status, "responsavel": obj.responsavel_id}
         if serializer.validated_data.get("status") == "CONCLUIDA":
             pendente = obj.materiais.filter(qtd_pendente__gt=0).exclude(status="CANCELADA").exists()
@@ -2553,6 +2556,8 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
     def perform_create(self, serializer):
         if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
             raise PermissionDenied("Usuário sem permissão para registrar material da OS.")
+        if serializer.validated_data["ordem_servico"].status == "CONCLUIDA":
+            raise ValidationError({"detail": "Ordem de Serviço concluída não pode mais ser alterada."})
         material = serializer.save()
         atualizar_status_material_os(material)
         atualizar_status_material_ordem_servico(material.ordem_servico)
@@ -2561,6 +2566,8 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
     def perform_update(self, serializer):
         if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):
             raise PermissionDenied("Usuário sem permissão para alterar material da OS.")
+        if serializer.instance.ordem_servico.status == "CONCLUIDA":
+            raise ValidationError({"detail": "Ordem de Serviço concluída não pode mais ser alterada."})
         before = {"status": serializer.instance.status, "qtd_necessaria": str(serializer.instance.qtd_necessaria)}
         material = serializer.save()
         atualizar_status_material_os(material)
@@ -2570,6 +2577,8 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
 
     def destroy(self, request, *args, **kwargs):
         material = self.get_object()
+        if material.ordem_servico.status == "CONCLUIDA":
+            return Response({"detail": "Ordem de Serviço concluída não pode mais ser alterada."}, status=status.HTTP_400_BAD_REQUEST)
         if Decimal(material.qtd_atendida or 0) > 0:
             return Response({"detail": "Material já atendido não pode ser removido."}, status=status.HTTP_400_BAD_REQUEST)
         _audit("ordemservicomaterial", material.pk, {"deleted": True, "ordem_servico": material.ordem_servico_id}, request, action="delete")
@@ -2581,6 +2590,8 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
             raise PermissionDenied("Usuário sem permissão para atender material da OS.")
         with transaction.atomic():
             material = OrdemServicoMaterial.objects.select_for_update().select_related("ordem_servico", "produto").get(pk=self.get_object().pk)
+            if material.ordem_servico.status == "CONCLUIDA":
+                return Response({"detail": "Ordem de Serviço concluída não pode mais ser alterada."}, status=status.HTTP_400_BAD_REQUEST)
             if material.status == "CANCELADA":
                 return Response({"detail": "Material cancelado não pode ser atendido."}, status=status.HTTP_400_BAD_REQUEST)
             if not material.produto_id:

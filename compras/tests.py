@@ -1881,6 +1881,41 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(item.status, "SERVICO_CONCLUIDO")
         self.assertEqual(RequisicaoHistorico.objects.filter(requisicao=req, observacao=observacao).count(), historico_antes)
 
+    def test_ordem_servico_concluida_nao_permite_alteracoes_operacionais(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        OrdemServico.objects.filter(pk=os.pk).update(status="CONCLUIDA")
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"status": "EM_ATENDIMENTO"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(str(resp.data["detail"]), "Ordem de Serviço concluída não pode mais ser alterada.")
+        resp = self.client.patch(f"/api/compras/ordens-servico/{os.id}/", {"diagnostico": "Alterar"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        detalhe = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+
+    def test_ordem_servico_concluida_bloqueia_material(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("5.000")})
+        req = self.criar_requisicao(tipo_requisicao="TI")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        material = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("1.000"))
+        OrdemServico.objects.filter(pk=os.pk).update(status="CONCLUIDA")
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post("/api/compras/ordens-servico-materiais/", {"ordem_servico": os.id, "produto": self.produto.pk, "qtd_necessaria": "1.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.patch(f"/api/compras/ordens-servico-materiais/{material.id}/", {"qtd_necessaria": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/ordens-servico-materiais/{material.id}/atender/", {"quantidade": "1.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.delete(f"/api/compras/ordens-servico-materiais/{material.id}/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
     def test_os_com_material_pendente_bloqueia_conclusao(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
@@ -2753,6 +2788,38 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.item_produto(req)
         self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
         resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Alterar"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_requisicao_concluida_permanece_imutavel_e_consultavel(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("5.000")})
+        req = self.criar_requisicao()
+        item_id = self.item_produto(req, qtd="1.000")
+        Requisicao.objects.filter(pk=req.pk).update(status="CONCLUIDA")
+        RequisicaoItem.objects.filter(pk=item_id).update(status="ATENDIDO")
+
+        detalhe = self.client.get(f"/api/compras/requisicoes/{req.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Alterar"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post("/api/compras/requisicao-itens/", {
+            "requisicao": req.id,
+            "tipo": "MATERIAL",
+            "origem": "PRODUTO",
+            "produto": self.produto.pk,
+            "unidade": self.unidade.pk,
+            "finalidade_aquisicao": self.finalidade_uso.id,
+            "qtd_solicitada": "1.000",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.patch(f"/api/compras/requisicao-itens/{item_id}/", {"qtd_solicitada": "2.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.delete(f"/api/compras/requisicao-itens/{item_id}/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "1.000"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/requisicao-itens/{item_id}/aguardar-cotacao/", {}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
 
     def test_devolvida_para_correcao_permite_edicao_e_reenvio_do_requisitante(self):
