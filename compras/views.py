@@ -2170,10 +2170,7 @@ class RequisicaoViewSet(BaseViewSet):
         responsabilidade = resolver_responsabilidade_requisicao(empresa, tipo)
         proximo = (Requisicao.objects.select_for_update().filter(empresa=empresa).aggregate(max_num=Max("numero"))["max_num"] or 0) + 1
         obj = serializer.save(empresa=empresa, numero=proximo, requisitante=self.request.user, criado_por=self.request.user, setor_responsavel=responsabilidade.setor_atendimento)
-        ordem = garantir_ordem_servico_requisicao(obj)
         _historico(obj, self.request, "CRIACAO", "", obj.status, observacao="Requisição criada.")
-        if ordem:
-            _historico(obj, self.request, "STATUS", "", obj.status, observacao=f"Ordem de Serviço {ordem.id} gerada.")
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -2189,11 +2186,8 @@ class RequisicaoViewSet(BaseViewSet):
         responsabilidade = resolver_responsabilidade_requisicao(obj.empresa, tipo)
         before = {"setor": obj.setor_id, "loja": obj.loja_id, "prioridade": obj.prioridade, "tipo_requisicao": obj.tipo_requisicao, "setor_responsavel": obj.setor_responsavel_id}
         updated = serializer.save(empresa=obj.empresa, setor_responsavel=responsabilidade.setor_atendimento)
-        ordem = garantir_ordem_servico_requisicao(updated)
         after = {"setor": updated.setor_id, "loja": updated.loja_id, "prioridade": updated.prioridade, "tipo_requisicao": updated.tipo_requisicao, "setor_responsavel": updated.setor_responsavel_id}
         _historico(updated, self.request, "EDICAO", updated.status, updated.status, valor_anterior=before, valor_novo=after, observacao="Requisição editada.")
-        if ordem:
-            _historico(updated, self.request, "STATUS", updated.status, updated.status, observacao=f"Ordem de Serviço {ordem.id} vinculada.")
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Exclusão física de requisição não é permitida. Utilize cancelamento."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)

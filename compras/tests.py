@@ -1727,8 +1727,11 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.data["tipo_requisicao"], "USO_CONSUMO")
         self.assertIsNone(resp.data["setor_responsavel"])
 
-    def test_requisicao_manutencao_gera_ordem_servico(self):
+    def test_requisicao_manutencao_gera_ordem_servico_ao_aprovar(self):
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO", justificativa="Ar condicionado sem gelar")
+        self.item_servico(req, titulo="Ar condicionado sem gelar")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+        self.aprovar(req)
         os = OrdemServico.objects.get(requisicao=req)
         self.assertEqual(os.empresa_id, self.empresa.id)
         self.assertEqual(os.loja_id, self.loja.id)
@@ -1737,9 +1740,14 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(os.tipo, "MANUTENCAO")
         self.assertEqual(os.origem, "REQUISICAO")
         self.assertIn("Ar condicionado", os.descricao)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
 
-    def test_requisicao_ti_gera_ordem_servico(self):
+    def test_requisicao_ti_gera_ordem_servico_ao_aprovar(self):
         req = self.criar_requisicao(tipo_requisicao="TI", justificativa="Computador sem rede")
+        self.item_servico(req, titulo="Computador sem rede")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+        self.aprovar(req)
         os = OrdemServico.objects.get(requisicao=req)
         self.assertEqual(os.setor_responsavel_id, self.ti.id)
         self.assertEqual(os.tipo, "TI")
@@ -1750,8 +1758,57 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
 
     def test_ordem_servico_nao_duplica_para_mesma_requisicao(self):
         req = self.criar_requisicao(tipo_requisicao="TI")
+        self.item_servico(req)
+        self.aprovar(req)
         resp = self.client.patch(f"/api/compras/requisicoes/{req.id}/", {"observacoes": "Atualiza"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(OrdemServico.objects.filter(requisicao=req).count(), 1)
+
+    def test_item_servico_em_rascunho_ti_nao_cria_os_nem_muda_status(self):
+        req = self.criar_requisicao(tipo_requisicao="TI")
+        item_id = self.item_servico(req, titulo="Instalar impressora")
+        req.refresh_from_db()
+        self.assertEqual(req.status, "RASCUNHO")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+
+        resp = self.client.patch(f"/api/compras/requisicao-itens/{item_id}/", {
+            "titulo_servico": "Instalar impressora fiscal",
+            "descricao_servico": "Instalar impressora fiscal",
+        }, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "RASCUNHO")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "AGUARDANDO_APROVACAO")
+        self.assertFalse(OrdemServico.objects.filter(requisicao=req).exists())
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/aprovar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["status"], "EM_ATENDIMENTO")
+        self.assertEqual(OrdemServico.objects.filter(requisicao=req).count(), 1)
+
+    def test_retrieve_rascunho_com_os_antiga_nao_sincroniza_para_atendimento(self):
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req, titulo="OS criada cedo")
+        OrdemServico.objects.create(
+            requisicao=req,
+            empresa=req.empresa,
+            loja=req.loja,
+            setor_solicitante=req.setor,
+            setor_responsavel=req.setor_responsavel,
+            tipo=req.tipo_requisicao,
+            origem="REQUISICAO",
+            descricao=req.justificativa,
+        )
+
+        resp = self.client.get(f"/api/compras/requisicoes/{req.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "RASCUNHO")
         self.assertEqual(OrdemServico.objects.filter(requisicao=req).count(), 1)
 
     def test_ordem_servico_status_e_conclusao(self):

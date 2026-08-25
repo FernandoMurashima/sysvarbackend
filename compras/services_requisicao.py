@@ -81,6 +81,9 @@ def sincronizar_requisicao_com_ordem_servico(ordem_servico, usuario=None, regist
     if ordem_servico.status == "CANCELADA":
         return {"requisicao": False, "itens": 0}
 
+    if requisicao.status in {"RASCUNHO", "SOLICITADA", "AGUARDANDO_APROVACAO"}:
+        return {"requisicao": False, "itens": 0}
+
     status_destino = "CONCLUIDA" if ordem_servico.status == "CONCLUIDA" else "EM_ATENDIMENTO"
     status_anterior = requisicao.status
     requisicao_atualizada = False
