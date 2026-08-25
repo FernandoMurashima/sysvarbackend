@@ -1401,8 +1401,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.finalidade_almox = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Estoque/Almoxarifado", comportamento="ALMOXARIFADO")
         self.finalidade_imob = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Imobilizado", comportamento="IMOBILIZADO")
         self.finalidade_outro = RequisicaoFinalidadeAquisicao.objects.create(empresa=self.empresa, nome="Outro", comportamento="OUTRO")
-        self.setor = RequisicaoSetor.objects.create(empresa=self.empresa, nome="Financeiro")
-        self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, nome="Financeiro B")
+        self.setor = RequisicaoSetor.objects.create(empresa=self.empresa, loja=self.loja, nome="Financeiro")
+        self.setor_b = RequisicaoSetor.objects.create(empresa=self.empresa_b, loja=self.loja_b, nome="Financeiro B")
         self.almoxarifado = RequisicaoSetor.objects.create(empresa=self.empresa, loja=self.loja, nome="Almoxarifado Central", central_uso_consumo=True, recebe_requisicoes=True)
         self.manutencao = RequisicaoSetor.objects.create(empresa=self.empresa, loja=self.loja, nome="Manutenção", central_manutencao=True, recebe_requisicoes=True)
         self.ti = RequisicaoSetor.objects.create(empresa=self.empresa, loja=self.loja, nome="TI", central_ti=True, recebe_requisicoes=True, responsavel_compras=True)
@@ -2664,6 +2664,32 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         resp = self.client.post(f"/api/compras/requisicoes/{req.id}/salvar-enviar/", {"requisicao": {"observacoes": "Enviar"}}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["status"], "AGUARDANDO_APROVACAO")
+
+    def test_requisicao_bloqueia_setor_de_outra_loja(self):
+        loja_tijuca = Loja.objects.create(empresa=self.empresa, nome_loja="Tijuca", apelido_loja="Tijuca", cnpj="55777777000190")
+        self.solicitante.lojas.add(loja_tijuca)
+        resp = self.client.post("/api/compras/requisicoes/", {
+            "loja": loja_tijuca.id,
+            "setor": self.setor.id,
+            "data_necessaria": timezone.localdate().isoformat(),
+            "prioridade": "NORMAL",
+            "justificativa": "Teste loja setor",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("setor", resp.data)
+
+    def test_requisicao_enviar_revalida_setor_da_mesma_loja(self):
+        req = self.criar_requisicao()
+        self.item_produto(req)
+        loja_tijuca = Loja.objects.create(empresa=self.empresa, nome_loja="Tijuca 2", apelido_loja="Tijuca 2", cnpj="55777777000270")
+        self.solicitante.lojas.add(loja_tijuca)
+        Requisicao.objects.filter(pk=req.pk).update(loja=loja_tijuca)
+
+        resp = self.client.post(f"/api/compras/requisicoes/{req.id}/enviar/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("setor", resp.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "RASCUNHO")
 
     def test_enviada_nao_pode_ser_editada_pelo_requisitante(self):
         req = self.criar_requisicao()

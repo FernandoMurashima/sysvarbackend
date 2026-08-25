@@ -1789,6 +1789,9 @@ class RequisicaoSetorViewSet(BaseViewSet):
         ativo = self.request.query_params.get("ativo")
         if ativo is not None:
             qs = qs.filter(ativo=str(ativo).lower() in {"1", "true", "sim"})
+        loja = self.request.query_params.get("loja")
+        if loja:
+            qs = qs.filter(loja_id=loja)
         pode_fazer = self.request.query_params.get("pode_fazer_requisicao")
         if pode_fazer is not None:
             qs = qs.filter(pode_fazer_requisicao=str(pode_fazer).lower() in {"1", "true", "sim"})
@@ -2201,6 +2204,8 @@ class RequisicaoViewSet(BaseViewSet):
         obj = self.get_object()
         if not _can_edit_requisicao_content(request.user, obj):
             return Response({"detail": "Somente o requisitante original pode enviar requisições não enviadas ou devolvidas para correção."}, status=status.HTTP_403_FORBIDDEN)
+        if obj.setor.loja_id != obj.loja_id:
+            return Response({"setor": ["Setor deve estar vinculado à mesma loja da requisição."]}, status=status.HTTP_400_BAD_REQUEST)
         if not obj.itens.exists():
             return Response({"detail": "Inclua ao menos um item antes de enviar."}, status=status.HTTP_400_BAD_REQUEST)
         before = obj.status
@@ -2221,6 +2226,8 @@ class RequisicaoViewSet(BaseViewSet):
             serializer.is_valid(raise_exception=True)
             self.perform_update(serializer)
             obj = serializer.instance
+        if obj.setor.loja_id != obj.loja_id:
+            return Response({"setor": ["Setor deve estar vinculado à mesma loja da requisição."]}, status=status.HTTP_400_BAD_REQUEST)
         if not obj.itens.exists():
             return Response({"itens": ["Inclua ao menos um item antes de enviar."]}, status=status.HTTP_400_BAD_REQUEST)
         before = obj.status

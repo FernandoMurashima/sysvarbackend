@@ -503,6 +503,8 @@ class RequisicaoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"setor": "Informe o setor."})
         if loja and setor and setor.empresa_id != loja.empresa_id:
             raise serializers.ValidationError({"setor": "Setor pertence a outra empresa."})
+        if loja and setor and setor.loja_id != loja.id:
+            raise serializers.ValidationError({"setor": "Setor deve estar vinculado à mesma loja da requisição."})
         if setor and (not setor.ativo or not setor.pode_fazer_requisicao):
             raise serializers.ValidationError({"setor": "Setor inativo ou não habilitado para requisições."})
         return attrs
