@@ -503,6 +503,10 @@ class CotacaoViewSet(BaseViewSet):
         itens = RequisicaoItem.objects.select_related(
             "requisicao", "requisicao__loja", "requisicao__setor", "produto", "unidade", "categoria_material"
         ).filter(requisicao__in=self._requisicoes_disponiveis_qs(), qtd_pendente__gt=0)
+        itens = itens.exclude(
+            requisicao__tipo_requisicao__in=["MANUTENCAO", "TI"],
+            requisicao__ordem_servico__isnull=False,
+        )
         if categoria:
             itens = itens.filter(categoria_material_id=categoria)
         if loja:

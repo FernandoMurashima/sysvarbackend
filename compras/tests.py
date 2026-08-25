@@ -1981,6 +1981,31 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO").count(), 1)
         self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="OS").count(), 1)
 
+    def test_necessidades_compra_ignora_item_requisicao_manutencao_com_os(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req_os = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        item_id = self.item_produto(req_os, qtd="3.000")
+        self.aprovar(req_os)
+        os = OrdemServico.objects.get(requisicao=req_os)
+        material = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("2.000"))
+
+        self.client.force_authenticate(self.aprovador)
+        resp = self.client.get("/api/compras/cotacoes/necessidades/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        grupo = next(row for row in resp.data if row["produto"] == self.produto.pk)
+        self.assertEqual(Decimal(grupo["quantidade_pendente"]), Decimal("2.000"))
+        self.assertEqual(Decimal(grupo["quantidade_sem_cobertura"]), Decimal("2.000"))
+        self.assertEqual([o["tipo_origem"] for o in grupo["origens"]], ["OS"])
+        self.assertFalse(any(o["tipo_origem"] == "REQ" and o["origem_id"] == item_id for row in resp.data for o in row["origens"]))
+
+        cotacao = Cotacao.objects.create(empresa=self.empresa, loja=self.loja, responsavel=self.aprovador, tipo_compra="USO_CONSUMO")
+        resp = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"REQ:{item_id}"]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/compras/cotacoes/{cotacao.id}/adicionar-necessidades/", {"necessidades": [f"OS:{material.id}"]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="REQUISICAO").count(), 0)
+        self.assertEqual(CotacaoItem.objects.filter(cotacao=cotacao, origem="OS").count(), 1)
+
     def test_necessidade_liquida_desconta_estoque_e_cotacao_existente(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("4.000")})
         req = self.criar_requisicao(tipo_requisicao="USO_CONSUMO")
