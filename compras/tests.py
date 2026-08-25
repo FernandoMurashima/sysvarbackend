@@ -1934,6 +1934,41 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         os.refresh_from_db()
         self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
 
+    def test_ordem_servico_material_disponivel_nao_mantem_os_aguardando_material(self):
+        outro_produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Material sem estoque OS", unidade=self.unidade)
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("1.000")})
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=outro_produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
+        req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req)
+        self.aprovar(req)
+        os = OrdemServico.objects.get(requisicao=req)
+        material_disponivel = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("1.000"))
+        material_compra = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=outro_produto, qtd_necessaria=Decimal("1.000"))
+        OrdemServicoMaterial.objects.filter(pk=material_compra.pk).update(status="EM_COMPRA")
+
+        self.client.force_authenticate(self.aprovador)
+        detalhe = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        material_disponivel.refresh_from_db()
+        material_compra.refresh_from_db()
+        os.refresh_from_db()
+        self.assertEqual(material_disponivel.status, "DISPONIVEL")
+        self.assertEqual(material_compra.status, "EM_COMPRA")
+        self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
+
+        material_compra.status = "CANCELADA"
+        material_compra.save(update_fields=["status", "atualizado_em"])
+        detalhe = self.client.get(f"/api/compras/ordens-servico/{os.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        material_disponivel.refresh_from_db()
+        material_compra.refresh_from_db()
+        os.refresh_from_db()
+        req.refresh_from_db()
+        self.assertEqual(material_disponivel.status, "DISPONIVEL")
+        self.assertEqual(material_compra.status, "CANCELADA")
+        self.assertEqual(os.status, "EM_ATENDIMENTO")
+        self.assertEqual(req.status, "EM_ATENDIMENTO")
+
     def test_ordem_servico_material_estoque_zero_permanece_pendente_e_sem_afetar_os_vazia(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
         req = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
@@ -2101,7 +2136,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         material_os.refresh_from_db()
         self.assertEqual(material_os.status, "DISPONIVEL")
         req_os.refresh_from_db()
-        self.assertEqual(req_os.ordem_servico.status, "AGUARDANDO_MATERIAL")
+        self.assertEqual(req_os.ordem_servico.status, "EM_ATENDIMENTO")
         atender_req = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "4.000"}, format="json")
         self.assertEqual(atender_req.status_code, 200, atender_req.data)
         self.assertEqual(atender_req.data["status"], "ATENDIDO")
@@ -2131,7 +2166,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         material.refresh_from_db()
         os.refresh_from_db()
         self.assertEqual(material.status, "DISPONIVEL")
-        self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
+        self.assertEqual(os.status, "EM_ATENDIMENTO")
 
     def test_nf_disponibiliza_requisicao_em_compra_para_atendimento_parcial(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})
