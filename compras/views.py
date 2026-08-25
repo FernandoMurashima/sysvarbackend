@@ -2480,6 +2480,9 @@ class OrdemServicoViewSet(BaseViewSet):
     @transaction.atomic
     def retrieve(self, request, *args, **kwargs):
         obj = OrdemServico.objects.select_for_update().get(pk=self.get_object().pk)
+        for material in obj.materiais.select_for_update().select_related("ordem_servico", "produto").all():
+            atualizar_status_material_os(material)
+        atualizar_status_material_ordem_servico(obj)
         sincronizar_requisicao_com_ordem_servico(obj, usuario=request.user)
         obj.refresh_from_db()
         return Response(self.get_serializer(obj).data)
@@ -2537,6 +2540,14 @@ class OrdemServicoMaterialViewSet(BaseViewSet):
         if ordem_servico:
             qs = qs.filter(ordem_servico_id=ordem_servico)
         return qs
+
+    @transaction.atomic
+    def retrieve(self, request, *args, **kwargs):
+        material = OrdemServicoMaterial.objects.select_for_update().select_related("ordem_servico", "produto").get(pk=self.get_object().pk)
+        atualizar_status_material_os(material)
+        atualizar_status_material_ordem_servico(material.ordem_servico)
+        material.refresh_from_db()
+        return Response(self.get_serializer(material).data)
 
     def perform_create(self, serializer):
         if not _can_manage_requisicao(self.request.user) and not _is_requisicao_admin(self.request.user):

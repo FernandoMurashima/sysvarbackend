@@ -2100,6 +2100,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertIn(req.status, {"APROVADA", "EM_ATENDIMENTO"})
         material_os.refresh_from_db()
         self.assertEqual(material_os.status, "DISPONIVEL")
+        req_os.refresh_from_db()
+        self.assertEqual(req_os.ordem_servico.status, "AGUARDANDO_MATERIAL")
         atender_req = self.client.post(f"/api/compras/requisicao-itens/{item_id}/atender/", {"quantidade": "4.000"}, format="json")
         self.assertEqual(atender_req.status_code, 200, atender_req.data)
         self.assertEqual(atender_req.data["status"], "ATENDIDO")
@@ -2110,7 +2112,26 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         req.refresh_from_db()
         req_os.refresh_from_db()
         self.assertEqual(req.status, "CONCLUIDA")
+        self.assertEqual(req_os.ordem_servico.status, "EM_ATENDIMENTO")
         self.assertNotEqual(req_os.ordem_servico.status, "CONCLUIDA")
+
+    def test_consulta_sincroniza_material_os_antigo_em_compra_com_estoque_disponivel(self):
+        ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("1.000")})
+        req_os = self.criar_requisicao(tipo_requisicao="MANUTENCAO")
+        self.item_servico(req_os)
+        self.aprovar(req_os)
+        os = OrdemServico.objects.get(requisicao=req_os)
+        material = OrdemServicoMaterial.objects.create(ordem_servico=os, produto=self.produto, qtd_necessaria=Decimal("1.000"))
+        OrdemServicoMaterial.objects.filter(pk=material.pk).update(status="EM_COMPRA", qtd_pendente=Decimal("1.000"))
+        OrdemServico.objects.filter(pk=os.pk).update(status="AGUARDANDO_MATERIAL")
+
+        self.client.force_authenticate(self.aprovador)
+        detalhe = self.client.get(f"/api/compras/ordens-servico-materiais/{material.id}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        material.refresh_from_db()
+        os.refresh_from_db()
+        self.assertEqual(material.status, "DISPONIVEL")
+        self.assertEqual(os.status, "AGUARDANDO_MATERIAL")
 
     def test_nf_disponibiliza_requisicao_em_compra_para_atendimento_parcial(self):
         ProdutoUsoConsumoEstoque.objects.update_or_create(empresa=self.empresa, produto=self.produto, loja=self.loja, defaults={"saldo": Decimal("0.000")})

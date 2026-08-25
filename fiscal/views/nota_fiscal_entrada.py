@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
 from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
 from compras.services_necessidade import sincronizar_requisicao_disponivel_para_atendimento
-from compras.services_requisicao import atualizar_status_material_os
+from compras.services_requisicao import atualizar_status_material_ordem_servico, atualizar_status_material_os
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
 
 from auditoria.models import AuditAction, AuditCategory
@@ -619,11 +619,15 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             resultado = sincronizar_requisicao_disponivel_para_atendimento(req)
             req_atualizadas += resultado["itens"]
         os_atualizadas = 0
+        ordens_servico = set()
         for material in OrdemServicoMaterial.objects.select_related("ordem_servico", "produto").filter(pk__in=os_material_ids):
             before = material.status
             atualizar_status_material_os(material)
+            ordens_servico.add(material.ordem_servico)
             if material.status != before:
                 os_atualizadas += 1
+        for ordem_servico in ordens_servico:
+            atualizar_status_material_ordem_servico(ordem_servico)
         return {"requisicao_itens": req_atualizadas, "materiais_os": os_atualizadas}
 
     def _movimentar_item_estoque_nao_revenda(self, nota, item_nf, tipo, documento, sinal):
