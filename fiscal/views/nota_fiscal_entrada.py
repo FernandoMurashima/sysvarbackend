@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
@@ -19,16 +20,17 @@ from auditoria.services import AuditService
 
 FIN_OK = True
 try:
-    from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
+    from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 except Exception:
     FIN_OK = False
-    MovimentacaoFinanceira = Pagar = PagarItem = None
+    FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
 from fiscal.serializers import (
+    FormaPagamentoFiscalMapSerializer,
     NotaFiscalEntradaDivergenciaXmlSerializer,
     NotaFiscalEntradaEventoSerializer,
     NotaFiscalEntradaItemSerializer,
@@ -429,6 +431,45 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         qs = nota.eventos_fiscais.order_by("tipo_evento", "sequencia", "criado_em")
         return Response(NotaFiscalEntradaEventoSerializer(qs, many=True).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="cobranca-financeira")
+    def cobranca_financeira(self, request, pk=None):
+        nota = self.get_object()
+        return Response(self._cobranca_financeira_xml(nota), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="vincular-forma-pagamento-fiscal")
+    @transaction.atomic
+    def vincular_forma_pagamento_fiscal(self, request, pk=None):
+        nota = self.get_object()
+        codigo_tpag = str(request.data.get("codigo_tpag") or "").strip().zfill(2)
+        forma_id = request.data.get("forma_pagamento")
+        pagamentos = self._pagamentos_xml(nota)
+        pagamento = next((pag for pag in pagamentos if pag["codigo_tpag"] == codigo_tpag), None)
+        if not pagamento:
+            raise ValidationError({"codigo_tpag": "Forma fiscal não encontrada no XML da NF-e."})
+        forma = FormaPagamento.objects.filter(pk=forma_id, empresa=nota.empresa, ativo=True).first()
+        if not forma:
+            raise ValidationError({"forma_pagamento": "Forma de Pagamento Sysvar ativa não encontrada para a empresa."})
+        mapa, _ = FormaPagamentoFiscalMap.objects.update_or_create(
+            empresa=nota.empresa,
+            codigo_tpag=codigo_tpag,
+            defaults={
+                "descricao_fiscal": pagamento["descricao_tpag"],
+                "forma_pagamento": forma,
+                "ativo": True,
+                "criado_por": request.user if getattr(request.user, "is_authenticated", False) else None,
+            },
+        )
+        AuditService.success(
+            AuditAction.OBJECT_CREATED,
+            category=AuditCategory.FISCAL,
+            request=request,
+            user=getattr(request, "user", None),
+            instance=mapa,
+            after={"empresa": nota.empresa_id, "codigo_tpag": codigo_tpag, "forma_pagamento": forma.codigo},
+            metadata={"legacy_action": "vincular_forma_pagamento_fiscal_nfe"},
+        )
+        return Response({"vinculo": FormaPagamentoFiscalMapSerializer(mapa).data, "cobranca": self._cobranca_financeira_xml(nota)}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="importar-evento-xml", parser_classes=[parsers.MultiPartParser])
     @transaction.atomic
     def importar_evento_xml(self, request, pk=None):
@@ -673,6 +714,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             raise ValueError("A NF-e XML precisa estar fiscalmente autorizada para efetivação operacional.")
         if nota.finalidade_nfe and nota.finalidade_nfe != "1":
             raise ValueError("NF-e com finalidade fiscal especial requer fluxo específico antes da efetivação operacional.")
+        if not nota.pedido_compra_id:
+            cobranca = self._cobranca_financeira_xml(nota)
+            if not cobranca["financeiro_pronto"]:
+                raise ValueError(cobranca["pendencias"][0])
         itens = list(
             nota.itens_xml.select_for_update()
             .select_related("produto", "produto_fornecedor", "pedido_item")
@@ -808,6 +853,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return {"disponivel": False, "titulos_criados": 0, "parcelas_efetivadas": 0}
         if Pagar.objects.filter(nfe_id=nota.pk).exists():
             return {"disponivel": True, "titulos_criados": 0, "parcelas_efetivadas": 0, "ja_vinculado": True}
+        cobranca = self._cobranca_financeira_xml(nota)
+        parcelas_xml = cobranca["parcelas"] if cobranca["usa_duplicatas"] else []
+        forma_codigo = cobranca.get("forma_pagamento_sysvar_codigo")
         natureza = self._natureza_padrao_compra(nota.empresa)
         titulo = Pagar.objects.create(
             empresa=nota.empresa,
@@ -818,11 +866,24 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             Data_emissao=nota.dt_emissao,
             Valor_total=_money(nota.valor_total or 0),
             Previsao=False,
-            FormaPagamento=None,
+            FormaPagamento=forma_codigo,
             Idnatureza=natureza,
             pedido_compra=None,
             nfe_id=nota.pk,
         )
+        if parcelas_xml:
+            for idx, parcela in enumerate(parcelas_xml, start=1):
+                PagarItem.objects.create(
+                    Idpagar=titulo,
+                    parcela_n=idx,
+                    status=PagarItem.STATUS_EFETIVO,
+                    Data_vencimento=date.fromisoformat(parcela["vencimento"]),
+                    valor_parcela=_money(parcela["valor"]),
+                    FormaPagamento=forma_codigo,
+                    Previsao=False,
+                    Idnatureza=natureza,
+                )
+            return {"disponivel": True, "titulos_criados": 1, "parcelas_efetivadas": len(parcelas_xml), "origem": "xml_duplicatas"}
         PagarItem.objects.create(
             Idpagar=titulo,
             parcela_n=1,
@@ -833,7 +894,90 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             Previsao=False,
             Idnatureza=natureza,
         )
-        return {"disponivel": True, "titulos_criados": 1, "parcelas_efetivadas": 1}
+        return {"disponivel": True, "titulos_criados": 1, "parcelas_efetivadas": 1, "origem": "fallback"}
+
+    def _cobranca_financeira_xml(self, nota):
+        parcelas = self._duplicatas_xml(nota)
+        pagamentos = self._pagamentos_xml(nota)
+        forma = self._forma_pagamento_fiscal_conciliada(nota, pagamentos)
+        soma = _money(sum(_money(p["valor"]) for p in parcelas))
+        valor_nf = _money(nota.valor_total or 0)
+        pendencias = []
+        usa_duplicatas = bool(parcelas)
+        if usa_duplicatas and abs(soma - valor_nf) > Decimal("0.01"):
+            pendencias.append(f"Soma das duplicatas ({soma}) difere do total da NF-e ({valor_nf}).")
+        if usa_duplicatas and len(pagamentos) == 1 and not forma:
+            pendencias.append("Concilie a forma de pagamento do XML antes de efetivar a NF-e.")
+        if usa_duplicatas and len(pagamentos) > 1:
+            pendencias.append("XML possui múltiplas formas de pagamento; defina regra financeira antes de efetivar.")
+        return {
+            "usa_duplicatas": usa_duplicatas,
+            "valor_fatura": str(valor_nf),
+            "parcelas": [{"numero": p["numero"], "vencimento": p["vencimento"], "valor": str(_money(p["valor"]))} for p in parcelas],
+            "pagamentos": pagamentos,
+            "forma_pagamento_conciliada": bool(forma),
+            "forma_pagamento_sysvar_id": getattr(forma, "pk", None),
+            "forma_pagamento_sysvar_codigo": getattr(forma, "codigo", None),
+            "forma_pagamento_sysvar_descricao": getattr(forma, "descricao", None),
+            "forma_pagamento_sysvar_tipo": getattr(forma, "tipo", None),
+            "sugestoes": self._sugestoes_forma_pagamento(nota, pagamentos),
+            "pendencias": pendencias,
+            "financeiro_pronto": not pendencias,
+        }
+
+    def _duplicatas_xml(self, nota):
+        cobr = nota.cobranca_fiscal or {}
+        dup = cobr.get("dup") if isinstance(cobr, dict) else None
+        rows = dup if isinstance(dup, list) else ([dup] if isinstance(dup, dict) else [])
+        parcelas = []
+        for idx, row in enumerate(rows, start=1):
+            venc = str(row.get("dVenc") or "").strip()
+            valor = _money(row.get("vDup"))
+            numero = str(row.get("nDup") or idx).strip()
+            if not venc or valor <= 0:
+                continue
+            try:
+                date.fromisoformat(venc)
+            except ValueError as exc:
+                raise ValueError("Duplicata do XML possui data de vencimento inválida.") from exc
+            parcelas.append({"numero": numero, "vencimento": venc, "valor": valor})
+        return parcelas
+
+    def _pagamentos_xml(self, nota):
+        rows = nota.pagamentos_fiscais if isinstance(nota.pagamentos_fiscais, list) else []
+        pagamentos = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            codigo = str(row.get("tPag") or "").strip().zfill(2)
+            if not codigo:
+                continue
+            pagamentos.append({"codigo_tpag": codigo, "descricao_tpag": row.get("descricao_tpag") or "", "valor": str(_money(row.get("vPag")))})
+        return pagamentos
+
+    def _forma_pagamento_fiscal_conciliada(self, nota, pagamentos):
+        if not FIN_OK or not pagamentos or len(pagamentos) != 1:
+            return None
+        mapa = FormaPagamentoFiscalMap.objects.select_related("forma_pagamento").filter(
+            empresa=nota.empresa,
+            codigo_tpag=pagamentos[0]["codigo_tpag"],
+            ativo=True,
+            forma_pagamento__ativo=True,
+            forma_pagamento__empresa=nota.empresa,
+        ).first()
+        return mapa.forma_pagamento if mapa else None
+
+    def _sugestoes_forma_pagamento(self, nota, pagamentos):
+        if not FIN_OK or not pagamentos or len(pagamentos) != 1:
+            return []
+        tipo_sugerido = {"15": "BOLETO", "17": "PIX", "18": "TRANSFERENCIA", "01": "DINHEIRO"}.get(pagamentos[0]["codigo_tpag"])
+        if not tipo_sugerido:
+            return []
+        qs = FormaPagamento.objects.filter(empresa=nota.empresa, ativo=True, tipo=tipo_sugerido).order_by("codigo")
+        if qs.count() != 1:
+            return []
+        forma = qs.first()
+        return [{"id": forma.pk, "codigo": forma.codigo, "descricao": forma.descricao, "tipo": forma.tipo}]
 
     def _natureza_padrao_compra(self, empresa):
         natureza = Nat_Lancamento.objects.filter(empresa=empresa, natureza_operacao="DESPESA", ativo=True).first()

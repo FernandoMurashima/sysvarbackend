@@ -448,3 +448,26 @@ class NotaFiscalEntradaEvento(models.Model):
 
     def __str__(self) -> str:
         return f"Evento NF-e {self.chave_acesso} {self.tipo_evento}/{self.sequencia}"
+
+
+class FormaPagamentoFiscalMap(models.Model):
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="formas_pagamento_fiscais", db_index=True)
+    codigo_tpag = models.CharField(max_length=2, db_index=True)
+    descricao_fiscal = models.CharField(max_length=80, blank=True, default="")
+    forma_pagamento = models.ForeignKey("financeiro.FormaPagamento", on_delete=models.PROTECT, related_name="mapas_fiscais_nfe")
+    ativo = models.BooleanField(default=True, db_index=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="formas_pagamento_fiscais_criadas", null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_forma_pagamento_fiscal_map"
+        constraints = [
+            UniqueConstraint(fields=["empresa", "codigo_tpag"], name="uq_fiscal_tpag_empresa"),
+        ]
+        indexes = [
+            Index(fields=["empresa", "codigo_tpag", "ativo"], name="ix_fiscal_tpag_emp_cod_atv"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.empresa_id} tPag {self.codigo_tpag} -> {self.forma_pagamento}"

@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -304,3 +304,14 @@ class NotaFiscalEntradaEventoSerializer(serializers.ModelSerializer):
             "xml_original",
             "criado_em",
         )
+
+
+class FormaPagamentoFiscalMapSerializer(serializers.ModelSerializer):
+    forma_pagamento_codigo = serializers.CharField(source="forma_pagamento.codigo", read_only=True)
+    forma_pagamento_descricao = serializers.CharField(source="forma_pagamento.descricao", read_only=True)
+    forma_pagamento_tipo = serializers.CharField(source="forma_pagamento.tipo", read_only=True)
+
+    class Meta:
+        model = FormaPagamentoFiscalMap
+        fields = "__all__"
+        read_only_fields = ("empresa", "descricao_fiscal", "criado_por", "criado_em", "atualizado_em")

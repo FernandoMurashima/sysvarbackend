@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Cfop,
+    FormaPagamentoFiscalMap,
     NFCe,
     NFeDevolucao,
     NotaFiscalEntrada,
@@ -62,6 +63,13 @@ class NotaFiscalEntradaEventoAdmin(admin.ModelAdmin):
     list_display = ("id", "nota", "tipo_evento", "sequencia", "protocolo", "cstat", "ambiente", "criado_em")
     list_filter = ("tipo_evento", "cstat", "ambiente", "origem", "situacao_processamento")
     search_fields = ("chave_acesso", "protocolo", "id_evento", "nota__numero")
+
+
+@admin.register(FormaPagamentoFiscalMap)
+class FormaPagamentoFiscalMapAdmin(admin.ModelAdmin):
+    list_display = ("id", "empresa", "codigo_tpag", "descricao_fiscal", "forma_pagamento", "ativo")
+    list_filter = ("empresa", "codigo_tpag", "ativo")
+    search_fields = ("codigo_tpag", "descricao_fiscal", "forma_pagamento__codigo", "forma_pagamento__descricao")
 
 
 class VendaPdvItemInline(admin.TabularInline):

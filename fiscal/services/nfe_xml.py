@@ -9,6 +9,27 @@ from rest_framework.exceptions import ValidationError
 
 NFE_NS = "http://www.portalfiscal.inf.br/nfe"
 MAX_XML_BYTES = 2 * 1024 * 1024
+MAX_VERPROC_LENGTH = 20
+
+TPAG_DESCRICOES = {
+    "01": "Dinheiro",
+    "02": "Cheque",
+    "03": "Cartão de crédito",
+    "04": "Cartão de débito",
+    "05": "Crédito loja",
+    "10": "Vale alimentação",
+    "11": "Vale refeição",
+    "12": "Vale presente",
+    "13": "Vale combustível",
+    "14": "Duplicata mercantil",
+    "15": "Boleto bancário",
+    "16": "Depósito bancário",
+    "17": "PIX",
+    "18": "Transferência bancária",
+    "19": "Programa de fidelidade",
+    "90": "Sem pagamento",
+    "99": "Outros",
+}
 
 
 @dataclass
@@ -171,6 +192,10 @@ def parse_nfe_xml(original_bytes):
     if not itens:
         raise ValidationError({"itens": "XML de NF-e sem itens."})
 
+    ver_proc = _text(_child(ide, "verProc"))
+    if len(ver_proc) > MAX_VERPROC_LENGTH:
+        raise ValidationError({"versao_processo": "Versão do processo no XML excede o limite fiscal aceito."})
+
     return NFeXmlData(
         chave_acesso=chave,
         modelo=modelo,
@@ -207,14 +232,14 @@ def parse_nfe_xml(original_bytes):
         presenca_comprador=_text(_child(ide, "indPres")),
         intermediador=_text(_child(ide, "indIntermed")),
         processo_emissao=_text(_child(ide, "procEmi")),
-        versao_processo=_text(_child(ide, "verProc")),
+        versao_processo=ver_proc,
         protocolo_chave_acesso=prot_chave,
         protocolo_recebido_em=_datetime_or_none(_text(_child(prot, "dhRecbto"))),
         protocolo_cstat=prot_cstat,
         protocolo_motivo=_text(_child(prot, "xMotivo")),
         totais_fiscais=_xml_to_dict(total),
         cobranca_fiscal=_xml_to_dict(_child(inf, "cobr")),
-        pagamentos_fiscais=[_xml_to_dict(node) for node in _children(_child(inf, "pag"), "detPag")],
+        pagamentos_fiscais=[_pagamento_dict(node) for node in _children(_child(inf, "pag"), "detPag")],
         documentos_referenciados=[_xml_to_dict(node) for node in _children(ide, "NFref")],
         informacoes_complementares_fisco=_text(_child(_child(inf, "infAdic"), "infAdFisco")),
         informacoes_complementares_contribuinte=_text(_child(_child(inf, "infAdic"), "infCpl")),
@@ -341,4 +366,14 @@ def _xml_to_dict(node):
             data[key].append(value)
         else:
             data[key] = value
+    return data
+
+
+def _pagamento_dict(node):
+    data = _xml_to_dict(node)
+    if isinstance(data, dict):
+        codigo = str(data.get("tPag") or "").zfill(2)
+        if codigo.strip("0") or codigo == "00":
+            data["tPag"] = codigo
+            data["descricao_tpag"] = TPAG_DESCRICOES.get(codigo, "Forma fiscal não mapeada")
     return data

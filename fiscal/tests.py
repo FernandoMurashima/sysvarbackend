@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,8 +11,8 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
-from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
 
@@ -94,8 +95,6 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
       <det nItem="1"><prod><cProd>BAX002</cProd><cEAN>7891234567895</cEAN><xProd>PAPEL SULFITE A4 75G</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>3.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>30.00</vProd><vDesc>1.00</vDesc></prod><imposto><ICMS><ICMS00><CST>00</CST><vBC>30.00</vBC><vICMS>5.40</vICMS></ICMS00></ICMS><PIS><PISAliq><CST>01</CST><vPIS>0.50</vPIS></PISAliq></PIS></imposto><infAdProd>Lote A</infAdProd></det>
       <det nItem="2"><prod><cProd>CAN001</cProd><cEAN>SEM GTIN</cEAN><xProd>CANETA AZUL</xProd><NCM>96081000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>5.0000000000</vUnCom><vProd>10.00</vProd></prod></det>
       <total><ICMSTot><vBC>40.00</vBC><vICMS>7.20</vICMS><vProd>40.00</vProd><vFrete>5.00</vFrete><vDesc>1.00</vDesc><vPIS>0.66</vPIS><vCOFINS>3.04</vCOFINS><vNF>44.00</vNF></ICMSTot></total>
-      <cobr><fat><nFat>123</nFat><vOrig>44.00</vOrig><vLiq>44.00</vLiq></fat><dup><nDup>001</nDup><dVenc>2026-09-10</dVenc><vDup>44.00</vDup></dup></cobr>
-      <pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>44.00</vPag></detPag></pag>
       <infAdic><infAdFisco>Fisco teste</infAdFisco><infCpl>Complementar teste</infCpl></infAdic>
     </infNFe>
   </NFe>
@@ -129,8 +128,6 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(nota.protocolo_chave_acesso, nota.chave_acesso)
         self.assertEqual(nota.dh_emissao.isoformat(), "2026-08-26T13:00:00+00:00")
         self.assertEqual(nota.totais_fiscais["vICMS"], "7.20")
-        self.assertEqual(nota.cobranca_fiscal["dup"]["vDup"], "44.00")
-        self.assertEqual(nota.pagamentos_fiscais[0]["tPag"], "15")
         self.assertEqual(nota.informacoes_complementares_fisco, "Fisco teste")
         self.assertEqual(nota.fornecedor_id, self.fornecedor.id)
         self.assertEqual(nota.loja_id, self.loja.id)
@@ -204,6 +201,129 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(evento.sequencia, 1)
         nota.refresh_from_db()
         self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.CANCELADA)
+
+    def xml_com_duplicatas(self, chave="35260822345678000195550010000001234567890204", total="200.00", emit_doc="22345678000195"):
+        xml = self.xml(chave=chave, numero=chave[-6:], emit_doc=emit_doc)
+        cobr = f"<cobr><fat><nFat>123</nFat><vOrig>{total}</vOrig><vLiq>{total}</vLiq></fat><dup><nDup>001</nDup><dVenc>2026-09-25</dVenc><vDup>100.00</vDup></dup><dup><nDup>002</nDup><dVenc>2026-10-25</dVenc><vDup>100.00</vDup></dup></cobr><pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>{total}</vPag></detPag></pag>"
+        return xml.replace("<infAdic>", f"{cobr}<infAdic>").replace("<vNF>44.00</vNF>", f"<vNF>{total}</vNF>")
+
+    def forma_boleto(self, empresa=None, codigo="BOL"):
+        return FormaPagamento.objects.create(
+            empresa=empresa or self.empresa,
+            codigo=codigo,
+            descricao="Boleto",
+            tipo=FormaPagamento.TIPO_BOLETO,
+            num_parcelas=1,
+            ativo=True,
+        )
+
+    def preparar_nf_xml_sem_pedido_com_duplicatas(self, chave="35260822345678000195550010000001234567890204"):
+        self.criar_vinculo(produto=self.produto, codigo="BAX002", unidade="FD", fator="10")
+        self.criar_vinculo(produto=self.produto_alt, codigo="CAN001", unidade="UN", fator="1")
+        resp = self.upload(self.xml_com_duplicatas(chave=chave))
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        for item in nota.itens_xml.order_by("numero_item"):
+            self.conferir(item, item.quantidade_comercial)
+        return nota
+
+    def test_cobranca_xml_sem_pedido_exige_mapa_tpag_e_cria_duas_parcelas(self):
+        forma = self.forma_boleto()
+        forma_outra_empresa = self.forma_boleto(self.empresa_b, codigo="BOLB")
+        FormaPagamentoFiscalMap.objects.create(empresa=self.empresa_b, codigo_tpag="15", descricao_fiscal="Boleto bancário", forma_pagamento=forma_outra_empresa)
+        nota = self.preparar_nf_xml_sem_pedido_com_duplicatas()
+
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{nota.pk}/cobranca-financeira/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["forma_pagamento_conciliada"])
+        self.assertEqual(len(resp.data["parcelas"]), 2)
+        self.assertEqual(resp.data["parcelas"][0]["vencimento"], "2026-09-25")
+        self.assertEqual(resp.data["parcelas"][1]["valor"], "100.00")
+        self.assertEqual(resp.data["pagamentos"][0]["codigo_tpag"], "15")
+        self.assertEqual(resp.data["sugestoes"][0]["codigo"], "BOL")
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Concilie a forma de pagamento", resp.data["detail"])
+
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/vincular-forma-pagamento-fiscal/",
+            {"codigo_tpag": "15", "forma_pagamento": forma.pk},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(resp.data["cobranca"]["forma_pagamento_conciliada"])
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["financeiro"]["titulos_criados"], 1)
+        self.assertEqual(resp.data["financeiro"]["parcelas_efetivadas"], 2)
+        titulo = Pagar.objects.get(nfe_id=nota.pk)
+        self.assertEqual(titulo.Valor_total, Decimal("200.00"))
+        self.assertEqual(titulo.FormaPagamento, "BOL")
+        parcelas = list(PagarItem.objects.filter(Idpagar=titulo).order_by("parcela_n"))
+        self.assertEqual([(p.Data_vencimento.isoformat(), p.valor_parcela, p.FormaPagamento) for p in parcelas], [("2026-09-25", Decimal("100.00"), "BOL"), ("2026-10-25", Decimal("100.00"), "BOL")])
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(PagarItem.objects.filter(Idpagar=titulo).count(), 2)
+
+    def test_mapa_tpag_e_permanente_por_empresa_independente_do_fornecedor(self):
+        forma = self.forma_boleto()
+        FormaPagamentoFiscalMap.objects.create(empresa=self.empresa, codigo_tpag="15", descricao_fiscal="Boleto bancário", forma_pagamento=forma)
+        fornecedor_mesma_empresa = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="52345678000195",
+            cnpj="52345678000195",
+            nome_fornecedor="Fornecedor Mesma Empresa",
+            categoria="OUTROS",
+        )
+
+        resp = self.upload(
+            self.xml_com_duplicatas(
+                chave="35260822345678000195550010000001234567890209",
+                emit_doc=fornecedor_mesma_empresa.documento,
+            )
+        )
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        cobranca = self.client.get(f"/api/fiscal/notas-entrada/{nota.pk}/cobranca-financeira/")
+
+        self.assertEqual(cobranca.status_code, 200, cobranca.data)
+        self.assertTrue(cobranca.data["forma_pagamento_conciliada"])
+        self.assertEqual(cobranca.data["forma_pagamento_sysvar_codigo"], "BOL")
+
+    def test_soma_divergente_dup_bloqueia_fallback_sem_dup_e_verproc_controlado(self):
+        forma = self.forma_boleto()
+        FormaPagamentoFiscalMap.objects.create(empresa=self.empresa, codigo_tpag="15", descricao_fiscal="Boleto bancário", forma_pagamento=forma)
+        nota = self.preparar_nf_xml_sem_pedido_com_duplicatas(chave="35260822345678000195550010000001234567890205")
+        NotaFiscalEntrada.objects.filter(pk=nota.pk).update(valor_total=Decimal("201.00"))
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Soma das duplicatas", resp.data["detail"])
+
+        nota2, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890206")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota2.pk}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        titulo = Pagar.objects.get(nfe_id=nota2.pk)
+        self.assertEqual(PagarItem.objects.filter(Idpagar=titulo).count(), 1)
+
+        longo = self.xml(chave="35260822345678000195550010000001234567890207").replace("SYSVAR-TESTE", "SYSVAR-PROCESSO-MUITO-LONGO")
+        self.upload(longo, status_code=400)
+
+    def test_cancelamento_nf_sem_pedido_duas_parcelas_bloqueia_baixa(self):
+        forma = self.forma_boleto()
+        FormaPagamentoFiscalMap.objects.create(empresa=self.empresa, codigo_tpag="15", descricao_fiscal="Boleto bancário", forma_pagamento=forma)
+        nota = self.preparar_nf_xml_sem_pedido_com_duplicatas(chave="35260822345678000195550010000001234567890208")
+        self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        titulo = Pagar.objects.get(nfe_id=nota.pk)
+        item = PagarItem.objects.filter(Idpagar=titulo).order_by("parcela_n").first()
+        item.status = PagarItem.STATUS_BAIXADO
+        item.valor_baixa = item.valor_parcela
+        item.data_baixa = date(2026, 9, 25)
+        item.save(update_fields=["status", "valor_baixa", "data_baixa"])
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/", {"motivo": "Teste", "confirmar_avisos": True}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("baixa", resp.data["detail"])
 
     def test_importa_com_pedido_compativel_e_rejeita_incompativel(self):
         resp = self.upload(extra={"pedido_compra": self.pedido.id})
