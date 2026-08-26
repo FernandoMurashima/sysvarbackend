@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from fiscal.validators import normalizar_chave_acesso_nfe
 
 
@@ -86,6 +86,7 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
 
 class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     itens = NotaFiscalEntradaItemSerializer(many=True, read_only=True)
+    itens_xml = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     destino_recebimento = serializers.CharField(source="loja.nome_loja", read_only=True)
     loja_estoque_id = serializers.IntegerField(source="loja_id", read_only=True)
 
@@ -194,3 +195,10 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
         except ValueError as exc:
             raise serializers.ValidationError({"valor_total": str(exc)}) from exc
         return obj
+
+
+class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotaFiscalEntradaItemXml
+        fields = "__all__"
+        read_only_fields = ("criado_em",)

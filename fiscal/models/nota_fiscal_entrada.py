@@ -65,6 +65,15 @@ class NotaFiscalEntrada(models.Model):
     valor_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     observacoes = models.CharField(max_length=255, blank=True, default="")
+    xml_original = models.TextField(blank=True, default="")
+    xml_importado = models.BooleanField(default=False, db_index=True)
+    natureza_operacao = models.CharField(max_length=120, blank=True, default="")
+    emitente_documento = models.CharField(max_length=14, blank=True, default="")
+    emitente_nome = models.CharField(max_length=120, blank=True, default="")
+    emitente_ie = models.CharField(max_length=20, blank=True, default="")
+    destinatario_documento = models.CharField(max_length=14, blank=True, default="")
+    destinatario_nome = models.CharField(max_length=120, blank=True, default="")
+    protocolo_autorizacao = models.CharField(max_length=30, blank=True, default="")
 
     # auditoria básica
     criado_por = models.ForeignKey(
@@ -153,3 +162,38 @@ class NotaFiscalEntradaItem(models.Model):
 
     def __str__(self) -> str:
         return f"Item NF {self.nota_id} / PedidoItem {self.pedido_item_id}"
+
+
+class NotaFiscalEntradaItemXml(models.Model):
+    nota = models.ForeignKey(
+        "fiscal.NotaFiscalEntrada",
+        on_delete=models.CASCADE,
+        related_name="itens_xml",
+        db_index=True,
+    )
+    numero_item = models.PositiveIntegerField()
+    codigo_produto_fornecedor = models.CharField(max_length=80, blank=True, default="")
+    descricao_produto = models.CharField(max_length=255, blank=True, default="")
+    gtin_ean = models.CharField(max_length=14, blank=True, default="")
+    ncm = models.CharField(max_length=10, blank=True, default="")
+    cfop = models.CharField(max_length=4, blank=True, default="")
+    unidade_comercial = models.CharField(max_length=20, blank=True, default="")
+    quantidade_comercial = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    valor_unitario_comercial = models.DecimalField(max_digits=18, decimal_places=10, default=0)
+    valor_produto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    valor_desconto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    informacoes_adicionais = models.TextField(blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_nota_fiscal_entrada_item_xml"
+        constraints = [
+            UniqueConstraint(fields=["nota", "numero_item"], name="uq_fiscal_nfe_xml_item_numero"),
+        ]
+        indexes = [
+            Index(fields=["nota", "codigo_produto_fornecedor"], name="ix_fiscal_nfe_xml_cod"),
+            Index(fields=["gtin_ean"], name="ix_fiscal_nfe_xml_gtin"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Item XML NF {self.nota_id} #{self.numero_item}"

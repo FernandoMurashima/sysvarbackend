@@ -1,16 +1,148 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
+from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
-from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class NotaFiscalEntradaXmlImportacaoTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa XML", documento="12345678000195", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa XML B", documento="12345678000276", plano_completo=True)
+        self.user = get_user_model().objects.create_user("xml-user", "xml@sysvar.test", "123", empresa=self.empresa, type="Gerente")
+        self.modulo = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        EmpresaContrato.objects.update_or_create(
+            empresa=self.empresa,
+            defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": self.user},
+        )
+        EmpresaModulo.objects.update_or_create(empresa=self.empresa, modulo=self.modulo, defaults={"contratado": True})
+        UserModulePermission.objects.create(user=self.user, modulo=UserModulePermission.Module.COMPRAS, acesso=UserModulePermission.Access.EDIT)
+        self.client.force_authenticate(self.user)
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja XML", apelido_loja="XML", cnpj="12345678000195", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja B", apelido_loja="B", cnpj="12345678000276", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="22345678000195",
+            cnpj="22345678000195",
+            nome_fornecedor="Fornecedor XML",
+            categoria="OUTROS",
+        )
+        self.fornecedor_b = Fornecedor.objects.create(
+            empresa=self.empresa_b,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="32345678000195",
+            cnpj="32345678000195",
+            nome_fornecedor="Fornecedor B",
+            categoria="OUTROS",
+        )
+        self.fornecedor_incompativel = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="42345678000195",
+            cnpj="42345678000195",
+            nome_fornecedor="Fornecedor Incompativel",
+            categoria="OUTROS",
+        )
+        self.pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=self.loja, fornecedor=self.fornecedor, status="AP")
+        self.pedido_incompativel = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=self.loja, fornecedor=self.fornecedor_incompativel, status="AP")
+
+    def xml(self, chave=None, modelo="55", emit_doc="22345678000195", dest_doc="12345678000195"):
+        chave = chave or "35260822345678000195550010000001234567890123"
+        return f'''<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe{chave}" versao="4.00">
+      <ide><cUF>35</cUF><natOp>Compra</natOp><mod>{modelo}</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-08-26T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>{emit_doc}</CNPJ><xNome>Fornecedor XML</xNome><IE>110042490114</IE></emit>
+      <dest><CNPJ>{dest_doc}</CNPJ><xNome>Empresa XML</xNome></dest>
+      <det nItem="1"><prod><cProd>BAX002</cProd><cEAN>7891234567895</cEAN><xProd>PAPEL SULFITE A4 75G</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>3.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>30.00</vProd><vDesc>1.00</vDesc></prod><infAdProd>Lote A</infAdProd></det>
+      <det nItem="2"><prod><cProd>CAN001</cProd><cEAN>SEM GTIN</cEAN><xProd>CANETA AZUL</xProd><NCM>96081000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>5.0000000000</vUnCom><vProd>10.00</vProd></prod></det>
+      <total><ICMSTot><vProd>40.00</vProd><vFrete>5.00</vFrete><vDesc>1.00</vDesc><vNF>44.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><chNFe>{chave}</chNFe><nProt>135260000000001</nProt></infProt></protNFe>
+</nfeProc>'''
+
+    def upload(self, xml_text=None, status_code=201, extra=None):
+        xml_text = xml_text if xml_text is not None else self.xml()
+        payload = {"arquivo": SimpleUploadedFile("nota.xml", xml_text.encode("utf-8"), content_type="application/xml")}
+        if extra:
+            payload.update(extra)
+        resp = self.client.post("/api/fiscal/notas-entrada/importar-xml/", payload, format="multipart")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def test_importa_xml_valido_preserva_original_cabecalho_itens_e_nao_efetiva_operacao(self):
+        original = self.xml()
+        resp = self.upload(original)
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertTrue(nota.xml_importado)
+        self.assertEqual(nota.xml_original, original)
+        self.assertEqual(nota.chave_acesso, "35260822345678000195550010000001234567890123")
+        self.assertEqual((nota.modelo, nota.serie, nota.numero), ("55", "1", "123"))
+        self.assertEqual(nota.dt_emissao.isoformat(), "2026-08-26")
+        self.assertEqual(nota.fornecedor_id, self.fornecedor.id)
+        self.assertEqual(nota.loja_id, self.loja.id)
+        self.assertEqual(nota.valor_produtos, Decimal("40.00"))
+        self.assertEqual(nota.valor_desconto, Decimal("1.00"))
+        self.assertEqual(nota.valor_frete, Decimal("5.00"))
+        self.assertEqual(nota.valor_total, Decimal("44.00"))
+        itens = list(nota.itens_xml.order_by("numero_item"))
+        self.assertEqual(len(itens), 2)
+        self.assertEqual(itens[0].codigo_produto_fornecedor, "BAX002")
+        self.assertEqual(itens[0].descricao_produto, "PAPEL SULFITE A4 75G")
+        self.assertEqual(itens[0].gtin_ean, "7891234567895")
+        self.assertEqual(itens[0].ncm, "48025610")
+        self.assertEqual(itens[0].cfop, "5102")
+        self.assertEqual(itens[0].unidade_comercial, "FD")
+        self.assertEqual(itens[0].quantidade_comercial, Decimal("3.000000"))
+        self.assertEqual(itens[0].valor_unitario_comercial, Decimal("10.0000000000"))
+        self.assertEqual(itens[0].valor_produto, Decimal("30.00"))
+        self.assertEqual(itens[0].valor_desconto, Decimal("1.00"))
+        self.assertFalse(nota.itens.exists())
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.status, "AP")
+        self.assertFalse(ProdutoFornecedor.objects.exists())
+
+    def test_importa_com_pedido_compativel_e_rejeita_incompativel(self):
+        resp = self.upload(extra={"pedido_compra": self.pedido.id})
+        self.assertEqual(resp.data["pedido_compra"], self.pedido.id)
+        self.upload(self.xml(chave="35260822345678000195550010000001234567890124"), status_code=400, extra={"pedido_compra": self.pedido_incompativel.id})
+
+    def test_rejeita_fornecedor_destinatario_modelo_chave_duplicada_e_xml_invalido(self):
+        self.upload(self.xml(emit_doc="99999999000199"), status_code=400)
+        self.upload(self.xml(dest_doc=self.loja_b.cnpj), status_code=400)
+        self.upload(self.xml(modelo="65"), status_code=400)
+        self.upload()
+        self.upload(status_code=400)
+        self.upload("<NFe><infNFe>", status_code=400)
+        self.upload("isso nao e xml", status_code=400)
+
+    def test_importacao_falha_sem_registro_parcial_e_audita_sucesso(self):
+        self.upload(self.xml(emit_doc="99999999000199"), status_code=400)
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+        self.assertFalse(NotaFiscalEntradaItemXml.objects.exists())
+        resp = self.upload()
+        self.assertTrue(AuditLog.objects.filter(app_label="fiscal", model="notafiscalentrada", object_id=str(resp.data["id"]), action="OBJECT_CREATED").exists())
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

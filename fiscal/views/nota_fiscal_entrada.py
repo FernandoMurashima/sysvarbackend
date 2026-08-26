@@ -2,11 +2,12 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
-from rest_framework import status, viewsets
+from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
+from cadastros.models import Fornecedor, Loja
 from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
 from compras.services_necessidade import sincronizar_requisicao_disponivel_para_atendimento
 from compras.services_requisicao import atualizar_status_material_ordem_servico, atualizar_status_material_os
@@ -22,7 +23,8 @@ except Exception:
     FIN_OK = False
     MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.services.nfe_xml import only_digits, parse_nfe_xml
 from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaSerializer
 
 
@@ -164,6 +166,129 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["post"], url_path="importar-xml", parser_classes=[parsers.MultiPartParser])
+    @transaction.atomic
+    def importar_xml(self, request):
+        arquivo = request.FILES.get("arquivo") or request.FILES.get("xml")
+        if not arquivo:
+            raise ValidationError({"arquivo": "Informe o arquivo XML da NF-e."})
+        original_bytes = arquivo.read()
+        dados = parse_nfe_xml(original_bytes)
+        if NotaFiscalEntrada.objects.select_for_update().filter(chave_acesso=dados.chave_acesso).exists():
+            raise ValidationError({"chave_acesso": "NF-e já importada para esta chave de acesso."})
+
+        empresa_id = self._empresa_id_usuario()
+        if not empresa_id and not request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if not empresa_id:
+            empresa_id = request.data.get("empresa")
+        if not empresa_id:
+            raise ValidationError({"empresa": "Informe a empresa da importação."})
+
+        fornecedor = self._identificar_fornecedor(empresa_id, dados.emitente_documento)
+        loja = self._identificar_loja(empresa_id, dados.destinatario_documento)
+        pedido = None
+        pedido_id = request.data.get("pedido_compra") or request.data.get("pedido")
+        if pedido_id:
+            pedido = PedidoCompra.objects.select_related("empresa", "loja", "fornecedor").filter(pk=pedido_id).first()
+            if not pedido:
+                raise ValidationError({"pedido_compra": "Pedido de compra não encontrado."})
+            if pedido.empresa_id != int(empresa_id) or pedido.loja_id != loja.id or pedido.fornecedor_id != fornecedor.id:
+                raise ValidationError({"pedido_compra": "Pedido incompatível com empresa, loja ou fornecedor do XML."})
+
+        try:
+            xml_original = original_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValidationError({"arquivo": "XML deve estar em codificação textual válida."}) from exc
+
+        nota = NotaFiscalEntrada.objects.create(
+            empresa_id=empresa_id,
+            loja=loja,
+            fornecedor=fornecedor,
+            pedido_compra=pedido,
+            modelo=dados.modelo,
+            serie=dados.serie,
+            numero=dados.numero,
+            chave_acesso=dados.chave_acesso,
+            dt_emissao=dados.dt_emissao,
+            dt_entrada=dados.dt_emissao,
+            valor_produtos=dados.valor_produtos,
+            valor_desconto=dados.valor_desconto,
+            valor_frete=dados.valor_frete,
+            valor_total=dados.valor_total,
+            xml_original=xml_original,
+            xml_importado=True,
+            natureza_operacao=dados.natureza_operacao,
+            emitente_documento=dados.emitente_documento,
+            emitente_nome=dados.emitente_nome,
+            emitente_ie=dados.emitente_ie,
+            destinatario_documento=dados.destinatario_documento,
+            destinatario_nome=dados.destinatario_nome,
+            protocolo_autorizacao=dados.protocolo_autorizacao,
+            criado_por=request.user if request.user.is_authenticated else None,
+        )
+        NotaFiscalEntradaItemXml.objects.bulk_create(
+            [
+                NotaFiscalEntradaItemXml(
+                    nota=nota,
+                    numero_item=item.numero_item,
+                    codigo_produto_fornecedor=item.codigo_produto_fornecedor,
+                    descricao_produto=item.descricao_produto,
+                    gtin_ean=item.gtin_ean,
+                    ncm=item.ncm,
+                    cfop=item.cfop,
+                    unidade_comercial=item.unidade_comercial,
+                    quantidade_comercial=item.quantidade_comercial,
+                    valor_unitario_comercial=item.valor_unitario_comercial,
+                    valor_produto=item.valor_produto,
+                    valor_desconto=item.valor_desconto,
+                    informacoes_adicionais=item.informacoes_adicionais,
+                )
+                for item in dados.itens
+            ]
+        )
+        AuditService.success(
+            AuditAction.OBJECT_CREATED,
+            category=AuditCategory.FISCAL,
+            request=request,
+            user=getattr(request, "user", None),
+            instance=nota,
+            after={
+                "empresa": nota.empresa_id,
+                "loja": nota.loja_id,
+                "fornecedor": nota.fornecedor_id,
+                "chave_acesso": nota.chave_acesso,
+                "xml_importado": True,
+                "itens_xml": len(dados.itens),
+            },
+            metadata={"legacy_action": "importar_xml", "origem": "upload_xml_nfe"},
+        )
+        data = self.get_serializer(nota).data
+        data["itens_xml_count"] = len(dados.itens)
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    def _identificar_fornecedor(self, empresa_id, documento):
+        documento = only_digits(documento)
+        if not documento:
+            raise ValidationError({"fornecedor": "Documento do emitente ausente no XML."})
+        fornecedor = (
+            Fornecedor.objects.filter(empresa_id=empresa_id)
+            .filter(Q(documento=documento) | Q(cnpj=documento))
+            .first()
+        )
+        if not fornecedor:
+            raise ValidationError({"fornecedor": "Fornecedor do XML não cadastrado para a empresa."})
+        return fornecedor
+
+    def _identificar_loja(self, empresa_id, documento):
+        documento = only_digits(documento)
+        if not documento:
+            raise ValidationError({"loja": "Documento do destinatário ausente no XML."})
+        loja = Loja.objects.filter(empresa_id=empresa_id, cnpj=documento).first()
+        if not loja:
+            raise ValidationError({"loja": "Destinatário do XML não corresponde a uma loja da empresa."})
+        return loja
 
     @transaction.atomic
     def perform_create(self, serializer):
