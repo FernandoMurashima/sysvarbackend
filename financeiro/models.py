@@ -580,6 +580,8 @@ class Pagar(models.Model):
 
     pedido_compra = models.IntegerField(null=True, blank=True)
     nfe_id = models.IntegerField(null=True, blank=True)
+    alerta_divergencia_mercadoria = models.BooleanField(default=False, db_index=True)
+    valor_divergencia_mercadoria = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     data_cadastro = models.DateTimeField(default=timezone.now)
 

@@ -60,10 +60,12 @@ def conciliar_automaticamente(nota, user=None, request=None):
         if produto:
             item.produto = produto
             item.produto_fornecedor = produto_fornecedor
+            if nota.pedido_compra_id:
+                item.pedido_item = _pedido_item_por_produto(nota, produto)
             item.origem_conciliacao = origem
             item.conciliado_por = user if getattr(user, "is_authenticated", False) else None
             item.conciliado_em = timezone.now()
-            item.save(update_fields=["produto", "produto_fornecedor", "origem_conciliacao", "conciliado_por", "conciliado_em"])
+            item.save(update_fields=["produto", "produto_fornecedor", "pedido_item", "origem_conciliacao", "conciliado_por", "conciliado_em"])
             stats["conciliados"] += 1
         else:
             stats["pendentes"] += 1
@@ -129,10 +131,11 @@ def conciliar_manual(item, produto_id, user=None, request=None):
     before = {"produto": item.produto_id, "produto_fornecedor": item.produto_fornecedor_id}
     item.produto = produto
     item.produto_fornecedor = vinculo
+    item.pedido_item = _pedido_item_por_produto(nota, produto)
     item.origem_conciliacao = NotaFiscalEntradaItemXml.OrigemConciliacao.MANUAL
     item.conciliado_por = user if getattr(user, "is_authenticated", False) else None
     item.conciliado_em = timezone.now()
-    item.save(update_fields=["produto", "produto_fornecedor", "origem_conciliacao", "conciliado_por", "conciliado_em"])
+    item.save(update_fields=["produto", "produto_fornecedor", "pedido_item", "origem_conciliacao", "conciliado_por", "conciliado_em"])
     if request:
         AuditService.success(
             AuditAction.OBJECT_UPDATED,
@@ -213,3 +216,10 @@ def _produto_por_pedido(nota, item):
     if len(produtos) == 1:
         return next(iter(produtos.values())), None, NotaFiscalEntradaItemXml.OrigemConciliacao.PEDIDO
     return None, None, ""
+
+
+def _pedido_item_por_produto(nota, produto):
+    if not nota.pedido_compra_id or not produto:
+        return None
+    itens = list(nota.pedido_compra.itens.filter(produto=produto)[:2])
+    return itens[0] if len(itens) == 1 else None

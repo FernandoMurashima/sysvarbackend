@@ -73,6 +73,13 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
             preco_unit=Decimal("5.00"),
             total_item=Decimal("10.00"),
         )
+        self.pedido_item_produto = PedidoCompraItem.objects.create(
+            pedido=self.pedido,
+            produto=self.produto,
+            qtd=Decimal("30.000"),
+            preco_unit=Decimal("10.00"),
+            total_item=Decimal("300.00"),
+        )
 
     def xml(self, chave=None, modelo="55", emit_doc="22345678000195", dest_doc="12345678000195", numero=None):
         chave = chave or "35260822345678000195550010000001234567890123"
@@ -158,17 +165,20 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(app_label="fiscal", model="notafiscalentrada", object_id=str(resp.data["id"]), action="OBJECT_CREATED").exists())
 
     def criar_vinculo(self, produto=None, fornecedor=None, codigo="BAX002", ativo=True, unidade="FD", fator="10", gtin=""):
-        return ProdutoFornecedor.objects.create(
+        vinculo, _ = ProdutoFornecedor.objects.get_or_create(
             empresa=(fornecedor or self.fornecedor).empresa,
             fornecedor=fornecedor or self.fornecedor,
-            produto=produto or self.produto,
             codigo_produto_fornecedor=codigo,
-            descricao_fornecedor="PAPEL SULFITE A4",
-            unidade_fornecedor=unidade,
-            fator_conversao=Decimal(fator),
-            gtin_ean=gtin,
-            ativo=ativo,
+            defaults={
+                "produto": produto or self.produto,
+                "descricao_fornecedor": "PAPEL SULFITE A4",
+                "unidade_fornecedor": unidade,
+                "fator_conversao": Decimal(fator),
+                "gtin_ean": gtin,
+                "ativo": ativo,
+            },
         )
+        return vinculo
 
     def item_xml(self, chave="35260822345678000195550010000001234567890125", extra=None, **kwargs):
         kwargs.setdefault("numero", chave[-6:])
@@ -410,8 +420,7 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertTrue(resp.data["possui_divergencia_pendente"])
         self.assertTrue(resp.data["conferencia_completa"])
         resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
-        self.assertEqual(resp.status_code, 400, resp.data)
-        self.assertEqual(resp.data["detail"], "Inclua ao menos um item antes de fechar a nota.")
+        self.assertEqual(resp.status_code, 200, resp.data)
 
     def test_item_nao_conciliado_nao_pode_ser_conferido_e_bloqueia_nf_nao_conferida(self):
         item = self.item_xml(chave="35260822345678000195550010000001234567890143")
@@ -444,6 +453,106 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.user.save(update_fields=["empresa"])
         resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/divergencias-xml/")
         self.assertIn(resp.status_code, {403, 404})
+
+    def preparar_nf_xml_efetivavel(self, chave="35260822345678000195550010000001234567890146", pedido=False, falta=False, zero_item2=False):
+        self.criar_vinculo(codigo="BAX002", produto=self.produto, unidade="FD", fator="10")
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, unidade="UN", fator="1")
+        extra = {"pedido_compra": self.pedido.id} if pedido else None
+        item = self.item_xml(chave=chave, extra=extra)
+        nota = item.nota
+        nota.refresh_from_db()
+        item1 = nota.itens_xml.get(numero_item=1)
+        item2 = nota.itens_xml.get(numero_item=2)
+        self.conferir(item1, Decimal("2") if falta else Decimal("3"))
+        self.conferir(item2, Decimal("0") if zero_item2 else Decimal("2"))
+        nota.refresh_from_db()
+        return nota, item1, item2
+
+    def test_efetiva_nf_xml_sem_pedido_com_estoque_custo_financeiro_alerta_e_snapshot(self):
+        nota, item1, item2 = self.preparar_nf_xml_efetivavel(falta=True, zero_item2=True)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nota.refresh_from_db()
+        item1.refresh_from_db()
+        item2.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.FECHADA)
+        self.assertEqual(item1.quantidade_comercial, Decimal("3.000000"))
+        self.assertEqual(item1.quantidade_recebida, Decimal("2.000000"))
+        self.assertEqual(item1.quantidade_interna_efetivada, Decimal("20.000000"))
+        self.assertEqual(item1.fator_conversao_efetivado, Decimal("10.000000"))
+        self.assertEqual(item1.unidade_fornecedor_efetivada, "FD")
+        self.assertEqual(item2.quantidade_interna_efetivada, Decimal("0.000000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("20.000"))
+        self.assertFalse(ProdutoUsoConsumoEstoque.objects.filter(empresa=self.empresa, loja=self.loja, produto=self.produto_alt).exists())
+        div = NotaFiscalEntradaDivergenciaXml.objects.get(item_xml=item1)
+        self.assertEqual(div.status, NotaFiscalEntradaDivergenciaXml.Status.PENDENTE)
+        titulo = Pagar.objects.get(nfe_id=nota.pk)
+        self.assertEqual(titulo.Valor_total, Decimal("44.00"))
+        self.assertTrue(titulo.alerta_divergencia_mercadoria)
+        self.assertEqual(titulo.valor_divergencia_mercadoria, Decimal("20.00"))
+        self.assertFalse(PedidoCompra.objects.filter(pk=self.pedido.pk, status="AT").exists())
+        self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="fechar_xml").exists())
+
+    def test_efetivacao_xml_e_idempotente_e_bloqueia_alteracoes_apos_fechamento(self):
+        nota, item1, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890147")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(origem__contains=f"NFE:{nota.pk}").count(), 2)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/item-xml-conferir/", {"item": item1.id, "quantidade_recebida": "1"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/item-xml-conciliar/", {"item": item1.id, "produto": self.produto.pk}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_efetivacao_bloqueia_precondicoes_xml(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890148")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Concilie todos", resp.data["detail"])
+
+        self.criar_vinculo(codigo="BAX002", produto=self.produto, unidade="FD", fator="10")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890149")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Concilie todos", resp.data["detail"])
+
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, unidade="", fator="1")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890150")
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        self.conferir(item, 3)
+        self.conferir(item2, 2)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("conversão", resp.data["detail"])
+
+    def test_efetiva_nf_xml_com_pedido_atualiza_recebimento_real_sem_exceder_saldo(self):
+        nota, item1, item2 = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890151", pedido=True, falta=True)
+        self.assertEqual(item2.pedido_item_id, self.pedido_item.id)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.pedido.refresh_from_db()
+        entrega = self.pedido_item.entregas.get()
+        self.assertEqual(entrega.qtd_recebida, Decimal("2.000"))
+        self.assertEqual(self.pedido.status, "AP")
+        self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 0)
+
+        nota2, _, item2b = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890152", pedido=True)
+        self.assertEqual(item2b.pedido_item_id, self.pedido_item.id)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota2.id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("saldo permitido", resp.data["detail"])
+
+    def test_snapshot_nao_muda_com_alteracao_posterior_do_vinculo(self):
+        nota, item1, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890153")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        vinculo = item1.produto_fornecedor
+        vinculo.fator_conversao = Decimal("99")
+        vinculo.save(update_fields=["fator_conversao"])
+        item1.refresh_from_db()
+        self.assertEqual(item1.fator_conversao_efetivado, Decimal("10.000000"))
+        self.assertEqual(item1.quantidade_interna_efetivada, Decimal("30.000000"))
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

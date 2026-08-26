@@ -230,6 +230,10 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
             "conciliado_por",
             "conferido_em",
             "conferido_por",
+            "unidade_fornecedor_efetivada",
+            "fator_conversao_efetivado",
+            "quantidade_interna_efetivada",
+            "efetivado_em",
         )
 
     def get_conversao(self, obj):

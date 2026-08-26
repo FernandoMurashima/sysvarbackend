@@ -2,12 +2,13 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
+from django.utils import timezone
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from accounts.permissions import HasModuleRole
-from cadastros.models import Fornecedor, Loja
+from cadastros.models import Fornecedor, Loja, Nat_Lancamento
 from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
 from compras.services_necessidade import sincronizar_requisicao_disponivel_para_atendimento
 from compras.services_requisicao import atualizar_status_material_ordem_servico, atualizar_status_material_os
@@ -499,15 +500,18 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @action(detail=True, methods=["post"], url_path="fechar")
     @transaction.atomic
     def fechar(self, request, pk=None):
-        nota = self.get_object()
+        nota = self.get_queryset().select_for_update().get(pk=pk)
         if nota.status != NotaFiscalEntrada.Status.ABERTA:
             return Response({"detail": "Somente notas abertas podem ser fechadas."}, status=status.HTTP_400_BAD_REQUEST)
-        if nota.xml_importado and nota.itens_xml.filter(produto__isnull=True).exists():
-            return Response({"detail": "Concilie todos os itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
-        if nota.xml_importado and nota.itens_xml.filter(quantidade_recebida__isnull=True).exists():
-            return Response({"detail": "Informe a conferência física de todos os itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
-        if nota.xml_importado and not resumo_conferencia(nota)["conferencia_completa"]:
-            return Response({"detail": "Resolva as pendências de conversão dos itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
+        if nota.xml_importado:
+            try:
+                resultado = self._fechar_xml(nota, request)
+            except ValueError as exc:
+                transaction.set_rollback(True)
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            data = self.get_serializer(nota).data
+            data.update(resultado)
+            return Response(data, status=status.HTTP_200_OK)
         if not nota.itens.exists():
             return Response({"detail": "Inclua ao menos um item antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -534,6 +538,242 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         data["recebimento_pedido"] = recebimento
         data["necessidades"] = necessidades
         return Response(data, status=status.HTTP_200_OK)
+
+    def _fechar_xml(self, nota, request):
+        self._validar_pronto_xml(nota)
+        estoque = self._movimentar_estoque_xml(nota)
+        custos_produtos = self._atualizar_custos_xml(nota)
+        financeiro = self._vincular_financeiro_xml(nota)
+        recebimento = self._atualizar_recebimento_pedido_xml(nota)
+        necessidades = self._recalcular_necessidades_vinculadas(nota)
+        before = nota.status
+        nota.status = NotaFiscalEntrada.Status.FECHADA
+        nota.save(update_fields=["status", "atualizado_em"])
+        resumo_conf = resumo_conferencia(nota)
+        AuditService.success(
+            AuditAction.OBJECT_UPDATED,
+            category=AuditCategory.FISCAL,
+            request=request,
+            user=getattr(request, "user", None),
+            instance=nota,
+            after={
+                "empresa": nota.empresa_id,
+                "loja": nota.loja_id,
+                "fornecedor": nota.fornecedor_id,
+                "pedido_compra": nota.pedido_compra_id,
+                "itens": nota.itens_xml.count(),
+                "valor_total": str(nota.valor_total),
+                "divergencia_pendente": resumo_conf["possui_divergencia_pendente"],
+                "valor_divergente": resumo_conf["valor_divergente_total"],
+                "status": nota.status,
+                "estoque": estoque,
+                "financeiro": financeiro,
+            },
+            metadata={"legacy_action": "fechar_xml", "status_anterior": before},
+        )
+        return {
+            "financeiro": financeiro,
+            "estoque": estoque,
+            "custos_produtos": custos_produtos,
+            "recebimento_pedido": recebimento,
+            "necessidades": necessidades,
+        }
+
+    def _validar_pronto_xml(self, nota):
+        itens = list(
+            nota.itens_xml.select_for_update()
+            .select_related("produto", "produto_fornecedor", "pedido_item")
+            .order_by("numero_item")
+        )
+        if not itens:
+            raise ValueError("NF-e XML não possui itens importados.")
+        if any(not item.produto_id for item in itens):
+            raise ValueError("Concilie todos os itens XML da NF-e antes de fechar a nota.")
+        if any(item.quantidade_recebida is None for item in itens):
+            raise ValueError("Informe a conferência física de todos os itens XML da NF-e antes de fechar a nota.")
+        for item in itens:
+            if Decimal(item.quantidade_recebida or 0) < 0 or Decimal(item.quantidade_recebida or 0) > Decimal(item.quantidade_comercial or 0):
+                raise ValueError("Quantidade recebida inválida para item XML.")
+            if item.produto.empresa_id != nota.empresa_id:
+                raise ValueError("Produto conciliado pertence a outra empresa.")
+            if not item.conversao_pronta:
+                raise ValueError("Resolva as pendências de conversão dos itens XML da NF-e antes de fechar a nota.")
+            if nota.pedido_compra_id:
+                if not item.pedido_item_id or item.pedido_item.pedido_id != nota.pedido_compra_id:
+                    raise ValueError("Item XML sem vínculo seguro com item do Pedido de Compra.")
+                saldo = Decimal(item.pedido_item.qtd or 0) - self._qtd_recebida_item(item.pedido_item)
+                if Decimal(item.quantidade_interna_efetivada or item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_recebida)) > saldo:
+                    raise ValueError("Quantidade recebida do XML ultrapassa o saldo permitido do Pedido.")
+
+    def _movimentar_estoque_xml(self, nota):
+        documento = self._documento_estoque(nota, "ENTRADA")
+        if (
+            EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists()
+            or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA).exists()
+        ):
+            return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+        movimentos = 0
+        for item in nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").order_by("numero_item"):
+            qtd = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_recebida or 0))
+            item.unidade_fornecedor_efetivada = item.produto_fornecedor.unidade_fornecedor
+            item.fator_conversao_efetivado = item.produto_fornecedor.fator_conversao
+            item.quantidade_interna_efetivada = qtd
+            item.efetivado_em = timezone.now()
+            item.save(update_fields=["unidade_fornecedor_efetivada", "fator_conversao_efetivado", "quantidade_interna_efetivada", "efetivado_em"])
+            if qtd <= 0:
+                continue
+            if item.produto.tipo_produto == "2":
+                movimentos += self._movimentar_produto_xml_uso_consumo(nota, item, qtd, documento)
+            else:
+                movimentos += self._movimentar_produto_xml_estoque(nota, item, qtd, documento)
+        return {"disponivel": True, "movimentos": movimentos}
+
+    def _movimentar_produto_xml_uso_consumo(self, nota, item, qtd, documento):
+        estoque, _ = ProdutoUsoConsumoEstoque.objects.select_for_update().get_or_create(
+            empresa=nota.empresa,
+            loja=nota.loja,
+            produto=item.produto,
+            defaults={"saldo": Decimal("0")},
+        )
+        anterior = Decimal(estoque.saldo or 0)
+        posterior = anterior + qtd
+        estoque.saldo = posterior
+        estoque.save(update_fields=["saldo", "atualizado_em"])
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=nota.empresa,
+            produto=item.produto,
+            loja=nota.loja,
+            tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
+            quantidade=_q3(qtd),
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            usuario=getattr(nota, "criado_por", None),
+            motivo="Nota fiscal de entrada XML",
+            destino=nota.loja.nome_loja,
+            documento=documento,
+            origem=f"NFE:{nota.pk};XML_ITEM:{item.pk}",
+        )
+        return 1
+
+    def _movimentar_produto_xml_estoque(self, nota, item, qtd, documento):
+        produto = item.produto
+        codigo = self._codigo_estoque_produto(produto)
+        custo_movimento = _q4(item.valor_unitario_comercial or produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or 0)
+        estoque, _ = Estoque.objects.select_for_update().get_or_create(
+            CodigodeBarra=codigo,
+            Idloja=nota.loja,
+            defaults={"referencia": produto.referencia or "", "Estoque": 0, "reserva": 0},
+        )
+        anterior = Decimal(estoque.Estoque or 0)
+        posterior = anterior + qtd
+        estoque.referencia = produto.referencia or estoque.referencia
+        estoque.Estoque = posterior
+        estoque.reserva = estoque.reserva or 0
+        estoque.save(update_fields=["referencia", "Estoque", "reserva"])
+        EstoqueMovimentacao.objects.create(
+            Idloja=nota.loja,
+            CodigodeBarra=codigo,
+            referencia=produto.referencia or "",
+            tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+            quantidade=_q3(qtd),
+            custo_unitario=custo_movimento,
+            custo_total=_money(qtd * custo_movimento),
+            custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            documento=documento,
+            observacao=f"Nota fiscal de entrada XML {nota.numero};ITEM:{item.pk}",
+        )
+        return 1
+
+    def _atualizar_custos_xml(self, nota):
+        atualizados = 0
+        for item in nota.itens_xml.select_related("produto"):
+            produto = item.produto
+            qtd = Decimal(item.quantidade_interna_efetivada or 0)
+            if not produto or qtd <= 0 or produto.tipo_produto not in ("2", "4"):
+                continue
+            custo_entrada = _q4(item.valor_unitario_comercial or 0)
+            if custo_entrada <= 0:
+                continue
+            if not Decimal(produto.custo_original or 0):
+                produto.custo_original = custo_entrada
+            produto.custo_ultima_compra = custo_entrada
+            produto.custo_medio = custo_entrada
+            produto.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+            atualizados += 1
+        return {"atualizados": atualizados}
+
+    def _vincular_financeiro_xml(self, nota):
+        financeiro = self._vincular_financeiro(nota) if nota.pedido_compra_id else self._criar_financeiro_xml_sem_pedido(nota)
+        self._aplicar_alerta_financeiro_divergencia(nota)
+        financeiro["alerta_divergencia"] = nota.resumo_conferencia_xml()["possui_divergencia_pendente"]
+        return financeiro
+
+    def _criar_financeiro_xml_sem_pedido(self, nota):
+        if not FIN_OK:
+            return {"disponivel": False, "titulos_criados": 0, "parcelas_efetivadas": 0}
+        if Pagar.objects.filter(nfe_id=nota.pk).exists():
+            return {"disponivel": True, "titulos_criados": 0, "parcelas_efetivadas": 0, "ja_vinculado": True}
+        natureza = self._natureza_padrao_compra(nota.empresa)
+        titulo = Pagar.objects.create(
+            empresa=nota.empresa,
+            idloja=nota.loja,
+            idfornecedor=nota.fornecedor,
+            Titulo=str(nota.numero)[:60],
+            Documento=_documento_nota(nota),
+            Data_emissao=nota.dt_emissao,
+            Valor_total=_money(nota.valor_total or 0),
+            Previsao=False,
+            FormaPagamento=None,
+            Idnatureza=natureza,
+            pedido_compra=None,
+            nfe_id=nota.pk,
+        )
+        PagarItem.objects.create(
+            Idpagar=titulo,
+            parcela_n=1,
+            status=PagarItem.STATUS_EFETIVO,
+            Data_vencimento=nota.dt_entrada,
+            valor_parcela=titulo.Valor_total,
+            FormaPagamento=None,
+            Previsao=False,
+            Idnatureza=natureza,
+        )
+        return {"disponivel": True, "titulos_criados": 1, "parcelas_efetivadas": 1}
+
+    def _natureza_padrao_compra(self, empresa):
+        natureza = Nat_Lancamento.objects.filter(empresa=empresa, natureza_operacao="DESPESA", ativo=True).first()
+        if natureza:
+            return natureza
+        return Nat_Lancamento.objects.create(
+            empresa=empresa,
+            codigo="COMPRA",
+            categoria_principal="Compras",
+            subcategoria="Mercadorias",
+            descricao="Compras de mercadorias",
+            tipo="SAIDA",
+            status="ATIVO",
+            tipo_natureza="DESPESA",
+            natureza_operacao="DESPESA",
+            movimenta_financeiro=True,
+            entra_dre=True,
+            ativo=True,
+        )
+
+    def _aplicar_alerta_financeiro_divergencia(self, nota):
+        if not FIN_OK:
+            return
+        resumo = nota.resumo_conferencia_xml()
+        Pagar.objects.filter(nfe_id=nota.pk).update(
+            alerta_divergencia_mercadoria=resumo["possui_divergencia_pendente"],
+            valor_divergencia_mercadoria=Decimal(resumo["valor_divergente_total"]),
+        )
+
+    def _atualizar_recebimento_pedido_xml(self, nota):
+        if not nota.pedido_compra_id:
+            return {"status_pedido": None, "itens_atualizados": 0}
+        return self._atualizar_recebimento_pedido(nota)
 
     @action(detail=True, methods=["post"], url_path="cancelar")
     @transaction.atomic
@@ -644,7 +884,15 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             nota__pedido_compra_id=pedido_item.pedido_id,
             nota__status=NotaFiscalEntrada.Status.FECHADA,
         )
-        return sum(Decimal(item.qtd_recebida or 0) for item in itens)
+        total_legado = sum(Decimal(item.qtd_recebida or 0) for item in itens)
+        total_xml = sum(
+            Decimal(item.quantidade_interna_efetivada or 0)
+            for item in NotaFiscalEntradaItemXml.objects.filter(
+                pedido_item=pedido_item,
+                nota__pedido_compra_id=pedido_item.pedido_id,
+            ).filter(Q(nota__status=NotaFiscalEntrada.Status.FECHADA) | Q(quantidade_interna_efetivada__isnull=False))
+        )
+        return total_legado + total_xml
 
     def _atualizar_recebimento_pedido(self, nota):
         pedido = nota.pedido_compra
