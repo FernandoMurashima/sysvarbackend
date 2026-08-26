@@ -582,6 +582,8 @@ class ProdutoFornecedorSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
     produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
     produto_tipo = serializers.CharField(source='produto.tipo_produto', read_only=True)
+    unidade_interna = serializers.CharField(source='produto.unidade.Codigo', read_only=True)
+    unidade_interna_descricao = serializers.CharField(source='produto.unidade.Descricao', read_only=True)
 
     class Meta:
         model = ProdutoFornecedor
@@ -592,6 +594,8 @@ class ProdutoFornecedorSerializer(serializers.ModelSerializer):
             'ativo': {'required': False},
             'gtin_ean': {'required': False, 'allow_blank': True},
             'descricao_fornecedor': {'required': False, 'allow_blank': True},
+            'unidade_fornecedor': {'required': False, 'allow_blank': True},
+            'fator_conversao': {'required': False},
         }
 
     def validate(self, attrs):
@@ -609,6 +613,8 @@ class ProdutoFornecedorSerializer(serializers.ModelSerializer):
             attrs.get('codigo_produto_fornecedor', getattr(self.instance, 'codigo_produto_fornecedor', ''))
         )
         ativo = attrs.get('ativo', getattr(self.instance, 'ativo', True))
+        unidade_fornecedor = attrs.get('unidade_fornecedor', getattr(self.instance, 'unidade_fornecedor', ''))
+        fator_conversao = attrs.get('fator_conversao', getattr(self.instance, 'fator_conversao', Decimal('1')))
 
         if not empresa:
             raise serializers.ValidationError({'empresa': 'Empresa é obrigatória.'})
@@ -622,6 +628,18 @@ class ProdutoFornecedorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'fornecedor': 'Fornecedor pertence a outra empresa.'})
         if produto.empresa_id != empresa.id:
             raise serializers.ValidationError({'produto': 'Produto pertence a outra empresa.'})
+        if unidade_fornecedor is not None:
+            unidade_normalizada = str(unidade_fornecedor).strip()
+            unidade_raw = getattr(self, 'initial_data', {}).get('unidade_fornecedor')
+            if unidade_raw is not None and str(unidade_raw) and not str(unidade_raw).strip():
+                raise serializers.ValidationError({'unidade_fornecedor': 'Unidade do fornecedor não pode conter apenas espaços.'})
+            attrs['unidade_fornecedor'] = unidade_normalizada
+        if fator_conversao is None:
+            raise serializers.ValidationError({'fator_conversao': 'Fator de conversão é obrigatório.'})
+        fator_conversao = Decimal(str(fator_conversao))
+        if fator_conversao <= 0:
+            raise serializers.ValidationError({'fator_conversao': 'Fator de conversão deve ser maior que zero.'})
+        attrs['fator_conversao'] = fator_conversao
 
         gtin = attrs.get('gtin_ean', getattr(self.instance, 'gtin_ean', ''))
         if gtin:

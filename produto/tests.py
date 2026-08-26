@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -211,6 +213,97 @@ class ProdutoFornecedorApiTests(TestCase):
         self.fornecedor.refresh_from_db()
         self.assertEqual(self.produto.descricao, descricao_produto)
         self.assertEqual(self.fornecedor.nome_fornecedor, nome_fornecedor)
+
+    def test_vinculo_sem_conversao_explicita_continua_valido_com_fator_padrao_um(self):
+        resp = self.post_vinculo()
+        vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
+        self.assertEqual(vinculo.fator_conversao, Decimal("1.000000"))
+        self.assertEqual(vinculo.unidade_fornecedor, "")
+        self.assertEqual(vinculo.converter_quantidade_fornecedor(Decimal("7")), Decimal("7.000000"))
+
+    def test_cadastra_unidade_externa_e_fator_inteiro(self):
+        payload = self.payload()
+        payload.update({"unidade_fornecedor": " FARDO ", "fator_conversao": "10"})
+        resp = self.post_vinculo(payload)
+        vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
+        self.assertEqual(vinculo.unidade_fornecedor, "FARDO")
+        self.assertEqual(vinculo.fator_conversao, Decimal("10.000000"))
+        self.assertEqual(resp.data["unidade_interna"], self.unidade.Codigo)
+        self.assertEqual(resp.data["unidade_interna_descricao"], self.unidade.Descricao)
+
+    def test_cadastra_fator_decimal_e_converte_com_decimal_sem_float(self):
+        payload = self.payload(codigo="DEC")
+        payload.update({"unidade_fornecedor": "PACOTE", "fator_conversao": "0.5"})
+        resp = self.post_vinculo(payload)
+        vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
+        resultado = vinculo.converter_quantidade_fornecedor(Decimal("3"))
+        self.assertIsInstance(resultado, Decimal)
+        self.assertEqual(resultado, Decimal("1.500000"))
+
+    def test_rejeita_fator_zero_negativo_e_unidade_apenas_espacos(self):
+        payload = self.payload(codigo="ZERO")
+        payload["fator_conversao"] = "0"
+        resp = self.post_vinculo(payload, status_code=400)
+        self.assertIn("fator_conversao", resp.data)
+
+        payload = self.payload(codigo="NEG")
+        payload["fator_conversao"] = "-1"
+        resp = self.post_vinculo(payload, status_code=400)
+        self.assertIn("fator_conversao", resp.data)
+
+        payload = self.payload(codigo="ESP")
+        payload["unidade_fornecedor"] = "   "
+        resp = self.post_vinculo(payload, status_code=400)
+        self.assertIn("unidade_fornecedor", resp.data)
+
+    def test_conversao_tres_vezes_dez_resulta_em_trinta(self):
+        payload = self.payload(codigo="FARDO")
+        payload.update({"unidade_fornecedor": "FARDO", "fator_conversao": "10"})
+        resp = self.post_vinculo(payload)
+        vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
+        self.assertEqual(vinculo.converter_quantidade_fornecedor(Decimal("3")), Decimal("30.000000"))
+
+    def test_alterar_unidade_externa_e_fator_nao_altera_produto_e_audita_before_after(self):
+        resp = self.post_vinculo(self.payload(codigo="ALT"))
+        vinculo_id = resp.data["id"]
+        unidade_interna_id = self.produto.unidade_id
+        descricao_produto = self.produto.descricao
+        resp = self.client.patch(
+            f"/api/produto/produto-fornecedor/{vinculo_id}/",
+            {"unidade_fornecedor": "CX", "fator_conversao": "24"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.produto.refresh_from_db()
+        self.assertEqual(self.produto.unidade_id, unidade_interna_id)
+        self.assertEqual(self.produto.descricao, descricao_produto)
+        log = AuditLog.objects.filter(app_label="produto", model="produtofornecedor", object_id=str(vinculo_id), action="OBJECT_UPDATED").latest("created_at")
+        self.assertIn("unidade_fornecedor", log.changed_fields)
+        self.assertIn("fator_conversao", log.changed_fields)
+        self.assertEqual(log.before_data["unidade_fornecedor"], "")
+        self.assertEqual(log.after_data["unidade_fornecedor"], "CX")
+        self.assertEqual(log.before_data["fator_conversao"], "1.000000")
+        self.assertEqual(log.after_data["fator_conversao"], "24.000000")
+
+    def test_fornecedores_podem_ter_fatores_diferentes_para_mesmo_codigo(self):
+        payload_a = self.payload(codigo="CX")
+        payload_a.update({"unidade_fornecedor": "CX", "fator_conversao": "10"})
+        payload_b = self.payload(fornecedor=self.fornecedor_2, codigo="CX")
+        payload_b.update({"unidade_fornecedor": "CX", "fator_conversao": "24"})
+        self.post_vinculo(payload_a)
+        self.post_vinculo(payload_b)
+        fatores = list(ProdutoFornecedor.objects.filter(codigo_produto_fornecedor="CX").order_by("fornecedor_id").values_list("fator_conversao", flat=True))
+        self.assertEqual(fatores, [Decimal("10.000000"), Decimal("24.000000")])
+
+    def test_filtros_continuam_funcionando_com_campos_de_conversao(self):
+        payload = self.payload(codigo="BUSCA")
+        payload.update({"unidade_fornecedor": "FD", "fator_conversao": "10"})
+        self.post_vinculo(payload)
+        resp = self.client.get("/api/produto/produto-fornecedor/", {"fornecedor": self.fornecedor.pk, "codigo": "BUSCA"})
+        rows = self.results(resp)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["unidade_fornecedor"], "FD")
+        self.assertEqual(Decimal(rows[0]["fator_conversao"]), Decimal("10.000000"))
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

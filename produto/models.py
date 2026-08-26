@@ -529,6 +529,13 @@ class ProdutoFornecedor(models.Model):
     codigo_normalizado = models.CharField(max_length=80, db_index=True)
     codigo_vigente = models.CharField(max_length=80, null=True, blank=True, db_index=True)
     descricao_fornecedor = models.CharField(max_length=255, blank=True, default='')
+    unidade_fornecedor = models.CharField(max_length=20, blank=True, default='')
+    fator_conversao = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        default=Decimal('1'),
+        validators=[MinValueValidator(Decimal('0.000001'))],
+    )
     gtin_ean = models.CharField(
         max_length=14,
         blank=True,
@@ -569,8 +576,12 @@ class ProdutoFornecedor(models.Model):
         self.codigo_normalizado = self.codigo_produto_fornecedor
         self.codigo_vigente = self.codigo_normalizado if self.ativo else None
         self.descricao_fornecedor = (self.descricao_fornecedor or '').strip()
+        self.unidade_fornecedor = (self.unidade_fornecedor or '').strip()
         self.gtin_ean = ''.join(ch for ch in str(self.gtin_ean or '') if ch.isdigit())
         super().save(*args, **kwargs)
+
+    def converter_quantidade_fornecedor(self, quantidade_fornecedor):
+        return Decimal(str(quantidade_fornecedor or 0)) * Decimal(self.fator_conversao or 0)
 
     def __str__(self):
         return f'{self.fornecedor_id} - {self.codigo_produto_fornecedor} -> {self.produto_id}'

@@ -950,6 +950,8 @@ def _snapshot_produto_fornecedor(obj):
         'fornecedor': obj.fornecedor_id,
         'codigo_produto_fornecedor': obj.codigo_produto_fornecedor,
         'descricao_fornecedor': obj.descricao_fornecedor,
+        'unidade_fornecedor': obj.unidade_fornecedor,
+        'fator_conversao': str(obj.fator_conversao),
         'gtin_ean': obj.gtin_ean,
         'produto': obj.produto_id,
         'ativo': obj.ativo,
