@@ -23,10 +23,16 @@ except Exception:
     FIN_OK = False
     MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_xml
-from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaItemXmlSerializer, NotaFiscalEntradaSerializer
+from fiscal.serializers import (
+    NotaFiscalEntradaDivergenciaXmlSerializer,
+    NotaFiscalEntradaItemSerializer,
+    NotaFiscalEntradaItemXmlSerializer,
+    NotaFiscalEntradaSerializer,
+)
 
 
 def _q4(valor) -> Decimal:
@@ -326,6 +332,61 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         item = conciliar_manual(item, request.data.get("produto"), user=request.user, request=request)
         return Response(NotaFiscalEntradaItemXmlSerializer(item).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="item-xml-conferir")
+    def conferir_item_xml(self, request, pk=None):
+        nota = self.get_object()
+        item = nota.itens_xml.get(pk=request.data.get("item"))
+        item, divergencia = registrar_conferencia(item, request.data.get("quantidade_recebida"), user=request.user, request=request)
+        return Response(
+            {
+                "item": NotaFiscalEntradaItemXmlSerializer(item).data,
+                "divergencia": NotaFiscalEntradaDivergenciaXmlSerializer(divergencia).data if divergencia else None,
+                "resumo": resumo_conferencia(nota),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="conferir-itens-xml")
+    @transaction.atomic
+    def conferir_itens_xml(self, request, pk=None):
+        nota = self.get_object()
+        itens = request.data.get("itens") or []
+        if not isinstance(itens, list) or not itens:
+            raise ValidationError({"itens": "Informe a lista de itens para conferência."})
+        conferidos = []
+        for row in itens:
+            item = nota.itens_xml.get(pk=row.get("item"))
+            item, _ = registrar_conferencia(item, row.get("quantidade_recebida"), user=request.user, request=request)
+            conferidos.append(item)
+        return Response(
+            {
+                "itens": NotaFiscalEntradaItemXmlSerializer(conferidos, many=True).data,
+                "resumo": resumo_conferencia(nota),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"], url_path="resumo-conferencia")
+    def resumo_conferencia_xml(self, request, pk=None):
+        nota = self.get_object()
+        return Response(resumo_conferencia(nota), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="divergencias-xml")
+    def divergencias_xml(self, request, pk=None):
+        nota = self.get_object()
+        qs = nota.divergencias_xml.select_related("produto", "item_xml", "fornecedor").order_by("item_xml__numero_item")
+        status_filtro = request.query_params.get("status")
+        if status_filtro:
+            qs = qs.filter(status=str(status_filtro).upper())
+        return Response(NotaFiscalEntradaDivergenciaXmlSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="resolver-divergencia-xml")
+    def resolver_divergencia_xml(self, request, pk=None):
+        nota = self.get_object()
+        divergencia = nota.divergencias_xml.select_related("nota").get(pk=request.data.get("divergencia"))
+        divergencia = resolver_divergencia(divergencia, user=request.user, request=request)
+        return Response(NotaFiscalEntradaDivergenciaXmlSerializer(divergencia).data, status=status.HTTP_200_OK)
+
     def _identificar_fornecedor(self, empresa_id, documento):
         documento = only_digits(documento)
         if not documento:
@@ -443,6 +504,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return Response({"detail": "Somente notas abertas podem ser fechadas."}, status=status.HTTP_400_BAD_REQUEST)
         if nota.xml_importado and nota.itens_xml.filter(produto__isnull=True).exists():
             return Response({"detail": "Concilie todos os itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
+        if nota.xml_importado and nota.itens_xml.filter(quantidade_recebida__isnull=True).exists():
+            return Response({"detail": "Informe a conferência física de todos os itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
+        if nota.xml_importado and not resumo_conferencia(nota)["conferencia_completa"]:
+            return Response({"detail": "Resolva as pendências de conversão dos itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
         if not nota.itens.exists():
             return Response({"detail": "Inclua ao menos um item antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
 

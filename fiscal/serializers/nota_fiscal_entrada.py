@@ -3,7 +3,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
 
@@ -91,6 +92,7 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     destino_recebimento = serializers.CharField(source="loja.nome_loja", read_only=True)
     loja_estoque_id = serializers.IntegerField(source="loja_id", read_only=True)
     resumo_conciliacao = serializers.SerializerMethodField()
+    resumo_conferencia = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaFiscalEntrada
@@ -113,6 +115,9 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
 
     def get_resumo_conciliacao(self, obj):
         return obj.resumo_conciliacao_xml() if obj.xml_importado else None
+
+    def get_resumo_conferencia(self, obj):
+        return obj.resumo_conferencia_xml() if obj.xml_importado else None
 
     def validate(self, attrs):
         pedido = attrs.get("pedido_compra") or getattr(self.instance, "pedido_compra", None)
@@ -208,6 +213,10 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
     produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
     produto_fornecedor_codigo = serializers.CharField(source="produto_fornecedor.codigo_produto_fornecedor", read_only=True)
     conversao = serializers.SerializerMethodField()
+    conferido = serializers.BooleanField(read_only=True)
+    quantidade_faltante = serializers.SerializerMethodField()
+    valor_divergente = serializers.SerializerMethodField()
+    quantidade_interna_recebida = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaFiscalEntradaItemXml
@@ -219,7 +228,46 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
             "origem_conciliacao",
             "conciliado_em",
             "conciliado_por",
+            "conferido_em",
+            "conferido_por",
         )
 
     def get_conversao(self, obj):
         return conversao_info(obj)
+
+    def get_quantidade_faltante(self, obj):
+        return str(obj.quantidade_faltante) if obj.quantidade_faltante is not None else None
+
+    def get_valor_divergente(self, obj):
+        return str(obj.valor_divergente) if obj.valor_divergente is not None else None
+
+    def get_quantidade_interna_recebida(self, obj):
+        value = quantidade_interna_recebida(obj)
+        return str(value) if value is not None else None
+
+
+class NotaFiscalEntradaDivergenciaXmlSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    numero_item = serializers.IntegerField(source="item_xml.numero_item", read_only=True)
+
+    class Meta:
+        model = NotaFiscalEntradaDivergenciaXml
+        fields = "__all__"
+        read_only_fields = (
+            "empresa",
+            "nota",
+            "item_xml",
+            "fornecedor",
+            "produto",
+            "quantidade_fiscal",
+            "quantidade_recebida",
+            "quantidade_faltante",
+            "valor_divergente",
+            "status",
+            "conferido_por",
+            "resolvido_por",
+            "criado_em",
+            "atualizado_em",
+            "resolvido_em",
+        )

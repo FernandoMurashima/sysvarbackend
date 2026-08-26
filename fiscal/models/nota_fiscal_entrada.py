@@ -132,6 +132,31 @@ class NotaFiscalEntrada(models.Model):
             "nota_conciliada": total > 0 and conciliados == total,
         }
 
+    def resumo_conferencia_xml(self):
+        itens = list(self.itens_xml.select_related("produto_fornecedor", "produto__unidade").all())
+        total = len(itens)
+        conferidos = sum(1 for item in itens if item.quantidade_recebida is not None)
+        conversao_pendente = sum(1 for item in itens if item.produto_id and not item.conversao_pronta)
+        divergencias = self.divergencias_xml.filter(status=NotaFiscalEntradaDivergenciaXml.Status.PENDENTE)
+        valor_divergente = _money(sum((div.valor_divergente or 0) for div in divergencias))
+        quantidade_faltante = sum((div.quantidade_faltante or 0) for div in divergencias)
+        return {
+            "total_itens": total,
+            "itens_conferidos": conferidos,
+            "itens_nao_conferidos": total - conferidos,
+            "itens_com_divergencia": divergencias.count(),
+            "quantidade_faltante_total": str(quantidade_faltante),
+            "valor_divergente_total": str(valor_divergente),
+            "possui_divergencia_pendente": divergencias.exists(),
+            "conversoes_pendentes": conversao_pendente,
+            "conferencia_completa": (
+                total > 0
+                and self.resumo_conciliacao_xml()["nota_conciliada"]
+                and conferidos == total
+                and conversao_pendente == 0
+            ),
+        }
+
 
 class NotaFiscalEntradaItem(models.Model):
     nota = models.ForeignKey(
@@ -195,6 +220,7 @@ class NotaFiscalEntradaItemXml(models.Model):
     cfop = models.CharField(max_length=4, blank=True, default="")
     unidade_comercial = models.CharField(max_length=20, blank=True, default="")
     quantidade_comercial = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    quantidade_recebida = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     valor_unitario_comercial = models.DecimalField(max_digits=18, decimal_places=10, default=0)
     valor_produto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     valor_desconto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -224,6 +250,14 @@ class NotaFiscalEntradaItemXml(models.Model):
         null=True,
         blank=True,
     )
+    conferido_em = models.DateTimeField(null=True, blank=True)
+    conferido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="itens_xml_nfe_conferidos",
+        null=True,
+        blank=True,
+    )
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -243,3 +277,71 @@ class NotaFiscalEntradaItemXml(models.Model):
     @property
     def conciliado(self):
         return self.produto_id is not None
+
+    @property
+    def conferido(self):
+        return self.quantidade_recebida is not None
+
+    @property
+    def quantidade_faltante(self):
+        if self.quantidade_recebida is None:
+            return None
+        return Decimal(self.quantidade_comercial or 0) - Decimal(self.quantidade_recebida or 0)
+
+    @property
+    def valor_divergente(self):
+        if self.quantidade_faltante is None:
+            return None
+        return _money(Decimal(self.quantidade_faltante or 0) * Decimal(self.valor_unitario_comercial or 0))
+
+    @property
+    def conversao_pronta(self):
+        if not self.produto_id or not self.produto_fornecedor_id:
+            return False
+        unidade_xml = str(self.unidade_comercial or "").strip().upper()
+        unidade_vinculo = str(self.produto_fornecedor.unidade_fornecedor or "").strip().upper()
+        return bool(unidade_vinculo and unidade_xml == unidade_vinculo)
+
+
+class NotaFiscalEntradaDivergenciaXml(models.Model):
+    class Status(models.TextChoices):
+        PENDENTE = "PENDENTE", "Pendente"
+        RESOLVIDA = "RESOLVIDA", "Resolvida"
+
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="divergencias_nfe_xml", db_index=True)
+    nota = models.ForeignKey("fiscal.NotaFiscalEntrada", on_delete=models.CASCADE, related_name="divergencias_xml", db_index=True)
+    item_xml = models.OneToOneField("fiscal.NotaFiscalEntradaItemXml", on_delete=models.CASCADE, related_name="divergencia", db_index=True)
+    fornecedor = models.ForeignKey("cadastros.Fornecedor", on_delete=models.PROTECT, related_name="divergencias_nfe_xml", db_index=True)
+    produto = models.ForeignKey("produto.Produto", on_delete=models.PROTECT, related_name="divergencias_nfe_xml", db_index=True)
+    quantidade_fiscal = models.DecimalField(max_digits=18, decimal_places=6)
+    quantidade_recebida = models.DecimalField(max_digits=18, decimal_places=6)
+    quantidade_faltante = models.DecimalField(max_digits=18, decimal_places=6)
+    valor_divergente = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDENTE, db_index=True)
+    conferido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="divergencias_nfe_xml_conferidas",
+        null=True,
+        blank=True,
+    )
+    resolvido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="divergencias_nfe_xml_resolvidas",
+        null=True,
+        blank=True,
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    resolvido_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "fiscal_nota_fiscal_entrada_divergencia_xml"
+        indexes = [
+            Index(fields=["nota", "status"], name="ix_fiscal_nfe_div_xml_st"),
+            Index(fields=["empresa", "status"], name="ix_fiscal_nfe_div_emp_st"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Divergência XML NF {self.nota_id} item {self.item_xml_id}"

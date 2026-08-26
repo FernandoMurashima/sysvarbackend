@@ -10,7 +10,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -299,6 +299,151 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertIn("Concilie todos os itens XML", resp.data["detail"])
+
+    def conferir(self, item, quantidade, status_code=200):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{item.nota_id}/item-xml-conferir/",
+            {"item": item.id, "quantidade_recebida": str(quantidade)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def test_conferencia_quantidade_igual_preserva_fiscal_xml_e_nao_cria_divergencia(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890137")
+        original_xml = item.nota.xml_original
+        fiscal = item.quantidade_comercial
+        unitario = item.valor_unitario_comercial
+        self.conferir(item, fiscal)
+        item.refresh_from_db()
+        self.assertEqual(item.quantidade_recebida, fiscal)
+        self.assertTrue(item.conferido)
+        self.assertEqual(item.quantidade_comercial, fiscal)
+        self.assertEqual(item.valor_unitario_comercial, unitario)
+        self.assertEqual(item.nota.xml_original, original_xml)
+        self.assertFalse(NotaFiscalEntradaDivergenciaXml.objects.filter(item_xml=item, status=NotaFiscalEntradaDivergenciaXml.Status.PENDENTE).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(NotaFiscalEntradaItem.objects.exists())
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.status, "AP")
+        item.nota.refresh_from_db()
+        self.assertEqual(item.nota.valor_total, Decimal("44.00"))
+
+    def test_conferencia_menor_zero_recebido_e_divergencia_decimal(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890138")
+        self.conferir(item, Decimal("2"))
+        div = NotaFiscalEntradaDivergenciaXml.objects.get(item_xml=item)
+        self.assertEqual(div.status, NotaFiscalEntradaDivergenciaXml.Status.PENDENTE)
+        self.assertEqual(div.quantidade_faltante, Decimal("1.000000"))
+        self.assertEqual(div.valor_divergente, Decimal("10.00"))
+        self.conferir(item, Decimal("0"))
+        item.refresh_from_db()
+        div.refresh_from_db()
+        self.assertEqual(item.quantidade_recebida, Decimal("0.000000"))
+        self.assertEqual(div.quantidade_faltante, Decimal("3.000000"))
+        self.assertEqual(div.valor_divergente, Decimal("30.00"))
+        self.assertEqual(NotaFiscalEntradaDivergenciaXml.objects.filter(item_xml=item, status=NotaFiscalEntradaDivergenciaXml.Status.PENDENTE).count(), 1)
+
+    def test_conferencia_diferencia_zero_de_nao_conferido_e_valida_limites(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890139")
+        outro = item.nota.itens_xml.get(numero_item=2)
+        self.assertIsNone(item.quantidade_recebida)
+        self.conferir(item, 0)
+        item.refresh_from_db()
+        outro.refresh_from_db()
+        self.assertEqual(item.quantidade_recebida, Decimal("0.000000"))
+        self.assertIsNone(outro.quantidade_recebida)
+        self.conferir(item, -1, status_code=400)
+        self.conferir(item, Decimal("3.000001"), status_code=400)
+
+    def test_conferencia_atualiza_e_resolve_divergencia_sem_duplicar(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890140")
+        self.conferir(item, 1)
+        div = NotaFiscalEntradaDivergenciaXml.objects.get(item_xml=item)
+        self.assertEqual(div.quantidade_faltante, Decimal("2.000000"))
+        self.conferir(item, 2)
+        div.refresh_from_db()
+        self.assertEqual(div.status, NotaFiscalEntradaDivergenciaXml.Status.PENDENTE)
+        self.assertEqual(div.quantidade_faltante, Decimal("1.000000"))
+        self.conferir(item, 3)
+        div.refresh_from_db()
+        self.assertEqual(div.status, NotaFiscalEntradaDivergenciaXml.Status.RESOLVIDA)
+        self.assertEqual(div.valor_divergente, Decimal("0.00"))
+        self.assertEqual(NotaFiscalEntradaDivergenciaXml.objects.filter(item_xml=item).count(), 1)
+        self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="conferencia_fisica_xml").exists())
+        self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="divergencia_xml_atualizada").exists())
+
+    def test_quantidade_interna_e_conversao_pendente_no_resumo(self):
+        self.criar_vinculo(codigo="BAX002", unidade="FD", fator="10")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890141")
+        self.conferir(item, Decimal("2"))
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/itens-xml/")
+        linha = next(row for row in resp.data if row["id"] == item.id)
+        self.assertEqual(Decimal(linha["quantidade_interna_recebida"]), Decimal("20.000000"))
+        self.assertFalse(linha["conversao"]["conversao_pendente"])
+
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, unidade="", fator="1")
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/conciliar-automaticamente/")
+        self.conferir(item2, 2)
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/resumo-conferencia/")
+        self.assertEqual(resp.data["conversoes_pendentes"], 1)
+        self.assertFalse(resp.data["conferencia_completa"])
+
+    def test_conferencia_completa_admite_divergencia_pendente_e_fechamento_nao_bloqueia_por_falta(self):
+        self.criar_vinculo(codigo="BAX002", unidade="FD", fator="10")
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, unidade="UN", fator="1")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890142")
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        self.conferir(item, 2)
+        self.conferir(item2, 2)
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/resumo-conferencia/")
+        self.assertEqual(resp.data["itens_conferidos"], 2)
+        self.assertEqual(resp.data["itens_nao_conferidos"], 0)
+        self.assertEqual(resp.data["itens_com_divergencia"], 1)
+        self.assertEqual(Decimal(resp.data["valor_divergente_total"]), Decimal("10.00"))
+        self.assertTrue(resp.data["possui_divergencia_pendente"])
+        self.assertTrue(resp.data["conferencia_completa"])
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["detail"], "Inclua ao menos um item antes de fechar a nota.")
+
+    def test_item_nao_conciliado_nao_pode_ser_conferido_e_bloqueia_nf_nao_conferida(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890143")
+        self.conferir(item, 1, status_code=400)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Concilie todos", resp.data["detail"])
+
+    def test_lote_e_transacional(self):
+        self.criar_vinculo(codigo="BAX002", unidade="FD", fator="10")
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, unidade="UN", fator="1")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890144")
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{item.nota_id}/conferir-itens-xml/",
+            {"itens": [{"item": item.id, "quantidade_recebida": "3"}, {"item": item2.id, "quantidade_recebida": "3"}]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        item.refresh_from_db()
+        item2.refresh_from_db()
+        self.assertIsNone(item.quantidade_recebida)
+        self.assertIsNone(item2.quantidade_recebida)
+
+    def test_divergencias_respeitam_multiempresa(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890145")
+        self.conferir(item, 2)
+        self.user.empresa = self.empresa_b
+        self.user.save(update_fields=["empresa"])
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/divergencias-xml/")
+        self.assertIn(resp.status_code, {403, 404})
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
