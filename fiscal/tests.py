@@ -1001,7 +1001,7 @@ class NotaFiscalEntradaPermissoesBloco4Tests(TestCase):
         fechar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/fechar/", {}, format="json")
         self.assertEqual(fechar.status_code, 200, fechar.data)
 
-        cancelar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/cancelar/", {}, format="json")
+        cancelar = self.client.post(f"/api/fiscal/notas-entrada/{self.nota.id}/cancelar/", {"motivo": "Teste"}, format="json")
         self.assertEqual(cancelar.status_code, 200, cancelar.data)
 
     def test_usuario_sem_compras_e_usuario_apenas_fiscal_sao_bloqueados(self):
@@ -1430,8 +1430,12 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         nota.refresh_from_db()
         return resp
 
-    def cancelar(self, nota, status_code=200):
-        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={self.empresa.pk}", {}, format="json")
+    def cancelar(self, nota, status_code=200, confirmar_avisos=True):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={self.empresa.pk}",
+            {"motivo": "Teste de cancelamento", "confirmar_avisos": confirmar_avisos},
+            format="json",
+        )
         self.assertEqual(resp.status_code, status_code, resp.data)
         nota.refresh_from_db()
         return resp
@@ -1451,6 +1455,20 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         previsao = Pagar.objects.get(pedido_compra=pedido.pk, nfe_id__isnull=True, Previsao=True)
         self.assertEqual(previsao.Valor_total, Decimal("100.00"))
         self.assertEqual(previsao.itens.get().status, PagarItem.STATUS_PREVISTO)
+        nota.refresh_from_db()
+        self.assertEqual(nota.motivo_cancelamento, "Teste de cancelamento")
+        self.assertEqual(nota.cancelado_por, self.user)
+        self.assertTrue(AuditLog.objects.filter(model="notafiscalentrada", object_id=str(nota.pk), metadata__cancelamento_operacional=True).exists())
+
+    def test_cancelamento_exige_motivo(self):
+        produto = self.criar_produto()
+        pedido, item = self.criar_pedido(produto)
+        nota = self.criar_nota(pedido, item, "920", Decimal("10.000"), Decimal("10.00"))
+        self.fechar(nota)
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={self.empresa.pk}", {"motivo": "   "}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(NotaFiscalEntrada.objects.get(pk=nota.pk).status, NotaFiscalEntrada.Status.FECHADA)
 
     def test_cancelamento_parcial_preserva_financeiro_de_outra_nf(self):
         produto = self.criar_produto()
@@ -1517,7 +1535,7 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         nota = self.criar_nota(pedido, item, "906", Decimal("10.000"), Decimal("10.00"))
         self.fechar(nota)
         self.cancelar(nota)
-        self.cancelar(nota)
+        self.cancelar(nota, status_code=400)
         self.assertEqual(Pagar.objects.filter(pedido_compra=pedido.pk, Previsao=True).count(), 1)
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").count(), 1)
 
@@ -1590,10 +1608,20 @@ class NotaFiscalEntradaCancelamentoBloco2Tests(TestCase):
         self.fechar(nota)
         Estoque.objects.filter(Idloja=self.loja, CodigodeBarra=sku.ean13).update(Estoque=Decimal("2.000"))
 
-        self.cancelar(nota, status_code=400)
-        self.assertEqual(nota.status, NotaFiscalEntrada.Status.FECHADA)
-        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku.ean13).Estoque, Decimal("2.000"))
-        self.assertTrue(Pagar.objects.filter(nfe_id=nota.pk).exists())
+        resp = self.cancelar(nota, status_code=200)
+        self.assertTrue(any(aviso["tipo"] == "SALDO_NEGATIVO" for aviso in resp.data["analise_cancelamento"]["avisos"]))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku.ean13).Estoque, Decimal("-8.000"))
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+
+    def test_aviso_de_saldo_negativo_exige_confirmacao(self):
+        pedido, item, sku = self.criar_revenda()
+        nota = self.criar_nota(pedido, item, "921", Decimal("10.000"), Decimal("10.00"))
+        self.fechar(nota)
+        Estoque.objects.filter(Idloja=self.loja, CodigodeBarra=sku.ean13).update(Estoque=Decimal("2.000"))
+
+        resp = self.cancelar(nota, status_code=409, confirmar_avisos=False)
+        self.assertEqual(NotaFiscalEntrada.objects.get(pk=nota.pk).status, NotaFiscalEntrada.Status.FECHADA)
+        self.assertTrue(any(aviso["tipo"] == "SALDO_NEGATIVO" for aviso in resp.data["analise"]["avisos"]))
 
     def test_revenda_permite_saldo_negativo_quando_loja_permite(self):
         self.loja.EstoqueNegativo = "SIM"
@@ -1757,7 +1785,11 @@ class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
         return resp
 
     def cancelar(self, nota):
-        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}",
+            {"motivo": "Teste de cancelamento", "confirmar_avisos": True},
+            format="json",
+        )
         self.assertEqual(resp.status_code, 200, resp.data)
         nota.refresh_from_db()
         return resp
@@ -1989,7 +2021,11 @@ class NotaFiscalEntradaIntegracaoBloco8Tests(TestCase):
         return resp
 
     def cancelar(self, nota, status_code=200):
-        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}", {}, format="json")
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/?empresa={nota.pedido_compra.empresa_id}",
+            {"motivo": "Teste de cancelamento", "confirmar_avisos": True},
+            format="json",
+        )
         self.assertEqual(resp.status_code, status_code, resp.data)
         nota.refresh_from_db()
         return resp

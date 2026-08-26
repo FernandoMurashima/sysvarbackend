@@ -778,37 +778,194 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @action(detail=True, methods=["post"], url_path="cancelar")
     @transaction.atomic
     def cancelar(self, request, pk=None):
-        nota = self.get_object()
+        nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        motivo = str(request.data.get("motivo") or "").strip()
+        if not motivo:
+            return Response({"motivo": "Informe o motivo do cancelamento."}, status=status.HTTP_400_BAD_REQUEST)
         if nota.status == NotaFiscalEntrada.Status.CANCELADA:
-            return Response(self.get_serializer(nota).data, status=status.HTTP_200_OK)
+            return Response({"detail": "Nota fiscal de entrada já está cancelada."}, status=status.HTTP_400_BAD_REQUEST)
 
         before = nota.status
         estoque = {"disponivel": True, "movimentos": 0}
+        analise = self._analisar_cancelamento(nota)
+        if analise["bloqueios"]:
+            return Response({"detail": analise["bloqueios"][0], "analise": analise}, status=status.HTTP_400_BAD_REQUEST)
+        if analise["avisos"] and not self._confirmacao_avisos(request):
+            return Response(
+                {"detail": "Confirme os avisos para cancelar a NF.", "analise": analise},
+                status=status.HTTP_409_CONFLICT,
+            )
         if nota.status == NotaFiscalEntrada.Status.FECHADA:
             try:
                 financeiro = self._cancelar_financeiro_nf(nota)
-                self._validar_estoque_cancelamento(nota)
-                estoque = self._movimentar_estoque_cancelamento(nota)
+                estoque = self._movimentar_estoque_cancelamento(nota, motivo, request)
                 custos = self._recalcular_custos_apos_cancelamento(nota)
+                divergencias = self._encerrar_divergencias_cancelamento(nota, request)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         else:
             financeiro = {"disponivel": FIN_OK, "titulos_cancelados": 0}
             custos = {"skus_atualizados": 0, "produtos_atualizados": 0}
+            divergencias = {"encerradas": 0}
 
-        nota.status = NotaFiscalEntrada.Status.CANCELADA
-        nota.save(update_fields=["status", "atualizado_em"])
-        recebimento = self._atualizar_recebimento_pedido(nota)
+        recebimento = self._atualizar_recebimento_pedido(nota, excluir_nota=nota)
         necessidades = self._recalcular_necessidades_vinculadas(nota)
-        _audit("notafiscalentrada", nota.pk, {"status": [before, nota.status]}, request, action="cancelar")
+        nota.status = NotaFiscalEntrada.Status.CANCELADA
+        nota.motivo_cancelamento = motivo
+        nota.cancelado_por = request.user if getattr(request.user, "is_authenticated", False) else None
+        nota.cancelado_em = timezone.now()
+        nota.save(update_fields=["status", "motivo_cancelamento", "cancelado_por", "cancelado_em", "atualizado_em"])
+        self._auditar_cancelamento(nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise)
         data = self.get_serializer(nota).data
         data["estoque"] = estoque
         data["financeiro"] = financeiro
         data["custos"] = custos
+        data["divergencias"] = divergencias
+        data["analise_cancelamento"] = analise
         data["recebimento_pedido"] = recebimento
         data["necessidades"] = necessidades
         return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get", "post"], url_path="analisar-cancelamento")
+    @transaction.atomic
+    def analisar_cancelamento(self, request, pk=None):
+        nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        return Response(self._analisar_cancelamento(nota), status=status.HTTP_200_OK)
+
+    def _confirmacao_avisos(self, request):
+        return str(request.data.get("confirmar_avisos") or request.data.get("confirmacao_avisos") or "").strip().lower() in {"1", "true", "sim", "s"}
+
+    def _analisar_cancelamento(self, nota):
+        bloqueios = []
+        avisos = []
+        if nota.status == NotaFiscalEntrada.Status.CANCELADA:
+            bloqueios.append("Nota fiscal de entrada já está cancelada.")
+        elif nota.status != NotaFiscalEntrada.Status.FECHADA:
+            return {"pode_cancelar": True, "bloqueios": [], "avisos": [], "pedido": nota.pedido_compra_id, "valor_financeiro": "0.00"}
+        financeiro = self._resumo_financeiro_cancelamento(nota)
+        if financeiro["baixado"]:
+            bloqueios.append("O título financeiro vinculado à NF já possui baixa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
+        if financeiro["movimentacao_ativa"]:
+            bloqueios.append("O título financeiro vinculado à NF já possui movimentação financeira ativa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
+        avisos.extend(self._avisos_estoque_cancelamento(nota))
+        return {
+            "pode_cancelar": not bloqueios,
+            "bloqueios": bloqueios,
+            "avisos": avisos,
+            "pedido": nota.pedido_compra_id,
+            "valor_financeiro": str(financeiro["valor"]),
+        }
+
+    def _resumo_financeiro_cancelamento(self, nota):
+        if not FIN_OK:
+            return {"valor": Decimal("0.00"), "baixado": False, "movimentacao_ativa": False}
+        titulos = Pagar.objects.select_for_update().filter(nfe_id=nota.pk, pedido_compra=nota.pedido_compra_id)
+        itens = PagarItem.objects.select_for_update().filter(Idpagar__in=titulos)
+        baixado = (
+            itens.filter(status=PagarItem.STATUS_BAIXADO).exists()
+            or itens.filter(data_baixa__isnull=False).exists()
+            or itens.filter(valor_baixa__gt=0).exists()
+        )
+        movimentacao_ativa = MovimentacaoFinanceira.objects.filter(pagar_item__in=itens).exclude(
+            status=MovimentacaoFinanceira.STATUS_CANCELADA
+        ).exists()
+        valor = _money(titulos.aggregate(total=Sum("Valor_total"))["total"] or 0)
+        return {"valor": valor, "baixado": baixado, "movimentacao_ativa": movimentacao_ativa}
+
+    def _avisos_estoque_cancelamento(self, nota):
+        documento_entrada = self._documento_estoque(nota, "ENTRADA")
+        avisos = []
+        for alvo in self._alvos_estoque_cancelamento(nota):
+            saldo = Decimal(alvo["saldo"] or 0)
+            qtd = Decimal(alvo["quantidade"] or 0)
+            if saldo - qtd < 0:
+                avisos.append(
+                    {
+                        "tipo": "SALDO_NEGATIVO",
+                        "produto": alvo.get("produto"),
+                        "codigo": alvo.get("codigo"),
+                        "saldo_atual": str(saldo),
+                        "quantidade_estorno": str(qtd),
+                        "saldo_previsto": str(saldo - qtd),
+                    }
+                )
+            if alvo["uso_consumo"]:
+                entrada = ProdutoUsoConsumoMovimentacao.objects.filter(
+                    documento=documento_entrada,
+                    produto_id=alvo["produto"],
+                    loja_id=nota.loja_id,
+                    tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
+                ).order_by("data_movimento", "id").first()
+                posterior = entrada and ProdutoUsoConsumoMovimentacao.objects.filter(
+                    produto_id=alvo["produto"],
+                    loja_id=nota.loja_id,
+                    data_movimento__gt=entrada.data_movimento,
+                ).exclude(documento=self._documento_estoque(nota, "CANCEL")).exists()
+            else:
+                entrada = EstoqueMovimentacao.objects.filter(
+                    documento=documento_entrada,
+                    CodigodeBarra=alvo["codigo"],
+                    Idloja_id=nota.loja_id,
+                    tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                ).order_by("data_movimento", "Idmovimento").first()
+                posterior = entrada and EstoqueMovimentacao.objects.filter(
+                    CodigodeBarra=alvo["codigo"],
+                    Idloja_id=nota.loja_id,
+                    data_movimento__gt=entrada.data_movimento,
+                ).exclude(documento=self._documento_estoque(nota, "CANCEL")).exists()
+            if posterior:
+                avisos.append({"tipo": "MOVIMENTACAO_POSTERIOR", "produto": alvo.get("produto"), "codigo": alvo.get("codigo")})
+        return avisos
+
+    def _alvos_estoque_cancelamento(self, nota):
+        alvos = []
+        if nota.xml_importado:
+            for item in nota.itens_xml.select_related("produto"):
+                produto = item.produto
+                qtd = _q3(item.quantidade_interna_efetivada or 0)
+                if not produto or qtd <= 0:
+                    continue
+                if produto.tipo_produto == "2":
+                    saldo = ProdutoUsoConsumoEstoque.objects.filter(empresa=nota.empresa, loja=nota.loja, produto=produto).values_list("saldo", flat=True).first() or 0
+                    alvos.append({"uso_consumo": True, "produto": produto.pk, "codigo": None, "quantidade": qtd, "saldo": saldo})
+                else:
+                    codigo = self._codigo_estoque_produto(produto)
+                    saldo = Estoque.objects.filter(CodigodeBarra=codigo, Idloja=nota.loja).values_list("Estoque", flat=True).first() or 0
+                    alvos.append({"uso_consumo": False, "produto": produto.pk, "codigo": codigo, "quantidade": qtd, "saldo": saldo})
+        elif nota.pedido_compra_id:
+            for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__pack"):
+                pedido_item = item_nf.pedido_item
+                produto = pedido_item.produto if pedido_item else None
+                if not produto:
+                    continue
+                qtd_recebida = _q3(item_nf.qtd_recebida or 0)
+                if qtd_recebida <= 0:
+                    continue
+                if nota.pedido_compra.tipo == "1" and pedido_item.pack_id:
+                    qtd_pedido = Decimal(pedido_item.qtd or 0)
+                    if qtd_pedido <= 0:
+                        continue
+                    fator_recebido = qtd_recebida / qtd_pedido
+                    for pack_item in PackItem.objects.filter(pack_id=pedido_item.pack_id):
+                        sku = ProdutoDetalhe.objects.filter(
+                            produto_id=pedido_item.produto_id,
+                            idcor_id=pedido_item.cor_id,
+                            idtamanho_id=pack_item.tamanho_id,
+                        ).first()
+                        if not sku:
+                            continue
+                        qtd = _q3(Decimal(pack_item.qtd or 0) * Decimal(pedido_item.n_packs or 0) * fator_recebido)
+                        saldo = Estoque.objects.filter(CodigodeBarra=sku.ean13, Idloja=nota.loja).values_list("Estoque", flat=True).first() or 0
+                        alvos.append({"uso_consumo": False, "produto": produto.pk, "codigo": sku.ean13, "quantidade": qtd, "saldo": saldo})
+                elif produto.tipo_produto == "2":
+                    saldo = ProdutoUsoConsumoEstoque.objects.filter(empresa=nota.empresa, loja=nota.loja, produto=produto).values_list("saldo", flat=True).first() or 0
+                    alvos.append({"uso_consumo": True, "produto": produto.pk, "codigo": None, "quantidade": qtd_recebida, "saldo": saldo})
+                elif produto.tipo_produto == "4":
+                    codigo = self._codigo_estoque_produto(produto)
+                    saldo = Estoque.objects.filter(CodigodeBarra=codigo, Idloja=nota.loja).values_list("Estoque", flat=True).first() or 0
+                    alvos.append({"uso_consumo": False, "produto": produto.pk, "codigo": codigo, "quantidade": qtd_recebida, "saldo": saldo})
+        return alvos
 
     @action(detail=True, methods=["get"], url_path="itens-pedido")
     def itens_pedido(self, request, pk=None):
@@ -878,23 +1035,28 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return referencia_numerica
         return f"29{int(produto.pk) % 100000000000:011d}"
 
-    def _qtd_recebida_item(self, pedido_item):
+    def _qtd_recebida_item(self, pedido_item, excluir_nota=None):
         itens = NotaFiscalEntradaItem.objects.filter(
             pedido_item=pedido_item,
             nota__pedido_compra_id=pedido_item.pedido_id,
             nota__status=NotaFiscalEntrada.Status.FECHADA,
         )
+        if excluir_nota:
+            itens = itens.exclude(nota=excluir_nota)
         total_legado = sum(Decimal(item.qtd_recebida or 0) for item in itens)
+        total_xml_qs = NotaFiscalEntradaItemXml.objects.filter(
+            pedido_item=pedido_item,
+            nota__pedido_compra_id=pedido_item.pedido_id,
+        ).exclude(nota__status=NotaFiscalEntrada.Status.CANCELADA)
+        if excluir_nota:
+            total_xml_qs = total_xml_qs.exclude(nota=excluir_nota)
         total_xml = sum(
             Decimal(item.quantidade_interna_efetivada or 0)
-            for item in NotaFiscalEntradaItemXml.objects.filter(
-                pedido_item=pedido_item,
-                nota__pedido_compra_id=pedido_item.pedido_id,
-            ).filter(Q(nota__status=NotaFiscalEntrada.Status.FECHADA) | Q(quantidade_interna_efetivada__isnull=False))
+            for item in total_xml_qs.filter(Q(nota__status=NotaFiscalEntrada.Status.FECHADA) | Q(quantidade_interna_efetivada__isnull=False))
         )
         return total_legado + total_xml
 
-    def _atualizar_recebimento_pedido(self, nota):
+    def _atualizar_recebimento_pedido(self, nota, excluir_nota=None):
         pedido = nota.pedido_compra
         if not pedido:
             return {"status_pedido": None, "itens_atualizados": 0}
@@ -907,7 +1069,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         atualizados = 0
         for item in itens:
             prevista = Decimal(item.qtd or 0)
-            recebida = self._qtd_recebida_item(item)
+            recebida = self._qtd_recebida_item(item, excluir_nota=excluir_nota)
             entrega = item.entregas.order_by("id").first()
             if not entrega:
                 entrega = PedidoCompraEntrega(item=item, qtd_prevista=prevista, data_prevista=pedido.previsao_entrega)
@@ -977,13 +1139,15 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         return {"disponivel": True, "movimentos": movimentos}
 
-    def _movimentar_estoque_cancelamento(self, nota):
+    def _movimentar_estoque_cancelamento(self, nota, motivo="", request=None):
         documento = self._documento_estoque(nota, "CANCEL")
         if (
             EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists()
             or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_SAIDA).exists()
         ):
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+        if nota.xml_importado:
+            return self._movimentar_estoque_cancelamento_xml(nota, motivo, request, documento)
 
         movimentos = 0
         for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__cor", "pedido_item__pack"):
@@ -1013,6 +1177,76 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 )
 
         return {"disponivel": True, "movimentos": movimentos}
+
+    def _movimentar_estoque_cancelamento_xml(self, nota, motivo, request, documento):
+        movimentos = 0
+        for item in nota.itens_xml.select_related("produto", "produto__unidade").order_by("numero_item"):
+            qtd = _q3(item.quantidade_interna_efetivada or 0)
+            if qtd <= 0:
+                continue
+            if item.produto.tipo_produto == "2":
+                movimentos += self._estornar_produto_xml_uso_consumo(nota, item, qtd, motivo, request, documento)
+            else:
+                movimentos += self._estornar_produto_xml_estoque(nota, item, qtd, motivo, documento)
+        return {"disponivel": True, "movimentos": movimentos}
+
+    def _estornar_produto_xml_uso_consumo(self, nota, item, qtd, motivo, request, documento):
+        estoque, _ = ProdutoUsoConsumoEstoque.objects.select_for_update().get_or_create(
+            empresa=nota.empresa,
+            loja=nota.loja,
+            produto=item.produto,
+            defaults={"saldo": Decimal("0")},
+        )
+        anterior = Decimal(estoque.saldo or 0)
+        posterior = anterior - qtd
+        estoque.saldo = posterior
+        estoque.save(update_fields=["saldo", "atualizado_em"])
+        ProdutoUsoConsumoMovimentacao.objects.create(
+            empresa=nota.empresa,
+            produto=item.produto,
+            loja=nota.loja,
+            tipo=ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_SAIDA,
+            quantidade=qtd,
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            usuario=getattr(request, "user", None) if request else getattr(nota, "criado_por", None),
+            motivo=f"Cancelamento NF-e XML: {motivo}"[:255],
+            destino=nota.loja.nome_loja,
+            documento=documento,
+            origem=f"NFE:{nota.pk};XML_ITEM:{item.pk};ESTORNO",
+        )
+        return 1
+
+    def _estornar_produto_xml_estoque(self, nota, item, qtd, motivo, documento):
+        produto = item.produto
+        codigo = self._codigo_estoque_produto(produto)
+        custo_movimento = _q4(item.valor_unitario_comercial or produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or 0)
+        estoque, _ = Estoque.objects.select_for_update().get_or_create(
+            CodigodeBarra=codigo,
+            Idloja=nota.loja,
+            defaults={"referencia": produto.referencia or "", "Estoque": 0, "reserva": 0},
+        )
+        anterior = Decimal(estoque.Estoque or 0)
+        posterior = anterior - qtd
+        estoque.referencia = produto.referencia or estoque.referencia
+        estoque.Estoque = posterior
+        estoque.reserva = estoque.reserva or 0
+        estoque.save(update_fields=["referencia", "Estoque", "reserva"])
+        EstoqueMovimentacao.objects.create(
+            Idloja=nota.loja,
+            CodigodeBarra=codigo,
+            referencia=produto.referencia or "",
+            tipo=EstoqueMovimentacao.TIPO_SAIDA,
+            quantidade=qtd,
+            custo_unitario=custo_movimento,
+            custo_total=_money(qtd * custo_movimento),
+            custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            documento=documento,
+            observacao=f"Cancelamento NF-e XML {nota.numero};ITEM:{item.pk};MOTIVO:{motivo}"[:255],
+        )
+        return 1
 
     def _validar_estoque_cancelamento(self, nota):
         for item_nf in nota.itens.select_related("pedido_item", "pedido_item__produto", "pedido_item__pack"):
@@ -1094,7 +1328,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         )
         anterior = Decimal(estoque.saldo or 0)
         posterior = anterior + (qtd * Decimal(sinal))
-        if posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+        if sinal > 0 and posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
             raise ValueError(f"Saldo insuficiente do produto {produto.descricao} para cancelar/movimentar a nota.")
         estoque.saldo = posterior
         estoque.save(update_fields=["saldo", "atualizado_em"])
@@ -1170,7 +1404,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         )
         anterior = Decimal(estoque.Estoque or 0)
         posterior = anterior + (qtd * Decimal(sinal))
-        if posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
+        if sinal > 0 and posterior < 0 and (nota.pedido_compra.loja.EstoqueNegativo or "NAO").upper() != "SIM":
             raise ValueError(
                 f"Saldo insuficiente do produto {produto.descricao} para cancelar/movimentar a nota."
             )
@@ -1223,6 +1457,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return {"atualizados": atualizados}
 
     def _recalcular_custos_apos_cancelamento(self, nota):
+        if nota.xml_importado:
+            return self._recalcular_custos_xml_apos_cancelamento(nota)
         produtos = set()
         skus = set()
         for item_nf in nota.itens.select_related("pedido_item"):
@@ -1300,6 +1536,74 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             obj.custo_ultima_compra = _q4(entradas[-1][1])
             obj.custo_medio = _q4(total / qtd_total) if qtd_total > 0 else obj.custo_ultima_compra
         obj.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+
+    def _recalcular_custos_xml_apos_cancelamento(self, nota):
+        produtos = {
+            item.produto_id
+            for item in nota.itens_xml.select_related("produto")
+            if item.produto_id and item.produto.tipo_produto in ("2", "4")
+        }
+        for produto_id in produtos:
+            produto = Produto.objects.get(pk=produto_id)
+            entradas = self._entradas_validas_produto_xml(produto, excluir_nota=nota)
+            self._aplicar_custos_historicos(produto, entradas)
+        return {"skus_atualizados": 0, "produtos_atualizados": len(produtos)}
+
+    def _entradas_validas_produto_xml(self, produto, excluir_nota):
+        rows = (
+            NotaFiscalEntradaItemXml.objects.select_related("nota")
+            .filter(produto=produto, nota__status=NotaFiscalEntrada.Status.FECHADA)
+            .exclude(nota=excluir_nota)
+            .order_by("nota__dt_entrada", "nota_id", "id")
+        )
+        return [
+            (Decimal(row.quantidade_interna_efetivada or 0), _q4(row.valor_unitario_comercial or 0))
+            for row in rows
+            if Decimal(row.quantidade_interna_efetivada or 0) > 0
+        ]
+
+    def _encerrar_divergencias_cancelamento(self, nota, request):
+        now = timezone.now()
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        atualizadas = NotaFiscalEntradaDivergenciaXml.objects.select_for_update().filter(
+            nota=nota,
+            status=NotaFiscalEntradaDivergenciaXml.Status.PENDENTE,
+        ).update(
+            status=NotaFiscalEntradaDivergenciaXml.Status.CANCELADA,
+            resolvido_por=user,
+            resolvido_em=now,
+        )
+        return {"encerradas": atualizadas}
+
+    def _auditar_cancelamento(self, nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise):
+        AuditService.success(
+            AuditAction.OBJECT_UPDATED,
+            category=AuditCategory.FISCAL,
+            request=request,
+            user=getattr(request, "user", None),
+            instance=nota,
+            before={"status": before},
+            after={
+                "nf": nota.pk,
+                "chave": nota.chave_acesso,
+                "empresa": nota.empresa_id,
+                "loja": nota.loja_id,
+                "fornecedor": nota.fornecedor_id,
+                "pedido_compra": nota.pedido_compra_id,
+                "motivo": motivo,
+                "cancelado_por": getattr(nota, "cancelado_por_id", None),
+                "cancelado_em": nota.cancelado_em.isoformat() if nota.cancelado_em else None,
+                "financeiro": financeiro,
+                "estoque": estoque,
+                "custos": custos,
+                "recebimento_pedido": recebimento,
+                "necessidades": necessidades,
+                "divergencias": divergencias,
+                "avisos": analise.get("avisos", []),
+                "status": nota.status,
+            },
+            metadata={"legacy_action": "cancelar", "cancelamento_operacional": True},
+        )
 
     def _movimentar_item_estoque(self, nota, item_nf, tipo, documento, sinal):
         pedido_item = item_nf.pedido_item
@@ -1489,9 +1793,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         titulos_nf = list(Pagar.objects.select_for_update().filter(nfe_id=nota.pk, pedido_compra=nota.pedido_compra_id))
         itens_nf = PagarItem.objects.select_for_update().filter(Idpagar__in=titulos_nf)
         if itens_nf.filter(status=PagarItem.STATUS_BAIXADO).exists() or itens_nf.filter(data_baixa__isnull=False).exists() or itens_nf.filter(valor_baixa__gt=0).exists():
-            raise ValueError("Não é possível cancelar a NF porque há parcelas do contas a pagar já baixadas.")
+            raise ValueError("O título financeiro vinculado à NF já possui baixa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
         if MovimentacaoFinanceira.objects.filter(pagar_item__in=itens_nf).exclude(status=MovimentacaoFinanceira.STATUS_CANCELADA).exists():
-            raise ValueError("Não é possível cancelar a NF porque há movimentações financeiras vinculadas às parcelas.")
+            raise ValueError("O título financeiro vinculado à NF já possui baixa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
 
         modelo_previsao = None
         for titulo in titulos_nf:
@@ -1499,7 +1803,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 modelo_previsao = titulo
             titulo.delete()
 
-        self._recalcular_previsao_financeira_pedido(nota, modelo_previsao)
+        if nota.pedido_compra_id:
+            self._recalcular_previsao_financeira_pedido(nota, modelo_previsao)
         return {"disponivel": True, "titulos_cancelados": len(titulos_nf)}
 
     def _recalcular_previsao_financeira_pedido(self, nota, modelo_previsao):

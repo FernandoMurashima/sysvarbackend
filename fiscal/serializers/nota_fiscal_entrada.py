@@ -109,6 +109,9 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
             "valor_desconto",
             "valor_total",
             "criado_por",
+            "cancelado_por",
+            "cancelado_em",
+            "motivo_cancelamento",
             "criado_em",
             "atualizado_em",
         )

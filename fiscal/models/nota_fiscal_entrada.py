@@ -83,6 +83,15 @@ class NotaFiscalEntrada(models.Model):
         null=True,
         blank=True,
     )
+    cancelado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="nfe_entrada_canceladas",
+        null=True,
+        blank=True,
+    )
+    cancelado_em = models.DateTimeField(null=True, blank=True)
+    motivo_cancelamento = models.TextField(blank=True, default="")
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -319,6 +328,7 @@ class NotaFiscalEntradaDivergenciaXml(models.Model):
     class Status(models.TextChoices):
         PENDENTE = "PENDENTE", "Pendente"
         RESOLVIDA = "RESOLVIDA", "Resolvida"
+        CANCELADA = "CANCELADA", "Cancelada"
 
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="divergencias_nfe_xml", db_index=True)
     nota = models.ForeignKey("fiscal.NotaFiscalEntrada", on_delete=models.CASCADE, related_name="divergencias_xml", db_index=True)
