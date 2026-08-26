@@ -19,6 +19,7 @@ from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
+    ProdutoFornecedor,
     ProdutoVendaHistorico, ProdutoUsoConsumoHistorico, ProdutoInsumoHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
     Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao,
@@ -28,6 +29,7 @@ from .serializers import (
     ConfigEanSerializer, NcmSerializer, GradeSerializer, TamanhoSerializer, CorSerializer,
     MaterialSerializer, ColecaoSerializer, UnidadeSerializer, GrupoSerializer, SubgrupoSerializer,
     TabelaprecoSerializer, CodigosSerializer, ProdutoSerializer, ProdutoDetalheSerializer,
+    ProdutoFornecedorSerializer,
     ProdutoVendaHistoricoSerializer, ProdutoImagemSerializer,
     TabelaprecoProdutoSerializer, FichaTecnicaSerializer, FichaTecnicaItemSerializer,
     OrdemProducaoSerializer, OrdemProducaoItemSerializer, PromocaoSerializer, PackSerializer, PackItemSerializer, EstoqueSerializer,
@@ -940,6 +942,132 @@ class ProdutoImagemViewSet(BaseViewSet):
             anteriores=historico_payload,
         )
         return super().destroy(request, *args, **kwargs)
+
+
+def _snapshot_produto_fornecedor(obj):
+    return {
+        'empresa': obj.empresa_id,
+        'fornecedor': obj.fornecedor_id,
+        'codigo_produto_fornecedor': obj.codigo_produto_fornecedor,
+        'descricao_fornecedor': obj.descricao_fornecedor,
+        'gtin_ean': obj.gtin_ean,
+        'produto': obj.produto_id,
+        'ativo': obj.ativo,
+    }
+
+
+class ProdutoFornecedorViewSet(BaseViewSet):
+    queryset = (
+        ProdutoFornecedor.objects
+        .select_related('empresa', 'fornecedor', 'produto', 'criado_por')
+        .all()
+        .order_by('fornecedor_id', 'codigo_normalizado', 'id')
+    )
+    serializer_class = ProdutoFornecedorSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['codigo_produto_fornecedor', 'descricao_fornecedor', 'criado_em', 'atualizado_em']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        fornecedor = params.get('fornecedor')
+        produto = params.get('produto')
+        codigo = params.get('codigo') or params.get('codigo_produto_fornecedor') or params.get('codigo_externo')
+        ativo = params.get('ativo')
+        search = (params.get('search') or '').strip()
+        gtin = ''.join(ch for ch in str(params.get('gtin_ean') or '') if ch.isdigit())
+
+        if fornecedor:
+            qs = qs.filter(fornecedor_id=fornecedor)
+        if produto:
+            qs = qs.filter(produto_id=produto)
+        if codigo:
+            qs = qs.filter(codigo_normalizado=ProdutoFornecedor.normalizar_codigo(codigo))
+        if gtin:
+            qs = qs.filter(gtin_ean=gtin)
+        if ativo in ('true', '1'):
+            qs = qs.filter(ativo=True)
+        elif ativo in ('false', '0'):
+            qs = qs.filter(ativo=False)
+        if search:
+            qs = qs.filter(
+                Q(codigo_produto_fornecedor__icontains=search)
+                | Q(descricao_fornecedor__icontains=search)
+                | Q(gtin_ean__icontains=search)
+                | Q(produto__descricao__icontains=search)
+                | Q(produto__referencia__icontains=search)
+                | Q(fornecedor__nome_fornecedor__icontains=search)
+            )
+        return qs
+
+    def _auditar(self, obj, before, after, action):
+        AuditService.success(
+            AuditAction.OBJECT_CREATED if action == 'create' else AuditAction.OBJECT_UPDATED,
+            category=AuditCategory.PRODUCT,
+            request=self.request,
+            user=getattr(self.request, 'user', None),
+            instance=obj,
+            before=before,
+            after=after,
+            changed_fields=sorted(k for k in set(before or {}) | set(after or {}) if (before or {}).get(k) != (after or {}).get(k)),
+            metadata={'legacy_action': action, 'contexto': 'produto_fornecedor'},
+        )
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        self._auditar(serializer.instance, None, _snapshot_produto_fornecedor(serializer.instance), 'create')
+
+    def perform_update(self, serializer):
+        before = _snapshot_produto_fornecedor(serializer.instance)
+        super().perform_update(serializer)
+        serializer.instance.refresh_from_db()
+        after = _snapshot_produto_fornecedor(serializer.instance)
+        if before != after:
+            self._auditar(serializer.instance, before, after, 'update')
+
+    def destroy(self, request, *args, **kwargs):
+        obj = self.get_object()
+        before = _snapshot_produto_fornecedor(obj)
+        if obj.ativo:
+            obj.ativo = False
+            obj.save(update_fields=['ativo', 'codigo_vigente', 'atualizado_em'])
+        after = _snapshot_produto_fornecedor(obj)
+        self._auditar(obj, before, after, 'delete')
+        return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='ativar')
+    def ativar(self, request, pk=None):
+        obj = self.get_object()
+        before = _snapshot_produto_fornecedor(obj)
+        if not obj.ativo:
+            codigo = ProdutoFornecedor.normalizar_codigo(obj.codigo_produto_fornecedor)
+            if ProdutoFornecedor.objects.filter(
+                empresa=obj.empresa,
+                fornecedor=obj.fornecedor,
+                codigo_vigente=codigo,
+            ).exclude(pk=obj.pk).exists():
+                return Response(
+                    {'codigo_produto_fornecedor': 'Já existe vínculo ativo para este fornecedor e código externo.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            obj.ativo = True
+            obj.save(update_fields=['ativo', 'codigo_normalizado', 'codigo_vigente', 'atualizado_em'])
+        after = _snapshot_produto_fornecedor(obj)
+        if before != after:
+            self._auditar(obj, before, after, 'ativar')
+        return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='inativar')
+    def inativar(self, request, pk=None):
+        obj = self.get_object()
+        before = _snapshot_produto_fornecedor(obj)
+        if obj.ativo:
+            obj.ativo = False
+            obj.save(update_fields=['ativo', 'codigo_vigente', 'atualizado_em'])
+        after = _snapshot_produto_fornecedor(obj)
+        if before != after:
+            self._auditar(obj, before, after, 'inativar')
+        return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)
 
 
 class ProdutoDetalheViewSet(BaseViewSet):

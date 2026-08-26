@@ -521,6 +521,61 @@ class ProdutoDetalhe(models.Model):
         super().save(*args, **kwargs)
 
 
+class ProdutoFornecedor(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='produtos_fornecedor', db_index=True)
+    fornecedor = models.ForeignKey('cadastros.Fornecedor', on_delete=models.PROTECT, related_name='produtos_sysvar', db_index=True)
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='vinculos_fornecedor', db_index=True)
+    codigo_produto_fornecedor = models.CharField(max_length=80)
+    codigo_normalizado = models.CharField(max_length=80, db_index=True)
+    codigo_vigente = models.CharField(max_length=80, null=True, blank=True, db_index=True)
+    descricao_fornecedor = models.CharField(max_length=255, blank=True, default='')
+    gtin_ean = models.CharField(
+        max_length=14,
+        blank=True,
+        default='',
+        validators=[RegexValidator(r'^\d{8,14}$', 'GTIN/EAN deve conter entre 8 e 14 dígitos.')],
+    )
+    ativo = models.BooleanField(default=True, db_index=True)
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='produtos_fornecedor_criados',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'produto_fornecedor'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'fornecedor', 'codigo_vigente'],
+                name='uq_prod_forn_codigo_vigente',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'fornecedor', 'codigo_normalizado'], name='ix_prod_forn_emp_forn_cod'),
+            models.Index(fields=['empresa', 'produto'], name='ix_prod_forn_emp_prod'),
+            models.Index(fields=['gtin_ean'], name='ix_prod_forn_gtin_ean'),
+        ]
+
+    @staticmethod
+    def normalizar_codigo(codigo):
+        return ' '.join(str(codigo or '').strip().split())
+
+    def save(self, *args, **kwargs):
+        self.codigo_produto_fornecedor = self.normalizar_codigo(self.codigo_produto_fornecedor)
+        self.codigo_normalizado = self.codigo_produto_fornecedor
+        self.codigo_vigente = self.codigo_normalizado if self.ativo else None
+        self.descricao_fornecedor = (self.descricao_fornecedor or '').strip()
+        self.gtin_ean = ''.join(ch for ch in str(self.gtin_ean or '') if ch.isdigit())
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.fornecedor_id} - {self.codigo_produto_fornecedor} -> {self.produto_id}'
+
+
 class ProdutoVendaHistorico(models.Model):
     CRIACAO = 'CRIACAO'
     ALTERACAO_CADASTRAL = 'ALTERACAO_CADASTRAL'

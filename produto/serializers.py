@@ -5,9 +5,11 @@ from django.utils import timezone
 from decimal import Decimal
 import re
 from accounts.permissions import has_field_permission
+from cadastros.models import Fornecedor
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
     Grupo, Subgrupo, Tabelapreco, Codigos, Produto, ProdutoDetalhe,
+    ProdutoFornecedor,
     ProdutoVendaHistorico, ProdutoUsoConsumoHistorico, ProdutoInsumoHistorico, ProdutoImagem,
     TabelaprecoProduto, FichaTecnica, FichaTecnicaItem, OrdemProducao, OrdemProducaoItem, OrdemProducaoGrade,
     Promocao, Pack, PackItem, Estoque, EstoqueMovimentacao, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao,
@@ -572,6 +574,81 @@ class ProdutoDetalheSerializer(serializers.ModelSerializer):
         dv = ean13_check_digit(base12)
         validated_data['ean13'] = base12 + dv
 
+        return super().create(validated_data)
+
+
+class ProdutoFornecedorSerializer(serializers.ModelSerializer):
+    fornecedor_nome = serializers.CharField(source='fornecedor.nome_fornecedor', read_only=True)
+    produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
+    produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
+    produto_tipo = serializers.CharField(source='produto.tipo_produto', read_only=True)
+
+    class Meta:
+        model = ProdutoFornecedor
+        fields = '__all__'
+        read_only_fields = ('codigo_normalizado', 'codigo_vigente', 'criado_por', 'criado_em', 'atualizado_em')
+        extra_kwargs = {
+            'empresa': {'required': False},
+            'ativo': {'required': False},
+            'gtin_ean': {'required': False, 'allow_blank': True},
+            'descricao_fornecedor': {'required': False, 'allow_blank': True},
+        }
+
+    def validate(self, attrs):
+        request = self.context.get('request') if getattr(self, 'context', None) else None
+        user = getattr(request, 'user', None)
+        empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        if not empresa and user and getattr(user, 'is_authenticated', False) and not user.is_superuser:
+            empresa = getattr(user, 'empresa', None)
+            if empresa:
+                attrs['empresa'] = empresa
+
+        fornecedor = attrs.get('fornecedor') or getattr(self.instance, 'fornecedor', None)
+        produto = attrs.get('produto') or getattr(self.instance, 'produto', None)
+        codigo = ProdutoFornecedor.normalizar_codigo(
+            attrs.get('codigo_produto_fornecedor', getattr(self.instance, 'codigo_produto_fornecedor', ''))
+        )
+        ativo = attrs.get('ativo', getattr(self.instance, 'ativo', True))
+
+        if not empresa:
+            raise serializers.ValidationError({'empresa': 'Empresa é obrigatória.'})
+        if not fornecedor:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor é obrigatório.'})
+        if not produto:
+            raise serializers.ValidationError({'produto': 'Produto é obrigatório.'})
+        if not codigo:
+            raise serializers.ValidationError({'codigo_produto_fornecedor': 'Código do produto no fornecedor é obrigatório.'})
+        if fornecedor.empresa_id != empresa.id:
+            raise serializers.ValidationError({'fornecedor': 'Fornecedor pertence a outra empresa.'})
+        if produto.empresa_id != empresa.id:
+            raise serializers.ValidationError({'produto': 'Produto pertence a outra empresa.'})
+
+        gtin = attrs.get('gtin_ean', getattr(self.instance, 'gtin_ean', ''))
+        if gtin:
+            gtin = ''.join(ch for ch in str(gtin) if ch.isdigit())
+            if len(gtin) < 8 or len(gtin) > 14:
+                raise serializers.ValidationError({'gtin_ean': 'GTIN/EAN deve conter entre 8 e 14 dígitos.'})
+            attrs['gtin_ean'] = gtin
+
+        attrs['codigo_produto_fornecedor'] = codigo
+        conflito = ProdutoFornecedor.objects.filter(
+            empresa=empresa,
+            fornecedor=fornecedor,
+            codigo_vigente=codigo if ativo else None,
+        )
+        if self.instance:
+            conflito = conflito.exclude(pk=self.instance.pk)
+        if ativo and conflito.exists():
+            raise serializers.ValidationError({
+                'codigo_produto_fornecedor': 'Já existe vínculo ativo para este fornecedor e código externo.'
+            })
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.is_authenticated:
+            validated_data['criado_por'] = user
         return super().create(validated_data)
 
 

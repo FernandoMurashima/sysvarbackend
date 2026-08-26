@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserModulePermission
 from auditoria.models import AuditLog
-from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Loja, ModuloSistema
+from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema
 from .models import (
     Colecao,
     ConfigEan,
@@ -17,6 +17,7 @@ from .models import (
     Ncm,
     Produto,
     ProdutoDetalhe,
+    ProdutoFornecedor,
     ProdutoImagem,
     ProdutoInsumoHistorico,
     ProdutoUsoConsumoEstoque,
@@ -30,6 +31,186 @@ from .models import (
     Unidade,
     Material,
 )
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class ProdutoFornecedorApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa PF", documento="33222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa PF B", documento="33222333000182", plano_completo=True)
+        self.user = get_user_model().objects.create_user(
+            "produto-fornecedor",
+            "produto-fornecedor@example.com",
+            "123",
+            empresa=self.empresa,
+            type="Admin",
+        )
+        self.user_b = get_user_model().objects.create_user(
+            "produto-fornecedor-b",
+            "produto-fornecedor-b@example.com",
+            "123",
+            empresa=self.empresa_b,
+            type="Admin",
+        )
+        self.produtos_modulo, _ = ModuloSistema.objects.get_or_create(
+            chave="produtos",
+            defaults={"nome": "Produtos", "categoria": ModuloSistema.CATEGORIA_BASICO, "basico": True},
+        )
+        for empresa, user in ((self.empresa, self.user), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(
+                empresa=empresa,
+                defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user},
+            )
+            EmpresaModulo.objects.update_or_create(
+                empresa=empresa,
+                modulo=self.produtos_modulo,
+                defaults={"contratado": True},
+            )
+        UserModulePermission.objects.create(user=self.user, modulo=UserModulePermission.Module.PRODUTOS, acesso=UserModulePermission.Access.EDIT)
+        UserModulePermission.objects.create(user=self.user_b, modulo=UserModulePermission.Module.PRODUTOS, acesso=UserModulePermission.Access.EDIT)
+        self.client.force_authenticate(self.user)
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
+        self.unidade_b = Unidade.objects.create(empresa=self.empresa_b, Descricao="Unidade B", Codigo="UNB")
+        self.produto = self.criar_produto(self.empresa, self.unidade, "Papel A4", "PAPEL")
+        self.produto_2 = self.criar_produto(self.empresa, self.unidade, "Caneta Azul", "CANETA")
+        self.produto_b = self.criar_produto(self.empresa_b, self.unidade_b, "Papel B", "PAPEL B")
+        self.fornecedor = self.criar_fornecedor(self.empresa, "Fornecedor A", "33222333000191")
+        self.fornecedor_2 = self.criar_fornecedor(self.empresa, "Fornecedor B", "33222333000272")
+        self.fornecedor_b = self.criar_fornecedor(self.empresa_b, "Fornecedor C", "33222333000353")
+
+    def criar_fornecedor(self, empresa, nome, documento):
+        return Fornecedor.objects.create(
+            empresa=empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento=documento,
+            cnpj=documento,
+            nome_fornecedor=nome,
+            categoria="OUTROS",
+        )
+
+    def criar_produto(self, empresa, unidade, descricao, reduzida):
+        return Produto.objects.create(
+            empresa=empresa,
+            tipo_produto="2",
+            descricao=descricao,
+            descricao_reduzida=reduzida,
+            unidade=unidade,
+        )
+
+    def payload(self, fornecedor=None, produto=None, codigo="BAX002", descricao="PAPEL SULFITE A4", gtin="7891234567895"):
+        return {
+            "empresa": self.empresa.pk,
+            "fornecedor": (fornecedor or self.fornecedor).pk,
+            "produto": (produto or self.produto).pk,
+            "codigo_produto_fornecedor": codigo,
+            "descricao_fornecedor": descricao,
+            "gtin_ean": gtin,
+        }
+
+    def post_vinculo(self, payload=None, status_code=201):
+        resp = self.client.post("/api/produto/produto-fornecedor/", payload or self.payload(), format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def results(self, resp):
+        return resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
+
+    def test_cria_vinculo_valido_com_descricao_gtin_e_auditoria(self):
+        resp = self.post_vinculo()
+        vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
+        self.assertEqual(vinculo.empresa_id, self.empresa.pk)
+        self.assertEqual(vinculo.codigo_produto_fornecedor, "BAX002")
+        self.assertEqual(vinculo.codigo_normalizado, "BAX002")
+        self.assertEqual(vinculo.codigo_vigente, "BAX002")
+        self.assertEqual(vinculo.descricao_fornecedor, "PAPEL SULFITE A4")
+        self.assertEqual(vinculo.gtin_ean, "7891234567895")
+        self.assertTrue(AuditLog.objects.filter(app_label="produto", model="produtofornecedor", object_id=str(vinculo.pk), action="OBJECT_CREATED").exists())
+
+    def test_permite_varios_fornecedores_e_codigos_para_mesmo_produto(self):
+        self.post_vinculo(self.payload(codigo="BAX002"))
+        self.post_vinculo(self.payload(fornecedor=self.fornecedor_2, codigo="KT004"))
+        self.post_vinculo(self.payload(codigo="BAX003"))
+        self.assertEqual(ProdutoFornecedor.objects.filter(produto=self.produto, ativo=True).count(), 3)
+
+    def test_bloqueia_mesmo_fornecedor_codigo_para_produtos_diferentes(self):
+        self.post_vinculo(self.payload(codigo=" DUP 001 "))
+        resp = self.post_vinculo(self.payload(produto=self.produto_2, codigo="DUP 001"), status_code=400)
+        self.assertIn("codigo_produto_fornecedor", resp.data)
+
+    def test_permite_mesmo_codigo_em_fornecedores_e_empresas_diferentes(self):
+        self.post_vinculo(self.payload(codigo="ABC"))
+        self.post_vinculo(self.payload(fornecedor=self.fornecedor_2, codigo="ABC", produto=self.produto_2))
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.post(
+            "/api/produto/produto-fornecedor/",
+            {
+                "empresa": self.empresa_b.pk,
+                "fornecedor": self.fornecedor_b.pk,
+                "produto": self.produto_b.pk,
+                "codigo_produto_fornecedor": "ABC",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+    def test_rejeita_produto_e_fornecedor_de_outra_empresa(self):
+        resp = self.post_vinculo(self.payload(produto=self.produto_b), status_code=400)
+        self.assertIn("produto", resp.data)
+        resp = self.post_vinculo(self.payload(fornecedor=self.fornecedor_b), status_code=400)
+        self.assertIn("fornecedor", resp.data)
+
+    def test_bloqueia_acesso_cruzado_entre_empresas(self):
+        resp = self.post_vinculo()
+        self.client.force_authenticate(self.user_b)
+        detail = self.client.get(f"/api/produto/produto-fornecedor/{resp.data['id']}/")
+        self.assertEqual(detail.status_code, 404)
+        lista = self.client.get("/api/produto/produto-fornecedor/")
+        self.assertEqual(self.results(lista), [])
+
+    def test_pesquisa_por_fornecedor_codigo_e_filtra_por_produto(self):
+        self.post_vinculo(self.payload(codigo="COD-1"))
+        self.post_vinculo(self.payload(codigo="COD-2", produto=self.produto_2))
+        resp = self.client.get("/api/produto/produto-fornecedor/", {"fornecedor": self.fornecedor.pk, "codigo": "COD-1"})
+        self.assertEqual([row["codigo_produto_fornecedor"] for row in self.results(resp)], ["COD-1"])
+        resp = self.client.get("/api/produto/produto-fornecedor/", {"produto": self.produto_2.pk})
+        self.assertEqual([row["produto"] for row in self.results(resp)], [self.produto_2.pk])
+
+    def test_inativa_sem_perder_historico_e_audita(self):
+        resp = self.post_vinculo()
+        vinculo_id = resp.data["id"]
+        resp = self.client.post(f"/api/produto/produto-fornecedor/{vinculo_id}/inativar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        vinculo = ProdutoFornecedor.objects.get(pk=vinculo_id)
+        self.assertFalse(vinculo.ativo)
+        self.assertIsNone(vinculo.codigo_vigente)
+        self.assertTrue(ProdutoFornecedor.objects.filter(pk=vinculo_id).exists())
+        self.assertTrue(AuditLog.objects.filter(app_label="produto", model="produtofornecedor", object_id=str(vinculo_id), action="OBJECT_UPDATED").exists())
+
+    def test_alteracao_do_produto_e_codigo_relevante_e_auditada(self):
+        resp = self.post_vinculo()
+        vinculo_id = resp.data["id"]
+        resp = self.client.patch(
+            f"/api/produto/produto-fornecedor/{vinculo_id}/",
+            {"produto": self.produto_2.pk, "codigo_produto_fornecedor": "BAX009", "descricao_fornecedor": "Descricao nova"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        vinculo = ProdutoFornecedor.objects.get(pk=vinculo_id)
+        self.assertEqual(vinculo.produto_id, self.produto_2.pk)
+        self.assertEqual(vinculo.codigo_produto_fornecedor, "BAX009")
+        log = AuditLog.objects.filter(app_label="produto", model="produtofornecedor", object_id=str(vinculo_id), action="OBJECT_UPDATED").latest("created_at")
+        self.assertIn("produto", log.changed_fields)
+        self.assertIn("codigo_produto_fornecedor", log.changed_fields)
+
+    def test_produto_e_fornecedor_existentes_nao_sao_alterados(self):
+        descricao_produto = self.produto.descricao
+        nome_fornecedor = self.fornecedor.nome_fornecedor
+        self.post_vinculo(self.payload(descricao="Descricao externa diferente"))
+        self.produto.refresh_from_db()
+        self.fornecedor.refresh_from_db()
+        self.assertEqual(self.produto.descricao, descricao_produto)
+        self.assertEqual(self.fornecedor.nome_fornecedor, nome_fornecedor)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
