@@ -31,6 +31,8 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"pedido_item": "O item informado não pertence ao pedido de compra da nota."}
             )
+        if nota and not nota.pedido_compra_id:
+            raise serializers.ValidationError({"nota": "Itens de NF sem pedido serão implementados em etapa posterior."})
 
         if Decimal(qtd_recebida or 0) < 0:
             raise serializers.ValidationError({"qtd_recebida": "Informe uma quantidade maior ou igual a zero."})
@@ -84,12 +86,18 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
 
 class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     itens = NotaFiscalEntradaItemSerializer(many=True, read_only=True)
-    destino_recebimento = serializers.CharField(source="pedido_compra.loja.nome_loja", read_only=True)
-    loja_estoque_id = serializers.IntegerField(source="pedido_compra.loja_id", read_only=True)
+    destino_recebimento = serializers.CharField(source="loja.nome_loja", read_only=True)
+    loja_estoque_id = serializers.IntegerField(source="loja_id", read_only=True)
 
     class Meta:
         model = NotaFiscalEntrada
         fields = "__all__"
+        extra_kwargs = {
+            "empresa": {"required": False},
+            "loja": {"required": False},
+            "fornecedor": {"required": False},
+            "pedido_compra": {"required": False, "allow_null": True},
+        }
         read_only_fields = (
             "status",
             "valor_produtos",
@@ -102,9 +110,38 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         pedido = attrs.get("pedido_compra") or getattr(self.instance, "pedido_compra", None)
+        empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)
+        loja = attrs.get("loja") or getattr(self.instance, "loja", None)
+        fornecedor = attrs.get("fornecedor") or getattr(self.instance, "fornecedor", None)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not empresa and user and not getattr(user, "is_superuser", False):
+            empresa = getattr(user, "empresa", None)
+            if empresa:
+                attrs["empresa"] = empresa
         for field in ("modelo", "serie", "numero"):
             if field in attrs and attrs[field] is not None:
                 attrs[field] = str(attrs[field]).strip()
+
+        if pedido:
+            attrs["empresa"] = pedido.empresa
+            attrs["loja"] = pedido.loja
+            attrs["fornecedor"] = pedido.fornecedor
+            empresa = pedido.empresa
+            loja = pedido.loja
+            fornecedor = pedido.fornecedor
+        else:
+            if not empresa:
+                raise serializers.ValidationError({"empresa": "Empresa é obrigatória para nota sem pedido."})
+            if not loja:
+                raise serializers.ValidationError({"loja": "Loja é obrigatória para nota sem pedido."})
+            if not fornecedor:
+                raise serializers.ValidationError({"fornecedor": "Fornecedor é obrigatório para nota sem pedido."})
+
+        if loja and empresa and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+        if fornecedor and empresa and fornecedor.empresa_id != empresa.id:
+            raise serializers.ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
 
         if pedido and (pedido.status or "").upper() == "CA":
             raise serializers.ValidationError({"pedido_compra": "Não é possível criar nota para pedido cancelado."})
@@ -119,7 +156,18 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"chave_acesso": exc.detail})
 
         if self.instance and self.instance.status != NotaFiscalEntrada.Status.ABERTA:
-            protected = {"pedido_compra", "modelo", "serie", "numero", "chave_acesso", "dt_emissao", "dt_entrada"}
+            protected = {
+                "empresa",
+                "loja",
+                "fornecedor",
+                "pedido_compra",
+                "modelo",
+                "serie",
+                "numero",
+                "chave_acesso",
+                "dt_emissao",
+                "dt_entrada",
+            }
             if protected.intersection(attrs.keys()):
                 raise serializers.ValidationError("Somente notas abertas podem ser alteradas.")
 

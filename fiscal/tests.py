@@ -126,6 +126,20 @@ class NotaFiscalEntradaMultiempresaTests(TestCase):
             "dt_entrada": hoje,
         }
 
+    def payload_nota_sem_pedido(self, numero="400", loja=None, fornecedor=None):
+        hoje = timezone.localdate().isoformat()
+        payload = {
+            "empresa": self.empresa_a.id,
+            "loja": (loja or self.loja_a).id if loja is not None else self.loja_a.id,
+            "fornecedor": (fornecedor or self.fornecedor_a).id if fornecedor is not None else self.fornecedor_a.id,
+            "modelo": "55",
+            "serie": "1",
+            "numero": numero,
+            "dt_emissao": hoje,
+            "dt_entrada": hoje,
+        }
+        return payload
+
     def payload_item(self, nota, pedido_item):
         return {
             "nota": nota.id,
@@ -167,6 +181,89 @@ class NotaFiscalEntradaMultiempresaTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_cria_nota_com_pedido_preenche_identidade_propria(self):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}",
+            self.payload_nota(self.pedido_a, numero="301"),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        self.assertEqual(nota.empresa_id, self.empresa_a.id)
+        self.assertEqual(nota.loja_id, self.loja_a.id)
+        self.assertEqual(nota.fornecedor_id, self.fornecedor_a.id)
+
+    def test_cria_nota_sem_pedido_com_identidade_valida(self):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}",
+            self.payload_nota_sem_pedido(),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertIsNone(resp.data["pedido_compra"])
+        self.assertEqual(resp.data["empresa"], self.empresa_a.id)
+        self.assertEqual(resp.data["loja"], self.loja_a.id)
+        self.assertEqual(resp.data["fornecedor"], self.fornecedor_a.id)
+
+    def test_nota_sem_pedido_exige_loja_e_fornecedor(self):
+        payload = self.payload_nota_sem_pedido(numero="401")
+        payload.pop("loja")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}", payload, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("loja", resp.data)
+
+        payload = self.payload_nota_sem_pedido(numero="402")
+        payload.pop("fornecedor")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}", payload, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("fornecedor", resp.data)
+
+    def test_nota_sem_pedido_rejeita_loja_e_fornecedor_de_outra_empresa(self):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}",
+            self.payload_nota_sem_pedido(numero="403", loja=self.loja_b),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("loja", resp.data)
+
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}",
+            self.payload_nota_sem_pedido(numero="404", fornecedor=self.fornecedor_b),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("fornecedor", resp.data)
+
+    def test_duplicidade_sem_pedido_usa_empresa_fornecedor_modelo_serie_numero(self):
+        payload = self.payload_nota_sem_pedido(numero="405")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}", payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}", payload, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("numero", resp.data)
+
+    def test_filtros_funcionam_para_notas_com_e_sem_pedido(self):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/?empresa={self.empresa_a.id}",
+            self.payload_nota_sem_pedido(numero="406"),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+        resp = self.client.get("/api/fiscal/notas-entrada/", {"empresa": self.empresa_a.id, "fornecedor": self.fornecedor_a.id})
+        notas = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        numeros = {n["numero"] for n in notas}
+        self.assertIn("100", numeros)
+        self.assertIn("406", numeros)
+
+        resp = self.client.get("/api/fiscal/notas-entrada/", {"empresa": self.empresa_a.id, "loja": self.loja_a.id})
+        notas = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        numeros = {n["numero"] for n in notas}
+        self.assertIn("100", numeros)
+        self.assertIn("406", numeros)
 
     def test_itens_respeitam_empresa_e_filtros_nao_escapam_tenant(self):
         resp = self.client.get(f"/api/fiscal/notas-entrada-itens/{self.nota_item_b.id}/", {"empresa": self.empresa_a.id})
@@ -1176,12 +1273,12 @@ class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
         self.fechar(nota2)
         resp = self.client.post(f"/api/fiscal/notas-entrada/{nota1.pk}/fechar/?empresa={self.empresa.pk}", {}, format="json")
         self.assertEqual(resp.status_code, 400, resp.data)
-        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:ENTRADA").count(), 1)
-        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:ENTRADA").count(), 1)
+        self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:ENTRADA").count(), 1)
+        self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:ENTRADA").count(), 1)
 
         self.cancelar(nota1)
-        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
-        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
+        self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota1.pk}:CANCEL").count(), 1)
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota2.pk}:CANCEL").exists())
 
     def test_series_e_empresas_iguais_no_numero_movimentam_sem_interferencia(self):
         pedido1, item1 = self.criar_pedido()
@@ -1193,7 +1290,7 @@ class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
         for nota, item in ((nota1, item1), (nota2, item2), (nota_b, item_b)):
             self.criar_item(nota, item)
             self.fechar(nota)
-            self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").count(), 1)
+            self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").count(), 1)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

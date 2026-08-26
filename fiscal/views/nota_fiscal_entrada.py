@@ -78,7 +78,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 
 class NotaFiscalEntradaViewSet(BaseViewSet):
     queryset = (
-        NotaFiscalEntrada.objects.select_related("pedido_compra", "criado_por")
+        NotaFiscalEntrada.objects.select_related("empresa", "loja", "fornecedor", "pedido_compra", "criado_por")
         .prefetch_related("itens")
         .all()
         .order_by("-dt_entrada", "-id")
@@ -103,7 +103,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         search = self.request.query_params.get("search")
 
         if empresa_id:
-            qs = qs.filter(pedido_compra__empresa_id=empresa_id)
+            qs = qs.filter(empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
         if pedido:
@@ -115,9 +115,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         if chave:
             qs = qs.filter(chave_acesso__icontains=chave)
         if fornecedor:
-            qs = qs.filter(pedido_compra__fornecedor_id=fornecedor)
+            qs = qs.filter(fornecedor_id=fornecedor)
         if loja:
-            qs = qs.filter(pedido_compra__loja_id=loja)
+            qs = qs.filter(loja_id=loja)
         if dt_emissao_de:
             qs = qs.filter(dt_emissao__gte=dt_emissao_de)
         if dt_emissao_ate:
@@ -137,7 +137,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 | Q(numero__icontains=search)
                 | Q(chave_acesso__icontains=search)
                 | Q(status__icontains=search)
-                | Q(pedido_compra__fornecedor__nome_fornecedor__icontains=search)
+                | Q(fornecedor__nome_fornecedor__icontains=search)
             )
             if str(search).isdigit():
                 search_filter |= Q(pedido_compra_id=int(search))
@@ -177,6 +177,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @transaction.atomic
     def perform_update(self, serializer):
         data = {**serializer.validated_data}
+        data.setdefault("empresa", serializer.instance.empresa)
+        data.setdefault("loja", serializer.instance.loja)
+        data.setdefault("fornecedor", serializer.instance.fornecedor)
         data.setdefault("pedido_compra", serializer.instance.pedido_compra)
         data.setdefault("modelo", serializer.instance.modelo)
         data.setdefault("serie", serializer.instance.serie)
@@ -197,32 +200,40 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _validar_nota_empresa(self, data):
         pedido = data.get("pedido_compra")
-        empresa_id = getattr(pedido, "empresa_id", None)
+        empresa = data.get("empresa")
+        loja = data.get("loja")
+        fornecedor = data.get("fornecedor")
+        empresa_id = getattr(empresa, "id", None) or getattr(pedido, "empresa_id", None)
         user_empresa_id = self._empresa_id_usuario()
         if not user_empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
+            field = "pedido_compra" if pedido else "empresa"
+            raise ValidationError({field: "Nota fiscal pertence a outra empresa."})
+        if pedido and pedido.empresa_id != empresa_id:
             raise ValidationError({"pedido_compra": "Pedido pertence a outra empresa."})
-        if pedido and pedido.loja_id and pedido.loja.empresa_id and empresa_id and pedido.loja.empresa_id != empresa_id:
+        if pedido and (pedido.loja_id != getattr(loja, "id", None) or pedido.fornecedor_id != getattr(fornecedor, "id", None)):
+            raise ValidationError({"pedido_compra": "Empresa, loja e fornecedor da nota devem ser coerentes com o pedido."})
+        if loja and loja.empresa_id != empresa_id:
             raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
+        if fornecedor and fornecedor.empresa_id != empresa_id:
+            raise ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
 
     def _validar_duplicidade_nota(self, data, instance=None):
-        pedido = data.get("pedido_compra")
-        if not pedido:
+        empresa = data.get("empresa")
+        fornecedor = data.get("fornecedor")
+        empresa_id = getattr(empresa, "id", None)
+        fornecedor_id = getattr(fornecedor, "id", None)
+        if not empresa_id or not fornecedor_id:
             return
         modelo = str(data.get("modelo") or "55").strip()
         serie = str(data.get("serie") or "").strip()
         numero = str(data.get("numero") or "").strip()
         chave = data.get("chave_acesso")
 
-        PedidoCompra.objects.select_for_update().filter(
-            empresa_id=pedido.empresa_id,
-            fornecedor_id=pedido.fornecedor_id,
-        ).exists()
-
         duplicadas = NotaFiscalEntrada.objects.select_for_update().filter(
-            pedido_compra__empresa_id=pedido.empresa_id,
-            pedido_compra__fornecedor_id=pedido.fornecedor_id,
+            empresa_id=empresa_id,
+            fornecedor_id=fornecedor_id,
             modelo=modelo,
             serie=serie,
             numero=numero,
@@ -312,6 +323,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @action(detail=True, methods=["get"], url_path="itens-pedido")
     def itens_pedido(self, request, pk=None):
         nota = self.get_object()
+        if not nota.pedido_compra_id:
+            return Response([], status=status.HTTP_200_OK)
         itens_nota = {item.pedido_item_id: item for item in nota.itens.all()}
         payload = []
 
@@ -385,6 +398,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _atualizar_recebimento_pedido(self, nota):
         pedido = nota.pedido_compra
+        if not pedido:
+            return {"status_pedido": None, "itens_atualizados": 0}
         itens = list(pedido.itens.all().order_by("id"))
         if not itens:
             return {"status_pedido": pedido.status, "itens_atualizados": 0}
@@ -602,6 +617,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return 1
 
     def _recalcular_necessidades_vinculadas(self, nota):
+        if not nota.pedido_compra_id:
+            return {"requisicao_itens": 0, "materiais_os": 0}
         req_ids = set()
         os_material_ids = set()
         for item in nota.pedido_compra.itens.all():
@@ -1100,7 +1117,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
 
 class NotaFiscalEntradaItemViewSet(BaseViewSet):
-    queryset = NotaFiscalEntradaItem.objects.select_related("nota", "pedido_item").all().order_by("nota_id", "id")
+    queryset = NotaFiscalEntradaItem.objects.select_related("nota", "nota__empresa", "pedido_item").all().order_by("nota_id", "id")
     serializer_class = NotaFiscalEntradaItemSerializer
 
     def get_queryset(self):
@@ -1111,7 +1128,7 @@ class NotaFiscalEntradaItemViewSet(BaseViewSet):
         pedido_item = self.request.query_params.get("pedido_item")
 
         if empresa_id:
-            qs = qs.filter(nota__pedido_compra__empresa_id=empresa_id)
+            qs = qs.filter(nota__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
         if nota:
@@ -1136,14 +1153,16 @@ class NotaFiscalEntradaItemViewSet(BaseViewSet):
     def _validar_item_empresa(self, data):
         nota = data.get("nota")
         pedido_item = data.get("pedido_item")
-        empresa_id = getattr(getattr(nota, "pedido_compra", None), "empresa_id", None)
+        empresa_id = getattr(nota, "empresa_id", None)
         user_empresa_id = self._empresa_id_usuario()
         if not user_empresa_id and not self.request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if user_empresa_id and empresa_id and int(user_empresa_id) != empresa_id:
             raise ValidationError({"nota": "Nota fiscal pertence a outra empresa."})
-        if nota and nota.pedido_compra.loja_id and nota.pedido_compra.loja.empresa_id != nota.pedido_compra.empresa_id:
-            raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
+        if nota and nota.loja_id and nota.loja.empresa_id != nota.empresa_id:
+            raise ValidationError({"loja": "A loja da nota pertence a outra empresa."})
+        if nota and not nota.pedido_compra_id:
+            raise ValidationError({"nota": "Itens de NF sem pedido serão implementados em etapa posterior."})
         if pedido_item and nota and pedido_item.pedido_id != nota.pedido_compra_id:
             raise ValidationError({"pedido_item": "O item informado não pertence ao pedido de compra da nota."})
         if pedido_item and empresa_id and pedido_item.pedido.empresa_id != empresa_id:

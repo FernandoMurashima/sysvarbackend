@@ -15,11 +15,30 @@ class NotaFiscalEntrada(models.Model):
         FECHADA = "FE", "Fechada"
         CANCELADA = "CA", "Cancelada"
 
-    # vínculo obrigatório com Pedido
+    empresa = models.ForeignKey(
+        "cadastros.Empresa",
+        on_delete=models.PROTECT,
+        related_name="notas_fiscais_entrada",
+        db_index=True,
+    )
+    loja = models.ForeignKey(
+        "cadastros.Loja",
+        on_delete=models.PROTECT,
+        related_name="notas_fiscais_entrada",
+        db_index=True,
+    )
+    fornecedor = models.ForeignKey(
+        "cadastros.Fornecedor",
+        on_delete=models.PROTECT,
+        related_name="notas_fiscais_entrada",
+        db_index=True,
+    )
     pedido_compra = models.ForeignKey(
         "compras.PedidoCompra",
         on_delete=models.PROTECT,
         related_name="notas_entrada",
+        null=True,
+        blank=True,
         db_index=True,
     )
 
@@ -61,12 +80,27 @@ class NotaFiscalEntrada(models.Model):
     class Meta:
         db_table = "fiscal_nota_fiscal_entrada"
         indexes = [
+            Index(fields=["empresa", "status"], name="ix_fiscal_nfe_empresa_status"),
             Index(fields=["pedido_compra", "status"], name="ix_fiscal_nfe_pedido_status"),
             Index(fields=["modelo", "serie", "numero"], name="ix_fiscal_nfe_num"),
         ]
+        constraints = [
+            UniqueConstraint(
+                fields=["empresa", "fornecedor", "modelo", "serie", "numero"],
+                name="uq_fiscal_nfe_emp_forn_doc",
+            )
+        ]
 
     def __str__(self) -> str:
-        return f"NFE {self.modelo}/{self.serie}/{self.numero} (Pedido {self.pedido_compra_id})"
+        origem = f"Pedido {self.pedido_compra_id}" if self.pedido_compra_id else "sem pedido"
+        return f"NFE {self.modelo}/{self.serie}/{self.numero} ({origem})"
+
+    def save(self, *args, **kwargs):
+        if self.pedido_compra_id:
+            self.empresa_id = self.pedido_compra.empresa_id
+            self.loja_id = self.pedido_compra.loja_id
+            self.fornecedor_id = self.pedido_compra.fornecedor_id
+        super().save(*args, **kwargs)
 
     def recalcular_totais(self):
         itens = list(self.itens.all())
