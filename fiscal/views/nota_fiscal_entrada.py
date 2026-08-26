@@ -24,12 +24,13 @@ except Exception:
     FIN_OK = False
     MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
-from fiscal.services.nfe_xml import only_digits, parse_nfe_xml
+from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
 from fiscal.serializers import (
     NotaFiscalEntradaDivergenciaXmlSerializer,
+    NotaFiscalEntradaEventoSerializer,
     NotaFiscalEntradaItemSerializer,
     NotaFiscalEntradaItemXmlSerializer,
     NotaFiscalEntradaSerializer,
@@ -234,6 +235,36 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             destinatario_documento=dados.destinatario_documento,
             destinatario_nome=dados.destinatario_nome,
             protocolo_autorizacao=dados.protocolo_autorizacao,
+            situacao_fiscal=dados.situacao_fiscal,
+            versao_leiaute=dados.versao_leiaute,
+            nfe_id_xml=dados.nfe_id_xml,
+            codigo_uf=dados.codigo_uf,
+            codigo_numerico=dados.codigo_numerico,
+            dh_emissao=dados.dh_emissao,
+            dh_saida_entrada=dados.dh_saida_entrada,
+            tipo_operacao=dados.tipo_operacao,
+            identificador_destino=dados.identificador_destino,
+            municipio_fato_gerador=dados.municipio_fato_gerador,
+            tipo_impressao=dados.tipo_impressao,
+            tipo_emissao=dados.tipo_emissao,
+            digito_verificador=dados.digito_verificador,
+            ambiente=dados.ambiente,
+            finalidade_nfe=dados.finalidade_nfe,
+            consumidor_final=dados.consumidor_final,
+            presenca_comprador=dados.presenca_comprador,
+            intermediador=dados.intermediador,
+            processo_emissao=dados.processo_emissao,
+            versao_processo=dados.versao_processo,
+            protocolo_chave_acesso=dados.protocolo_chave_acesso,
+            protocolo_recebido_em=dados.protocolo_recebido_em,
+            protocolo_cstat=dados.protocolo_cstat,
+            protocolo_motivo=dados.protocolo_motivo,
+            totais_fiscais=dados.totais_fiscais,
+            cobranca_fiscal=dados.cobranca_fiscal,
+            pagamentos_fiscais=dados.pagamentos_fiscais,
+            documentos_referenciados=dados.documentos_referenciados,
+            informacoes_complementares_fisco=dados.informacoes_complementares_fisco,
+            informacoes_complementares_contribuinte=dados.informacoes_complementares_contribuinte,
             criado_por=request.user if request.user.is_authenticated else None,
         )
         NotaFiscalEntradaItemXml.objects.bulk_create(
@@ -252,6 +283,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     valor_produto=item.valor_produto,
                     valor_desconto=item.valor_desconto,
                     informacoes_adicionais=item.informacoes_adicionais,
+                    impostos_fiscais=item.impostos_fiscais,
                 )
                 for item in dados.itens
             ]
@@ -269,6 +301,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 "chave_acesso": nota.chave_acesso,
                 "xml_importado": True,
                 "itens_xml": len(dados.itens),
+                "situacao_fiscal": nota.situacao_fiscal,
+                "ambiente": nota.ambiente,
+                "finalidade_nfe": nota.finalidade_nfe,
             },
             metadata={"legacy_action": "importar_xml", "origem": "upload_xml_nfe"},
         )
@@ -387,6 +422,60 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         divergencia = nota.divergencias_xml.select_related("nota").get(pk=request.data.get("divergencia"))
         divergencia = resolver_divergencia(divergencia, user=request.user, request=request)
         return Response(NotaFiscalEntradaDivergenciaXmlSerializer(divergencia).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="eventos-fiscais")
+    def eventos_fiscais(self, request, pk=None):
+        nota = self.get_object()
+        qs = nota.eventos_fiscais.order_by("tipo_evento", "sequencia", "criado_em")
+        return Response(NotaFiscalEntradaEventoSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="importar-evento-xml", parser_classes=[parsers.MultiPartParser])
+    @transaction.atomic
+    def importar_evento_xml(self, request, pk=None):
+        nota = self.get_queryset().select_for_update().get(pk=pk)
+        arquivo = request.FILES.get("arquivo") or request.FILES.get("xml")
+        if not arquivo:
+            raise ValidationError({"arquivo": "Informe o XML do evento da NF-e."})
+        original_bytes = arquivo.read()
+        evento = parse_nfe_evento_xml(original_bytes)
+        if evento.chave_acesso != nota.chave_acesso:
+            raise ValidationError({"chave_acesso": "Evento não pertence à chave de acesso desta NF-e."})
+        try:
+            xml_original = original_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValidationError({"arquivo": "XML deve estar em codificação textual válida."}) from exc
+        obj, created = NotaFiscalEntradaEvento.objects.get_or_create(
+            empresa=nota.empresa,
+            nota=nota,
+            chave_acesso=evento.chave_acesso,
+            tipo_evento=evento.tipo_evento,
+            sequencia=evento.sequencia,
+            protocolo=evento.protocolo,
+            defaults={
+                "id_evento": evento.id_evento,
+                "tipo_evento_descricao": evento.tipo_evento_descricao,
+                "data_hora_evento": evento.data_hora_evento,
+                "cstat": evento.cstat,
+                "xmotivo": evento.xmotivo,
+                "ambiente": evento.ambiente,
+                "xml_original": xml_original,
+                "situacao_processamento": NotaFiscalEntradaEvento.SituacaoProcessamento.PROCESSADO if evento.cstat == "135" else NotaFiscalEntradaEvento.SituacaoProcessamento.REGISTRADO,
+            },
+        )
+        if created and evento.tipo_evento == "110111" and evento.cstat == "135":
+            nota.situacao_fiscal = NotaFiscalEntrada.SituacaoFiscal.CANCELADA
+            nota.save(update_fields=["situacao_fiscal", "atualizado_em"])
+        if created:
+            AuditService.success(
+                AuditAction.OBJECT_CREATED,
+                category=AuditCategory.FISCAL,
+                request=request,
+                user=getattr(request, "user", None),
+                instance=obj,
+                after={"nota": nota.pk, "chave_acesso": evento.chave_acesso, "tipo_evento": evento.tipo_evento, "sequencia": evento.sequencia, "cstat": evento.cstat},
+                metadata={"legacy_action": "importar_evento_xml_nfe"},
+            )
+        return Response(NotaFiscalEntradaEventoSerializer(obj).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     def _identificar_fornecedor(self, empresa_id, documento):
         documento = only_digits(documento)
@@ -580,6 +669,10 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         }
 
     def _validar_pronto_xml(self, nota):
+        if nota.situacao_fiscal != NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA:
+            raise ValueError("A NF-e XML precisa estar fiscalmente autorizada para efetivação operacional.")
+        if nota.finalidade_nfe and nota.finalidade_nfe != "1":
+            raise ValueError("NF-e com finalidade fiscal especial requer fluxo específico antes da efetivação operacional.")
         itens = list(
             nota.itens_xml.select_for_update()
             .select_related("produto", "produto_fornecedor", "pedido_item")

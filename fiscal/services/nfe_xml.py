@@ -25,6 +25,7 @@ class NFeXmlItem:
     valor_produto: Decimal
     valor_desconto: Decimal
     informacoes_adicionais: str
+    impostos_fiscais: dict
 
 
 @dataclass
@@ -34,6 +35,8 @@ class NFeXmlData:
     serie: str
     numero: str
     dt_emissao: date
+    dh_emissao: datetime | None
+    dh_saida_entrada: datetime | None
     natureza_operacao: str
     emitente_documento: str
     emitente_nome: str
@@ -45,7 +48,49 @@ class NFeXmlData:
     valor_frete: Decimal
     valor_total: Decimal
     protocolo_autorizacao: str
+    situacao_fiscal: str
+    versao_leiaute: str
+    nfe_id_xml: str
+    codigo_uf: str
+    codigo_numerico: str
+    tipo_operacao: str
+    identificador_destino: str
+    municipio_fato_gerador: str
+    tipo_impressao: str
+    tipo_emissao: str
+    digito_verificador: str
+    ambiente: str
+    finalidade_nfe: str
+    consumidor_final: str
+    presenca_comprador: str
+    intermediador: str
+    processo_emissao: str
+    versao_processo: str
+    protocolo_chave_acesso: str
+    protocolo_recebido_em: datetime | None
+    protocolo_cstat: str
+    protocolo_motivo: str
+    totais_fiscais: dict
+    cobranca_fiscal: dict
+    pagamentos_fiscais: list
+    documentos_referenciados: list
+    informacoes_complementares_fisco: str
+    informacoes_complementares_contribuinte: str
     itens: list[NFeXmlItem]
+
+
+@dataclass
+class NFeEventoXmlData:
+    chave_acesso: str
+    id_evento: str
+    tipo_evento: str
+    sequencia: int
+    tipo_evento_descricao: str
+    data_hora_evento: datetime | None
+    protocolo: str
+    cstat: str
+    xmotivo: str
+    ambiente: str
 
 
 def only_digits(value):
@@ -64,6 +109,11 @@ def parse_nfe_xml(original_bytes):
         root = ET.fromstring(original_bytes)
     except ET.ParseError as exc:
         raise ValidationError({"arquivo": "XML malformado ou inválido."}) from exc
+
+    if _local_name(root.tag) not in {"nfeProc", "NFe"}:
+        raise ValidationError({"arquivo": "Estrutura XML não aceita para importação de NF-e original."})
+    if _find_first(root, "infEvento") is not None or _find_first(root, "retEvento") is not None:
+        raise ValidationError({"arquivo": "XML de evento não é aceito como NF-e original."})
 
     inf = _find_first(root, "infNFe")
     if inf is None:
@@ -88,6 +138,13 @@ def parse_nfe_xml(original_bytes):
     modelo = _text(_child(ide, "mod"))
     if modelo != "55":
         raise ValidationError({"modelo": "Somente NF-e modelo 55 é suportada nesta etapa."})
+    if len(chave) >= 22 and chave[20:22] != "55":
+        raise ValidationError({"modelo": "Modelo da chave de acesso incompatível com NF-e modelo 55."})
+
+    prot = _find_first(root, "infProt")
+    prot_cstat = _text(_child(prot, "cStat"))
+    if _local_name(root.tag) == "nfeProc" and prot_cstat and prot_cstat != "100":
+        raise ValidationError({"situacao_fiscal": "NF-e sem autorização de uso não pode ser importada para entrada operacional."})
 
     itens = []
     for det in _children(inf, "det"):
@@ -108,6 +165,7 @@ def parse_nfe_xml(original_bytes):
                 valor_produto=_decimal(_text(_child(prod, "vProd"))),
                 valor_desconto=_decimal(_text(_child(prod, "vDesc"))),
                 informacoes_adicionais=_text(_child(det, "infAdProd")),
+                impostos_fiscais=_xml_to_dict(_child(det, "imposto")),
             )
         )
     if not itens:
@@ -119,6 +177,8 @@ def parse_nfe_xml(original_bytes):
         serie=_text(_child(ide, "serie")),
         numero=_text(_child(ide, "nNF")),
         dt_emissao=_date(_text(_child(ide, "dhEmi")) or _text(_child(ide, "dEmi"))),
+        dh_emissao=_datetime_or_none(_text(_child(ide, "dhEmi"))),
+        dh_saida_entrada=_datetime_or_none(_text(_child(ide, "dhSaiEnt")) or _text(_child(ide, "dSaiEnt"))),
         natureza_operacao=_text(_child(ide, "natOp")),
         emitente_documento=only_digits(_text(_child(emit, "CNPJ")) or _text(_child(emit, "CPF"))),
         emitente_nome=_text(_child(emit, "xNome")),
@@ -129,8 +189,76 @@ def parse_nfe_xml(original_bytes):
         valor_desconto=_decimal(_text(_child(total, "vDesc"))),
         valor_frete=_decimal(_text(_child(total, "vFrete"))),
         valor_total=_decimal(_text(_child(total, "vNF"))),
-        protocolo_autorizacao=_text(_find_first(root, "nProt")),
+        protocolo_autorizacao=_text(_child(prot, "nProt")),
+        situacao_fiscal="AUTORIZADA" if prot_cstat == "100" else "DESCONHECIDA",
+        versao_leiaute=str(inf.attrib.get("versao") or root.attrib.get("versao") or ""),
+        nfe_id_xml=str(inf.attrib.get("Id") or ""),
+        codigo_uf=_text(_child(ide, "cUF")),
+        codigo_numerico=_text(_child(ide, "cNF")),
+        tipo_operacao=_text(_child(ide, "tpNF")),
+        identificador_destino=_text(_child(ide, "idDest")),
+        municipio_fato_gerador=_text(_child(ide, "cMunFG")),
+        tipo_impressao=_text(_child(ide, "tpImp")),
+        tipo_emissao=_text(_child(ide, "tpEmis")),
+        digito_verificador=_text(_child(ide, "cDV")),
+        ambiente=_text(_child(ide, "tpAmb")) or _text(_child(prot, "tpAmb")),
+        finalidade_nfe=_text(_child(ide, "finNFe")),
+        consumidor_final=_text(_child(ide, "indFinal")),
+        presenca_comprador=_text(_child(ide, "indPres")),
+        intermediador=_text(_child(ide, "indIntermed")),
+        processo_emissao=_text(_child(ide, "procEmi")),
+        versao_processo=_text(_child(ide, "verProc")),
+        protocolo_chave_acesso=prot_chave,
+        protocolo_recebido_em=_datetime_or_none(_text(_child(prot, "dhRecbto"))),
+        protocolo_cstat=prot_cstat,
+        protocolo_motivo=_text(_child(prot, "xMotivo")),
+        totais_fiscais=_xml_to_dict(total),
+        cobranca_fiscal=_xml_to_dict(_child(inf, "cobr")),
+        pagamentos_fiscais=[_xml_to_dict(node) for node in _children(_child(inf, "pag"), "detPag")],
+        documentos_referenciados=[_xml_to_dict(node) for node in _children(ide, "NFref")],
+        informacoes_complementares_fisco=_text(_child(_child(inf, "infAdic"), "infAdFisco")),
+        informacoes_complementares_contribuinte=_text(_child(_child(inf, "infAdic"), "infCpl")),
         itens=itens,
+    )
+
+
+def parse_nfe_evento_xml(original_bytes):
+    if not original_bytes:
+        raise ValidationError({"arquivo": "Arquivo XML vazio."})
+    if len(original_bytes) > MAX_XML_BYTES:
+        raise ValidationError({"arquivo": "Arquivo XML excede o tamanho máximo permitido para evento NF-e."})
+    head = original_bytes[:512].lower()
+    if b"<!doctype" in head or b"<!entity" in original_bytes[:4096].lower():
+        raise ValidationError({"arquivo": "XML com DTD ou entidades não é aceito."})
+    try:
+        root = ET.fromstring(original_bytes)
+    except ET.ParseError as exc:
+        raise ValidationError({"arquivo": "XML malformado ou inválido."}) from exc
+    if _find_first(root, "infNFe") is not None:
+        raise ValidationError({"arquivo": "XML de NF-e original não é aceito como evento."})
+    inf_evento = _find_first(root, "infEvento")
+    if inf_evento is None:
+        raise ValidationError({"arquivo": "XML não possui estrutura de evento NF-e suportada."})
+    ret = _find_first(root, "infEvento")
+    ret_evento = _find_first(root, "retEvento")
+    if ret_evento is not None:
+        ret = _find_first(ret_evento, "infEvento") or ret
+    chave = only_digits(_text(_child(inf_evento, "chNFe")) or _text(_child(ret, "chNFe")))
+    if len(chave) != 44:
+        raise ValidationError({"chave_acesso": "Chave de acesso do evento inválida ou ausente."})
+    tipo = _text(_child(inf_evento, "tpEvento")) or _text(_child(ret, "tpEvento"))
+    seq = int(_text(_child(inf_evento, "nSeqEvento")) or _text(_child(ret, "nSeqEvento")) or 1)
+    return NFeEventoXmlData(
+        chave_acesso=chave,
+        id_evento=str(inf_evento.attrib.get("Id") or ""),
+        tipo_evento=tipo,
+        sequencia=seq,
+        tipo_evento_descricao=_text(_find_first(inf_evento, "descEvento")) or _text(_child(ret, "xEvento")),
+        data_hora_evento=_datetime_or_none(_text(_child(inf_evento, "dhEvento")) or _text(_child(ret, "dhRegEvento"))),
+        protocolo=_text(_child(ret, "nProt")),
+        cstat=_text(_child(ret, "cStat")),
+        xmotivo=_text(_child(ret, "xMotivo")),
+        ambiente=_text(_child(inf_evento, "tpAmb")) or _text(_child(ret, "tpAmb")),
     )
 
 
@@ -183,6 +311,34 @@ def _date(value):
     return date.fromisoformat(value[:10])
 
 
+def _datetime_or_none(value):
+    value = str(value or "").strip()
+    if not value:
+        return None
+    if "T" in value:
+        return datetime.fromisoformat(re.sub(r"Z$", "+00:00", value))
+    return datetime.fromisoformat(value[:10])
+
+
 def _gtin(value):
     value = str(value or "").strip()
     return "" if value.upper() in {"SEM GTIN", "SEMGTIN"} else only_digits(value)
+
+
+def _xml_to_dict(node):
+    if node is None:
+        return {}
+    children = list(node)
+    if not children:
+        return _text(node)
+    data = {}
+    for child in children:
+        key = _local_name(child.tag)
+        value = _xml_to_dict(child)
+        if key in data:
+            if not isinstance(data[key], list):
+                data[key] = [data[key]]
+            data[key].append(value)
+        else:
+            data[key] = value
+    return data

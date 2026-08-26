@@ -5,6 +5,7 @@ from .models import (
     NFCe,
     NFeDevolucao,
     NotaFiscalEntrada,
+    NotaFiscalEntradaEvento,
     NotaFiscalEntradaItem,
     VendaDevolucao,
     VendaDevolucaoItem,
@@ -44,8 +45,8 @@ class NotaFiscalEntradaItemInline(admin.TabularInline):
 
 @admin.register(NotaFiscalEntrada)
 class NotaFiscalEntradaAdmin(admin.ModelAdmin):
-    list_display = ("id", "pedido_compra", "modelo", "serie", "numero", "status", "dt_emissao", "valor_total")
-    list_filter = ("status", "modelo", "dt_emissao", "dt_entrada")
+    list_display = ("id", "pedido_compra", "modelo", "serie", "numero", "status", "situacao_fiscal", "ambiente", "dt_emissao", "valor_total")
+    list_filter = ("status", "situacao_fiscal", "ambiente", "modelo", "dt_emissao", "dt_entrada")
     search_fields = ("numero", "serie", "chave_acesso", "pedido_compra__id")
     inlines = [NotaFiscalEntradaItemInline]
 
@@ -54,6 +55,13 @@ class NotaFiscalEntradaAdmin(admin.ModelAdmin):
 class NotaFiscalEntradaItemAdmin(admin.ModelAdmin):
     list_display = ("id", "nota", "pedido_item", "qtd_recebida", "preco_unit_nf", "total_item")
     search_fields = ("nota__numero", "pedido_item__id")
+
+
+@admin.register(NotaFiscalEntradaEvento)
+class NotaFiscalEntradaEventoAdmin(admin.ModelAdmin):
+    list_display = ("id", "nota", "tipo_evento", "sequencia", "protocolo", "cstat", "ambiente", "criado_em")
+    list_filter = ("tipo_evento", "cstat", "ambiente", "origem", "situacao_processamento")
+    search_fields = ("chave_acesso", "protocolo", "id_evento", "nota__numero")
 
 
 class VendaPdvItemInline(admin.TabularInline):

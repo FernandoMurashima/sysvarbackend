@@ -15,6 +15,12 @@ class NotaFiscalEntrada(models.Model):
         FECHADA = "FE", "Fechada"
         CANCELADA = "CA", "Cancelada"
 
+    class SituacaoFiscal(models.TextChoices):
+        DESCONHECIDA = "DESCONHECIDA", "Desconhecida"
+        AUTORIZADA = "AUTORIZADA", "Autorizada"
+        CANCELADA = "CANCELADA", "Cancelada"
+        DENEGADA = "DENEGADA", "Denegada"
+
     empresa = models.ForeignKey(
         "cadastros.Empresa",
         on_delete=models.PROTECT,
@@ -74,6 +80,36 @@ class NotaFiscalEntrada(models.Model):
     destinatario_documento = models.CharField(max_length=14, blank=True, default="")
     destinatario_nome = models.CharField(max_length=120, blank=True, default="")
     protocolo_autorizacao = models.CharField(max_length=30, blank=True, default="")
+    situacao_fiscal = models.CharField(max_length=20, choices=SituacaoFiscal.choices, default=SituacaoFiscal.DESCONHECIDA, db_index=True)
+    versao_leiaute = models.CharField(max_length=10, blank=True, default="")
+    nfe_id_xml = models.CharField(max_length=47, blank=True, default="")
+    codigo_uf = models.CharField(max_length=2, blank=True, default="")
+    codigo_numerico = models.CharField(max_length=8, blank=True, default="")
+    dh_emissao = models.DateTimeField(null=True, blank=True)
+    dh_saida_entrada = models.DateTimeField(null=True, blank=True)
+    tipo_operacao = models.CharField(max_length=1, blank=True, default="")
+    identificador_destino = models.CharField(max_length=1, blank=True, default="")
+    municipio_fato_gerador = models.CharField(max_length=7, blank=True, default="")
+    tipo_impressao = models.CharField(max_length=1, blank=True, default="")
+    tipo_emissao = models.CharField(max_length=1, blank=True, default="")
+    digito_verificador = models.CharField(max_length=1, blank=True, default="")
+    ambiente = models.CharField(max_length=1, blank=True, default="", db_index=True)
+    finalidade_nfe = models.CharField(max_length=1, blank=True, default="", db_index=True)
+    consumidor_final = models.CharField(max_length=1, blank=True, default="")
+    presenca_comprador = models.CharField(max_length=1, blank=True, default="")
+    intermediador = models.CharField(max_length=1, blank=True, default="")
+    processo_emissao = models.CharField(max_length=1, blank=True, default="")
+    versao_processo = models.CharField(max_length=20, blank=True, default="")
+    protocolo_chave_acesso = models.CharField(max_length=44, blank=True, default="")
+    protocolo_recebido_em = models.DateTimeField(null=True, blank=True)
+    protocolo_cstat = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    protocolo_motivo = models.CharField(max_length=255, blank=True, default="")
+    totais_fiscais = models.JSONField(default=dict, blank=True)
+    cobranca_fiscal = models.JSONField(default=dict, blank=True)
+    pagamentos_fiscais = models.JSONField(default=list, blank=True)
+    documentos_referenciados = models.JSONField(default=list, blank=True)
+    informacoes_complementares_fisco = models.TextField(blank=True, default="")
+    informacoes_complementares_contribuinte = models.TextField(blank=True, default="")
 
     # auditoria básica
     criado_por = models.ForeignKey(
@@ -101,6 +137,8 @@ class NotaFiscalEntrada(models.Model):
             Index(fields=["empresa", "status"], name="ix_fiscal_nfe_empresa_status"),
             Index(fields=["pedido_compra", "status"], name="ix_fiscal_nfe_pedido_status"),
             Index(fields=["modelo", "serie", "numero"], name="ix_fiscal_nfe_num"),
+            Index(fields=["empresa", "situacao_fiscal"], name="ix_fiscal_nfe_emp_sitfis"),
+            Index(fields=["empresa", "ambiente"], name="ix_fiscal_nfe_emp_amb"),
         ]
         constraints = [
             UniqueConstraint(
@@ -234,6 +272,7 @@ class NotaFiscalEntradaItemXml(models.Model):
     valor_produto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     valor_desconto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     informacoes_adicionais = models.TextField(blank=True, default="")
+    impostos_fiscais = models.JSONField(default=dict, blank=True)
     produto = models.ForeignKey(
         "produto.Produto",
         on_delete=models.PROTECT,
@@ -367,3 +406,45 @@ class NotaFiscalEntradaDivergenciaXml(models.Model):
 
     def __str__(self) -> str:
         return f"Divergência XML NF {self.nota_id} item {self.item_xml_id}"
+
+
+class NotaFiscalEntradaEvento(models.Model):
+    class Origem(models.TextChoices):
+        IMPORTACAO_MANUAL = "IMPORTACAO_MANUAL", "Importação manual"
+        CONSULTA_SEFAZ = "CONSULTA_SEFAZ", "Consulta SEFAZ"
+        TRANSMISSAO_FUTURA = "TRANSMISSAO_FUTURA", "Transmissão futura"
+
+    class SituacaoProcessamento(models.TextChoices):
+        REGISTRADO = "REGISTRADO", "Registrado"
+        PROCESSADO = "PROCESSADO", "Processado"
+        REJEITADO = "REJEITADO", "Rejeitado"
+
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="eventos_nfe_entrada", db_index=True)
+    nota = models.ForeignKey("fiscal.NotaFiscalEntrada", on_delete=models.CASCADE, related_name="eventos_fiscais", db_index=True)
+    chave_acesso = models.CharField(max_length=44, db_index=True)
+    id_evento = models.CharField(max_length=80, blank=True, default="")
+    tipo_evento = models.CharField(max_length=10, db_index=True)
+    tipo_evento_descricao = models.CharField(max_length=120, blank=True, default="")
+    sequencia = models.PositiveIntegerField(default=1)
+    data_hora_evento = models.DateTimeField(null=True, blank=True)
+    protocolo = models.CharField(max_length=30, blank=True, default="")
+    cstat = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    xmotivo = models.CharField(max_length=255, blank=True, default="")
+    ambiente = models.CharField(max_length=1, blank=True, default="", db_index=True)
+    origem = models.CharField(max_length=30, choices=Origem.choices, default=Origem.IMPORTACAO_MANUAL)
+    situacao_processamento = models.CharField(max_length=20, choices=SituacaoProcessamento.choices, default=SituacaoProcessamento.REGISTRADO)
+    xml_original = models.TextField(blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_nota_fiscal_entrada_evento"
+        constraints = [
+            UniqueConstraint(fields=["empresa", "chave_acesso", "tipo_evento", "sequencia", "protocolo"], name="uq_fiscal_nfe_evento_idem"),
+        ]
+        indexes = [
+            Index(fields=["nota", "tipo_evento", "sequencia"], name="ix_fiscal_nfe_evt_tipo_seq"),
+            Index(fields=["empresa", "ambiente", "tipo_evento"], name="ix_fiscal_nfe_evt_emp_amb"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Evento NF-e {self.chave_acesso} {self.tipo_evento}/{self.sequencia}"

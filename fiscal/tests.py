@@ -10,7 +10,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from financeiro.models import MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -88,15 +88,18 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
     <infNFe Id="NFe{chave}" versao="4.00">
-      <ide><cUF>35</cUF><natOp>Compra</natOp><mod>{modelo}</mod><serie>1</serie><nNF>{numero}</nNF><dhEmi>2026-08-26T10:00:00-03:00</dhEmi></ide>
+      <ide><cUF>35</cUF><cNF>45678901</cNF><natOp>Compra</natOp><mod>{modelo}</mod><serie>1</serie><nNF>{numero}</nNF><dhEmi>2026-08-26T10:00:00-03:00</dhEmi><dhSaiEnt>2026-08-27T08:00:00-03:00</dhSaiEnt><tpNF>0</tpNF><idDest>1</idDest><cMunFG>3550308</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>3</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>SYSVAR-TESTE</verProc></ide>
       <emit><CNPJ>{emit_doc}</CNPJ><xNome>Fornecedor XML</xNome><IE>110042490114</IE></emit>
       <dest><CNPJ>{dest_doc}</CNPJ><xNome>Empresa XML</xNome></dest>
-      <det nItem="1"><prod><cProd>BAX002</cProd><cEAN>7891234567895</cEAN><xProd>PAPEL SULFITE A4 75G</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>3.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>30.00</vProd><vDesc>1.00</vDesc></prod><infAdProd>Lote A</infAdProd></det>
+      <det nItem="1"><prod><cProd>BAX002</cProd><cEAN>7891234567895</cEAN><xProd>PAPEL SULFITE A4 75G</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>3.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>30.00</vProd><vDesc>1.00</vDesc></prod><imposto><ICMS><ICMS00><CST>00</CST><vBC>30.00</vBC><vICMS>5.40</vICMS></ICMS00></ICMS><PIS><PISAliq><CST>01</CST><vPIS>0.50</vPIS></PISAliq></PIS></imposto><infAdProd>Lote A</infAdProd></det>
       <det nItem="2"><prod><cProd>CAN001</cProd><cEAN>SEM GTIN</cEAN><xProd>CANETA AZUL</xProd><NCM>96081000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>5.0000000000</vUnCom><vProd>10.00</vProd></prod></det>
-      <total><ICMSTot><vProd>40.00</vProd><vFrete>5.00</vFrete><vDesc>1.00</vDesc><vNF>44.00</vNF></ICMSTot></total>
+      <total><ICMSTot><vBC>40.00</vBC><vICMS>7.20</vICMS><vProd>40.00</vProd><vFrete>5.00</vFrete><vDesc>1.00</vDesc><vPIS>0.66</vPIS><vCOFINS>3.04</vCOFINS><vNF>44.00</vNF></ICMSTot></total>
+      <cobr><fat><nFat>123</nFat><vOrig>44.00</vOrig><vLiq>44.00</vLiq></fat><dup><nDup>001</nDup><dVenc>2026-09-10</dVenc><vDup>44.00</vDup></dup></cobr>
+      <pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>44.00</vPag></detPag></pag>
+      <infAdic><infAdFisco>Fisco teste</infAdFisco><infCpl>Complementar teste</infCpl></infAdic>
     </infNFe>
   </NFe>
-  <protNFe><infProt><chNFe>{chave}</chNFe><nProt>135260000000001</nProt></infProt></protNFe>
+  <protNFe><infProt><tpAmb>2</tpAmb><chNFe>{chave}</chNFe><dhRecbto>2026-08-26T10:00:05-03:00</dhRecbto><nProt>135260000000001</nProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe>
 </nfeProc>'''
 
     def upload(self, xml_text=None, status_code=201, extra=None):
@@ -118,6 +121,17 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(nota.chave_acesso, "35260822345678000195550010000001234567890123")
         self.assertEqual((nota.modelo, nota.serie, nota.numero), ("55", "1", "123"))
         self.assertEqual(nota.dt_emissao.isoformat(), "2026-08-26")
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA)
+        self.assertEqual(nota.ambiente, "2")
+        self.assertEqual(nota.finalidade_nfe, "1")
+        self.assertEqual(nota.protocolo_cstat, "100")
+        self.assertEqual(nota.protocolo_motivo, "Autorizado o uso da NF-e")
+        self.assertEqual(nota.protocolo_chave_acesso, nota.chave_acesso)
+        self.assertEqual(nota.dh_emissao.isoformat(), "2026-08-26T13:00:00+00:00")
+        self.assertEqual(nota.totais_fiscais["vICMS"], "7.20")
+        self.assertEqual(nota.cobranca_fiscal["dup"]["vDup"], "44.00")
+        self.assertEqual(nota.pagamentos_fiscais[0]["tPag"], "15")
+        self.assertEqual(nota.informacoes_complementares_fisco, "Fisco teste")
         self.assertEqual(nota.fornecedor_id, self.fornecedor.id)
         self.assertEqual(nota.loja_id, self.loja.id)
         self.assertEqual(nota.valor_produtos, Decimal("40.00"))
@@ -136,12 +150,60 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(itens[0].valor_unitario_comercial, Decimal("10.0000000000"))
         self.assertEqual(itens[0].valor_produto, Decimal("30.00"))
         self.assertEqual(itens[0].valor_desconto, Decimal("1.00"))
+        self.assertEqual(itens[0].impostos_fiscais["ICMS"]["ICMS00"]["CST"], "00")
         self.assertFalse(nota.itens.exists())
         self.assertFalse(EstoqueMovimentacao.objects.exists())
         self.assertFalse(Pagar.objects.exists())
         self.pedido.refresh_from_db()
         self.assertEqual(self.pedido.status, "AP")
         self.assertFalse(ProdutoFornecedor.objects.exists())
+
+    def test_rejeita_evento_xml_protocolo_divergente_e_protocolo_nao_autorizado(self):
+        evento = '''<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+  <evento><infEvento Id="ID1101103526082234567800019555001000000123456789012301"><tpAmb>2</tpAmb><chNFe>35260822345678000195550010000001234567890123</chNFe><tpEvento>110110</tpEvento><nSeqEvento>1</nSeqEvento><dhEvento>2026-08-26T11:00:00-03:00</dhEvento><detEvento><descEvento>Carta de Correcao</descEvento></detEvento></infEvento></evento>
+</procEventoNFe>'''
+        self.upload(evento, status_code=400)
+        self.upload(self.xml().replace("<chNFe>35260822345678000195550010000001234567890123</chNFe>", "<chNFe>35260822345678000195550010000001234567890124</chNFe>"), status_code=400)
+        self.upload(self.xml().replace("<cStat>100</cStat>", "<cStat>110</cStat>").replace("Autorizado o uso da NF-e", "Uso denegado"), status_code=400)
+
+    def test_finalidade_especial_importa_mas_nao_efetiva_como_nf_normal(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890201")
+        nota = item.nota
+        NotaFiscalEntrada.objects.filter(pk=nota.pk).update(finalidade_nfe="2")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("finalidade fiscal especial", resp.data["detail"])
+
+    def test_cancelamento_operacional_nao_altera_situacao_fiscal(self):
+        nota, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890202")
+        self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/cancelar/", {"motivo": "Cancelamento operacional", "confirmar_avisos": True}, format="json")
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.CANCELADA)
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA)
+
+    def test_evento_fiscal_preserva_xml_e_cancelamento_fiscal_muda_situacao_fiscal(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890203")
+        nota = item.nota
+        evento_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+  <evento><infEvento Id="ID110111{nota.chave_acesso}01"><tpAmb>2</tpAmb><chNFe>{nota.chave_acesso}</chNFe><tpEvento>110111</tpEvento><nSeqEvento>1</nSeqEvento><dhEvento>2026-08-26T11:00:00-03:00</dhEvento><detEvento><descEvento>Cancelamento</descEvento></detEvento></infEvento></evento>
+  <retEvento><infEvento><tpAmb>2</tpAmb><chNFe>{nota.chave_acesso}</chNFe><tpEvento>110111</tpEvento><nSeqEvento>1</nSeqEvento><dhRegEvento>2026-08-26T11:00:03-03:00</dhRegEvento><nProt>135260000000002</nProt><cStat>135</cStat><xMotivo>Evento registrado e vinculado a NF-e</xMotivo></infEvento></retEvento>
+</procEventoNFe>'''
+        payload = {"arquivo": SimpleUploadedFile("evento.xml", evento_xml.encode("utf-8"), content_type="application/xml")}
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/importar-evento-xml/", payload, format="multipart")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        payload2 = {"arquivo": SimpleUploadedFile("evento.xml", evento_xml.encode("utf-8"), content_type="application/xml")}
+        resp2 = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/importar-evento-xml/", payload2, format="multipart")
+        self.assertEqual(resp2.status_code, 200, resp2.data)
+        self.assertEqual(NotaFiscalEntradaEvento.objects.filter(nota=nota).count(), 1)
+        evento = NotaFiscalEntradaEvento.objects.get(nota=nota)
+        self.assertEqual(evento.xml_original, evento_xml)
+        self.assertEqual(evento.tipo_evento, "110111")
+        self.assertEqual(evento.sequencia, 1)
+        nota.refresh_from_db()
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.CANCELADA)
 
     def test_importa_com_pedido_compativel_e_rejeita_incompativel(self):
         resp = self.upload(extra={"pedido_compra": self.pedido.id})

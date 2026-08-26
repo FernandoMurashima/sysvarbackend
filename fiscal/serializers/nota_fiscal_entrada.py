@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -105,6 +105,7 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
         }
         read_only_fields = (
             "status",
+            "situacao_fiscal",
             "valor_produtos",
             "valor_desconto",
             "valor_total",
@@ -237,6 +238,7 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
             "fator_conversao_efetivado",
             "quantidade_interna_efetivada",
             "efetivado_em",
+            "impostos_fiscais",
         )
 
     def get_conversao(self, obj):
@@ -277,4 +279,28 @@ class NotaFiscalEntradaDivergenciaXmlSerializer(serializers.ModelSerializer):
             "criado_em",
             "atualizado_em",
             "resolvido_em",
+        )
+
+
+class NotaFiscalEntradaEventoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotaFiscalEntradaEvento
+        fields = "__all__"
+        read_only_fields = (
+            "empresa",
+            "nota",
+            "chave_acesso",
+            "id_evento",
+            "tipo_evento",
+            "tipo_evento_descricao",
+            "sequencia",
+            "data_hora_evento",
+            "protocolo",
+            "cstat",
+            "xmotivo",
+            "ambiente",
+            "origem",
+            "situacao_processamento",
+            "xml_original",
+            "criado_em",
         )
