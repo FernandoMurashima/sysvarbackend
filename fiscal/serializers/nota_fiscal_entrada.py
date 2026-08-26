@@ -4,6 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
 
 
@@ -89,6 +90,7 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     itens_xml = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     destino_recebimento = serializers.CharField(source="loja.nome_loja", read_only=True)
     loja_estoque_id = serializers.IntegerField(source="loja_id", read_only=True)
+    resumo_conciliacao = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaFiscalEntrada
@@ -108,6 +110,9 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
             "criado_em",
             "atualizado_em",
         )
+
+    def get_resumo_conciliacao(self, obj):
+        return obj.resumo_conciliacao_xml() if obj.xml_importado else None
 
     def validate(self, attrs):
         pedido = attrs.get("pedido_compra") or getattr(self.instance, "pedido_compra", None)
@@ -198,7 +203,23 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
 
 
 class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
+    conciliado = serializers.BooleanField(read_only=True)
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    produto_fornecedor_codigo = serializers.CharField(source="produto_fornecedor.codigo_produto_fornecedor", read_only=True)
+    conversao = serializers.SerializerMethodField()
+
     class Meta:
         model = NotaFiscalEntradaItemXml
         fields = "__all__"
-        read_only_fields = ("criado_em",)
+        read_only_fields = (
+            "criado_em",
+            "produto",
+            "produto_fornecedor",
+            "origem_conciliacao",
+            "conciliado_em",
+            "conciliado_por",
+        )
+
+    def get_conversao(self, obj):
+        return conversao_info(obj)

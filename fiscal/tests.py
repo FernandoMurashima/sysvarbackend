@@ -61,14 +61,27 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         )
         self.pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=self.loja, fornecedor=self.fornecedor, status="AP")
         self.pedido_incompativel = PedidoCompra.objects.create(empresa=self.empresa, tipo="2", loja=self.loja, fornecedor=self.fornecedor_incompativel, status="AP")
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Pacote", Codigo="PCT")
+        self.unidade_b = Unidade.objects.create(empresa=self.empresa_b, Descricao="Pacote B", Codigo="PCT")
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Papel A4", unidade=self.unidade)
+        self.produto_alt = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Caneta Azul", unidade=self.unidade)
+        self.produto_b = Produto.objects.create(empresa=self.empresa_b, tipo_produto="2", descricao="Produto B", unidade=self.unidade_b)
+        self.pedido_item = PedidoCompraItem.objects.create(
+            pedido=self.pedido,
+            produto=self.produto_alt,
+            qtd=Decimal("2.000"),
+            preco_unit=Decimal("5.00"),
+            total_item=Decimal("10.00"),
+        )
 
-    def xml(self, chave=None, modelo="55", emit_doc="22345678000195", dest_doc="12345678000195"):
+    def xml(self, chave=None, modelo="55", emit_doc="22345678000195", dest_doc="12345678000195", numero=None):
         chave = chave or "35260822345678000195550010000001234567890123"
+        numero = numero or "123"
         return f'''<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
     <infNFe Id="NFe{chave}" versao="4.00">
-      <ide><cUF>35</cUF><natOp>Compra</natOp><mod>{modelo}</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-08-26T10:00:00-03:00</dhEmi></ide>
+      <ide><cUF>35</cUF><natOp>Compra</natOp><mod>{modelo}</mod><serie>1</serie><nNF>{numero}</nNF><dhEmi>2026-08-26T10:00:00-03:00</dhEmi></ide>
       <emit><CNPJ>{emit_doc}</CNPJ><xNome>Fornecedor XML</xNome><IE>110042490114</IE></emit>
       <dest><CNPJ>{dest_doc}</CNPJ><xNome>Empresa XML</xNome></dest>
       <det nItem="1"><prod><cProd>BAX002</cProd><cEAN>7891234567895</cEAN><xProd>PAPEL SULFITE A4 75G</xProd><NCM>48025610</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>3.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>30.00</vProd><vDesc>1.00</vDesc></prod><infAdProd>Lote A</infAdProd></det>
@@ -143,6 +156,149 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertFalse(NotaFiscalEntradaItemXml.objects.exists())
         resp = self.upload()
         self.assertTrue(AuditLog.objects.filter(app_label="fiscal", model="notafiscalentrada", object_id=str(resp.data["id"]), action="OBJECT_CREATED").exists())
+
+    def criar_vinculo(self, produto=None, fornecedor=None, codigo="BAX002", ativo=True, unidade="FD", fator="10", gtin=""):
+        return ProdutoFornecedor.objects.create(
+            empresa=(fornecedor or self.fornecedor).empresa,
+            fornecedor=fornecedor or self.fornecedor,
+            produto=produto or self.produto,
+            codigo_produto_fornecedor=codigo,
+            descricao_fornecedor="PAPEL SULFITE A4",
+            unidade_fornecedor=unidade,
+            fator_conversao=Decimal(fator),
+            gtin_ean=gtin,
+            ativo=ativo,
+        )
+
+    def item_xml(self, chave="35260822345678000195550010000001234567890125", extra=None, **kwargs):
+        kwargs.setdefault("numero", chave[-6:])
+        resp = self.upload(self.xml(chave=chave, **kwargs), extra=extra)
+        return NotaFiscalEntrada.objects.get(pk=resp.data["id"]).itens_xml.order_by("numero_item").first()
+
+    def test_conciliacao_automatica_por_produto_fornecedor_e_idempotente(self):
+        vinculo = self.criar_vinculo()
+        item = self.item_xml()
+        original = (item.codigo_produto_fornecedor, item.descricao_produto, item.unidade_comercial, item.quantidade_comercial)
+        item.refresh_from_db()
+        self.assertEqual(item.produto_id, self.produto.pk)
+        self.assertEqual(item.produto_fornecedor_id, vinculo.id)
+        self.assertEqual(item.origem_conciliacao, NotaFiscalEntradaItemXml.OrigemConciliacao.VINCULO)
+        self.assertEqual(
+            (item.codigo_produto_fornecedor, item.descricao_produto, item.unidade_comercial, item.quantidade_comercial),
+            original,
+        )
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/conciliar-automaticamente/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item.refresh_from_db()
+        self.assertEqual(item.produto_id, self.produto.pk)
+        self.assertEqual(item.produto_fornecedor_id, vinculo.id)
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(NotaFiscalEntradaItem.objects.exists())
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.status, "AP")
+
+    def test_conciliacao_automatica_respeita_empresa_fornecedor_ativo_e_unidade(self):
+        self.criar_vinculo(produto=self.produto_b, fornecedor=self.fornecedor_b)
+        item = self.item_xml(chave="35260822345678000195550010000001234567890126")
+        self.assertIsNone(item.produto_id)
+        self.assertIsNone(item.produto_fornecedor_id)
+
+        self.criar_vinculo(codigo="CAN001", produto=self.produto_alt, ativo=False, unidade="UN")
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        self.assertIsNone(item2.produto_id)
+
+        self.criar_vinculo(codigo="DIV001", produto=self.produto, unidade="CX")
+        item3 = self.item_xml(chave="35260822345678000195550010000001234567890127", emit_doc=self.fornecedor.documento)
+        item3.codigo_produto_fornecedor = "DIV001"
+        item3.save(update_fields=["codigo_produto_fornecedor"])
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item3.nota_id}/conciliar-automaticamente/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item3.refresh_from_db()
+        self.assertIsNone(item3.produto_id)
+
+    def test_gtin_unico_concilia_e_gtin_ambiguo_nao_concilia(self):
+        self.criar_vinculo(codigo="OUTRO", produto=self.produto, gtin="7891234567895", unidade="")
+        item = self.item_xml(chave="35260822345678000195550010000001234567890128")
+        self.assertEqual(item.produto_id, self.produto.pk)
+        self.assertEqual(item.origem_conciliacao, NotaFiscalEntradaItemXml.OrigemConciliacao.GTIN)
+
+        self.criar_vinculo(codigo="GTIN1", produto=self.produto, gtin="7891234567895", unidade="")
+        self.criar_vinculo(codigo="GTIN2", produto=self.produto_alt, gtin="7891234567895", unidade="")
+        item2 = self.item_xml(chave="35260822345678000195550010000001234567890129")
+        self.assertIsNone(item2.produto_id)
+
+    def test_pedido_inequivoco_concilia_e_pedido_ambiguo_nao_concilia(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890130", extra={"pedido_compra": self.pedido.id})
+        item2 = item.nota.itens_xml.get(numero_item=2)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/conciliar-automaticamente/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item2.refresh_from_db()
+        self.assertEqual(item2.produto_id, self.produto_alt.pk)
+        self.assertEqual(item2.origem_conciliacao, NotaFiscalEntradaItemXml.OrigemConciliacao.PEDIDO)
+
+        PedidoCompraItem.objects.create(pedido=self.pedido, produto=self.produto, qtd=Decimal("2.000"), preco_unit=Decimal("5.00"), total_item=Decimal("10.00"))
+        item_amb = self.item_xml(chave="35260822345678000195550010000001234567890131", extra={"pedido_compra": self.pedido.id})
+        item_amb2 = item_amb.nota.itens_xml.get(numero_item=2)
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item_amb.nota_id}/conciliar-automaticamente/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item_amb2.refresh_from_db()
+        self.assertIsNone(item_amb2.produto_id)
+
+    def test_descricao_apenas_sugere_sem_conciliar(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890132")
+        self.assertIsNone(item.produto_id)
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/item-xml-candidatos/", {"item": item.id, "q": "Papel"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIn(self.produto.pk, [row["id"] for row in resp.data])
+
+    def test_conciliacao_manual_cria_vinculo_audita_e_rejeita_conflitos(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890133")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/item-xml-conciliar/", {"item": item.id, "produto": self.produto.pk}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item.refresh_from_db()
+        vinculo = ProdutoFornecedor.objects.get(fornecedor=self.fornecedor, codigo_produto_fornecedor="BAX002")
+        self.assertEqual(vinculo.produto_id, self.produto.pk)
+        self.assertEqual(vinculo.descricao_fornecedor, item.descricao_produto)
+        self.assertEqual(vinculo.gtin_ean, item.gtin_ean)
+        self.assertEqual(vinculo.unidade_fornecedor, item.unidade_comercial)
+        self.assertEqual(vinculo.fator_conversao, Decimal("1.000000"))
+        self.assertEqual(item.origem_conciliacao, NotaFiscalEntradaItemXml.OrigemConciliacao.MANUAL)
+        self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="conciliacao_manual_xml").exists())
+        self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="produto_fornecedor_criado_conciliacao_nfe").exists())
+
+        item2 = self.item_xml(chave="35260822345678000195550010000001234567890134")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item2.nota_id}/item-xml-conciliar/", {"item": item2.id, "produto": self.produto_alt.pk}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        vinculo.refresh_from_db()
+        self.assertEqual(vinculo.produto_id, self.produto.pk)
+
+    def test_conciliacao_manual_rejeita_produto_de_outra_empresa_e_sem_codigo_nao_cria_vinculo(self):
+        item = self.item_xml(chave="35260822345678000195550010000001234567890135")
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/item-xml-conciliar/", {"item": item.id, "produto": self.produto_b.pk}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        item.codigo_produto_fornecedor = ""
+        item.save(update_fields=["codigo_produto_fornecedor"])
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/item-xml-conciliar/", {"item": item.id, "produto": self.produto.pk}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(ProdutoFornecedor.objects.filter(codigo_produto_fornecedor="").exists())
+
+    def test_resumo_quantidade_calculada_e_bloqueio_de_fechamento_pendente(self):
+        self.criar_vinculo()
+        item = self.item_xml(chave="35260822345678000195550010000001234567890136")
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/itens-xml/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linha = next(row for row in resp.data if row["numero_item"] == 1)
+        self.assertEqual(Decimal(linha["conversao"]["quantidade_interna_calculada"]), Decimal("30.000000"))
+        self.assertEqual(linha["conversao"]["fator_conversao"], "10.000000")
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{item.nota_id}/resumo-conciliacao/")
+        self.assertEqual(resp.data["total_itens"], 2)
+        self.assertEqual(resp.data["itens_conciliados"], 1)
+        self.assertEqual(resp.data["itens_pendentes"], 1)
+        self.assertFalse(resp.data["nota_conciliada"])
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{item.nota_id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Concilie todos os itens XML", resp.data["detail"])
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

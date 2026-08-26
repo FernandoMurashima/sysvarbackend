@@ -122,6 +122,16 @@ class NotaFiscalEntrada(models.Model):
             raise ValueError("Total da nota fiscal de entrada não pode ser negativo.")
         self.save(update_fields=["valor_produtos", "valor_desconto", "valor_total", "atualizado_em"])
 
+    def resumo_conciliacao_xml(self):
+        total = self.itens_xml.count()
+        conciliados = self.itens_xml.filter(produto__isnull=False).count()
+        return {
+            "total_itens": total,
+            "itens_conciliados": conciliados,
+            "itens_pendentes": total - conciliados,
+            "nota_conciliada": total > 0 and conciliados == total,
+        }
+
 
 class NotaFiscalEntradaItem(models.Model):
     nota = models.ForeignKey(
@@ -165,6 +175,12 @@ class NotaFiscalEntradaItem(models.Model):
 
 
 class NotaFiscalEntradaItemXml(models.Model):
+    class OrigemConciliacao(models.TextChoices):
+        VINCULO = "VINCULO", "Vínculo existente"
+        PEDIDO = "PEDIDO", "Pedido"
+        GTIN = "GTIN", "GTIN/EAN"
+        MANUAL = "MANUAL", "Manual"
+
     nota = models.ForeignKey(
         "fiscal.NotaFiscalEntrada",
         on_delete=models.CASCADE,
@@ -183,6 +199,31 @@ class NotaFiscalEntradaItemXml(models.Model):
     valor_produto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     valor_desconto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     informacoes_adicionais = models.TextField(blank=True, default="")
+    produto = models.ForeignKey(
+        "produto.Produto",
+        on_delete=models.PROTECT,
+        related_name="itens_xml_nfe",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    produto_fornecedor = models.ForeignKey(
+        "produto.ProdutoFornecedor",
+        on_delete=models.PROTECT,
+        related_name="itens_xml_nfe",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    origem_conciliacao = models.CharField(max_length=10, choices=OrigemConciliacao.choices, blank=True, default="")
+    conciliado_em = models.DateTimeField(null=True, blank=True)
+    conciliado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="itens_xml_nfe_conciliados",
+        null=True,
+        blank=True,
+    )
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -193,7 +234,12 @@ class NotaFiscalEntradaItemXml(models.Model):
         indexes = [
             Index(fields=["nota", "codigo_produto_fornecedor"], name="ix_fiscal_nfe_xml_cod"),
             Index(fields=["gtin_ean"], name="ix_fiscal_nfe_xml_gtin"),
+            Index(fields=["nota", "produto"], name="ix_fiscal_nfe_xml_prod"),
         ]
 
     def __str__(self) -> str:
         return f"Item XML NF {self.nota_id} #{self.numero_item}"
+
+    @property
+    def conciliado(self):
+        return self.produto_id is not None

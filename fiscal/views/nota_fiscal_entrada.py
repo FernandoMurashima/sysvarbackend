@@ -24,8 +24,9 @@ except Exception:
     MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_xml
-from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaSerializer
+from fiscal.serializers import NotaFiscalEntradaItemSerializer, NotaFiscalEntradaItemXmlSerializer, NotaFiscalEntradaSerializer
 
 
 def _q4(valor) -> Decimal:
@@ -81,7 +82,7 @@ class BaseViewSet(viewsets.ModelViewSet):
 class NotaFiscalEntradaViewSet(BaseViewSet):
     queryset = (
         NotaFiscalEntrada.objects.select_related("empresa", "loja", "fornecedor", "pedido_compra", "criado_por")
-        .prefetch_related("itens")
+        .prefetch_related("itens", "itens_xml")
         .all()
         .order_by("-dt_entrada", "-id")
     )
@@ -266,7 +267,64 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         )
         data = self.get_serializer(nota).data
         data["itens_xml_count"] = len(dados.itens)
+        conciliacao = conciliar_automaticamente(nota, user=request.user, request=request)
+        data["conciliacao_automatica"] = conciliacao
+        data["resumo_conciliacao"] = resumo_conciliacao(nota)
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="itens-xml")
+    def itens_xml(self, request, pk=None):
+        nota = self.get_object()
+        qs = nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").order_by("numero_item")
+        status_filtro = request.query_params.get("status")
+        if status_filtro in {"conciliados", "conciliado"}:
+            qs = qs.filter(produto__isnull=False)
+        elif status_filtro in {"pendentes", "pendente", "nao_conciliados"}:
+            qs = qs.filter(produto__isnull=True)
+        return Response(NotaFiscalEntradaItemXmlSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="pendencias-xml")
+    def pendencias_xml(self, request, pk=None):
+        nota = self.get_object()
+        qs = nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").filter(produto__isnull=True).order_by("numero_item")
+        return Response(NotaFiscalEntradaItemXmlSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="conciliar-automaticamente")
+    @transaction.atomic
+    def conciliar_xml_automaticamente(self, request, pk=None):
+        nota = self.get_object()
+        stats = conciliar_automaticamente(nota, user=request.user, request=request)
+        return Response({"resultado": stats, "resumo": resumo_conciliacao(nota)}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="resumo-conciliacao")
+    def resumo_conciliacao_xml(self, request, pk=None):
+        nota = self.get_object()
+        return Response(resumo_conciliacao(nota), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="item-xml-candidatos")
+    def candidatos_xml(self, request, pk=None):
+        nota = self.get_object()
+        item = nota.itens_xml.get(pk=request.query_params.get("item"))
+        produtos = candidatos_item(item, request.query_params.get("q") or request.query_params.get("produto"))
+        return Response(
+            [
+                {
+                    "id": produto.pk,
+                    "referencia": produto.referencia,
+                    "descricao": produto.descricao,
+                    "unidade_interna": getattr(produto.unidade, "Codigo", ""),
+                }
+                for produto in produtos
+            ],
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="item-xml-conciliar")
+    def conciliar_item_xml(self, request, pk=None):
+        nota = self.get_object()
+        item = nota.itens_xml.get(pk=request.data.get("item"))
+        item = conciliar_manual(item, request.data.get("produto"), user=request.user, request=request)
+        return Response(NotaFiscalEntradaItemXmlSerializer(item).data, status=status.HTTP_200_OK)
 
     def _identificar_fornecedor(self, empresa_id, documento):
         documento = only_digits(documento)
@@ -383,6 +441,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         nota = self.get_object()
         if nota.status != NotaFiscalEntrada.Status.ABERTA:
             return Response({"detail": "Somente notas abertas podem ser fechadas."}, status=status.HTTP_400_BAD_REQUEST)
+        if nota.xml_importado and nota.itens_xml.filter(produto__isnull=True).exists():
+            return Response({"detail": "Concilie todos os itens XML da NF-e antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
         if not nota.itens.exists():
             return Response({"detail": "Inclua ao menos um item antes de fechar a nota."}, status=status.HTTP_400_BAD_REQUEST)
 
