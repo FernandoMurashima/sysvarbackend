@@ -1939,15 +1939,66 @@ class PagarItemViewSet(BaseViewSet):
 
     @action(detail=True, methods=['post'], url_path='reabrir')
     def reabrir(self, request, pk=None):
-        obj = self.get_object()
         motivo = (request.data.get('motivo') or '').strip()
-        before = obj.status
-        if obj.status in (PagarItem.STATUS_CANCELADO, PagarItem.STATUS_EFETIVO) and obj.data_baixa is None:
-            obj.status = PagarItem.STATUS_PREVISTO
-            obj.Previsao = True
-            obj.save(update_fields=['status', 'Previsao'])
-            _audit('pagaritem', obj.pk, {'status': [before, obj.status], 'motivo': motivo}, request, action='reabrir')
+        with transaction.atomic():
+            obj = (
+                PagarItem.objects
+                .select_for_update()
+                .select_related('Idpagar', 'Idpagar__idloja', 'Idpagar__idfornecedor')
+                .get(pk=pk)
+            )
+            before = {
+                'status': obj.status,
+                'valor_baixa': obj.valor_baixa,
+                'data_baixa': obj.data_baixa,
+                'juros': obj.juros,
+                'multa': obj.multa,
+                'tarifa': obj.tarifa,
+                'desconto': obj.desconto,
+            }
+            movimentos = list(
+                MovimentacaoFinanceira.objects
+                .select_for_update()
+                .filter(pagar_item=obj)
+                .exclude(status=MovimentacaoFinanceira.STATUS_CANCELADA)
+            )
+            if obj.status == PagarItem.STATUS_BAIXADO or obj.data_baixa is not None or Decimal(obj.valor_baixa or 0) > 0:
+                for movimento in movimentos:
+                    self._estornar_movimento_baixa(movimento, motivo or 'Reabertura de parcela a pagar.')
+                obj.status = PagarItem.STATUS_EFETIVO
+                obj.Previsao = False
+                obj.data_baixa = None
+                obj.valor_baixa = None
+                obj.juros = Decimal('0.00')
+                obj.multa = Decimal('0.00')
+                obj.tarifa = Decimal('0.00')
+                obj.desconto = Decimal('0.00')
+                obj.save(update_fields=['status', 'Previsao', 'data_baixa', 'valor_baixa', 'juros', 'multa', 'tarifa', 'desconto'])
+                _audit('pagaritem', obj.pk, {
+                    'before': before,
+                    'after': {'status': obj.status, 'valor_baixa': obj.valor_baixa, 'data_baixa': obj.data_baixa},
+                    'movimentacoes_estornadas': [mov.pk for mov in movimentos],
+                    'motivo': motivo,
+                }, request, action='reabrir')
+            elif obj.status == PagarItem.STATUS_CANCELADO and obj.data_baixa is None:
+                obj.status = PagarItem.STATUS_PREVISTO
+                obj.Previsao = True
+                obj.save(update_fields=['status', 'Previsao'])
+                _audit('pagaritem', obj.pk, {'status': [before['status'], obj.status], 'motivo': motivo}, request, action='reabrir')
         return Response(self.get_serializer(obj).data)
+
+    def _estornar_movimento_baixa(self, movimento, motivo):
+        if movimento.status == MovimentacaoFinanceira.STATUS_CANCELADA:
+            return
+        if movimento.caixa_id:
+            caixa = Caixa.objects.select_for_update().get(pk=movimento.caixa_id)
+            sinal = Decimal('1.00') if movimento.tipo == MovimentacaoFinanceira.TIPO_SAIDA else Decimal('-1.00')
+            caixa.saldo_atual = Decimal(caixa.saldo_atual or 0) + (Decimal(movimento.valor or 0) * sinal)
+            caixa.save(update_fields=['saldo_atual'])
+        estornar_lancamento_contabil_movimentacao(movimento, motivo)
+        movimento.status = MovimentacaoFinanceira.STATUS_CANCELADA
+        movimento.historico = (f"{movimento.historico} | Estornado: {motivo}")[:255]
+        movimento.save(update_fields=['status', 'historico'])
 
 
 class PagarRateioViewSet(BaseViewSet):

@@ -1083,7 +1083,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         financeiro = self._resumo_financeiro_cancelamento(nota)
         if financeiro["baixado"]:
             bloqueios.append("O título financeiro vinculado à NF já possui baixa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
-        if financeiro["movimentacao_ativa"]:
+        if financeiro["movimentacao_ativa"] and not financeiro["baixado"]:
             bloqueios.append("O título financeiro vinculado à NF já possui movimentação financeira ativa. Reverta/levante a baixa no Financeiro antes de cancelar a NF.")
         avisos.extend(self._avisos_estoque_cancelamento(nota))
         return {
