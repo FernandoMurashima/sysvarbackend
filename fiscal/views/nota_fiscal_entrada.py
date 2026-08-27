@@ -333,6 +333,38 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         qs = nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").filter(produto__isnull=True).order_by("numero_item")
         return Response(NotaFiscalEntradaItemXmlSerializer(qs, many=True).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="recusar")
+    @transaction.atomic
+    def recusar_xml(self, request, pk=None):
+        nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        if nota.status != NotaFiscalEntrada.Status.ABERTA:
+            return Response({"detail": "Somente NF-e aberta e não efetivada pode ser recusada."}, status=status.HTTP_400_BAD_REQUEST)
+        if not nota.xml_importado:
+            return Response({"detail": "Recusa de entrada está disponível apenas para NF-e importada por XML."}, status=status.HTTP_400_BAD_REQUEST)
+        documento = self._documento_estoque(nota, "ENTRADA")
+        if (
+            EstoqueMovimentacao.objects.filter(documento=documento).exists()
+            or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento).exists()
+            or (FIN_OK and Pagar.objects.filter(nfe_id=nota.pk).exists())
+        ):
+            return Response({"detail": "Esta NF-e já possui efeitos operacionais e deve seguir o fluxo de cancelamento."}, status=status.HTTP_400_BAD_REQUEST)
+        nota_id = nota.pk
+        chave = nota.chave_acesso
+        itens = nota.itens_xml.count()
+        divergencias = nota.divergencias_xml.count()
+        _audit(
+            "notafiscalentrada",
+            nota_id,
+            {"status": [nota.status, "RECUSADA"], "chave_acesso": chave, "itens_xml": itens, "divergencias": divergencias},
+            request,
+            action="recusar_importacao_xml",
+        )
+        nota.delete()
+        return Response(
+            {"detail": "Entrada recusada. O XML poderá ser importado novamente.", "id": nota_id, "chave_acesso": chave},
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["post"], url_path="conciliar-automaticamente")
     @transaction.atomic
     def conciliar_xml_automaticamente(self, request, pk=None):

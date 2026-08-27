@@ -676,18 +676,47 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="fechar_xml").exists())
 
     def test_recusa_nf_xml_aberta_nao_movimenta_estoque_financeiro_ou_pedido(self):
+        vinculo = self.criar_vinculo(codigo="BAX002", unidade="FD", fator="10")
         nota, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890156", pedido=True, falta=True)
-        resp = self.client.post(
-            f"/api/fiscal/notas-entrada/{nota.id}/cancelar/",
-            {"motivo": "Recusa operacional da entrada", "confirmar_avisos": True},
-            format="json",
-        )
+        chave = nota.chave_acesso
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/recusar/", {}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        nota.refresh_from_db()
-        self.assertEqual(nota.status, NotaFiscalEntrada.Status.CANCELADA)
+        self.assertFalse(NotaFiscalEntrada.objects.filter(pk=nota.pk).exists())
+        self.assertFalse(NotaFiscalEntradaItemXml.objects.filter(nota_id=nota.pk).exists())
+        self.assertFalse(NotaFiscalEntradaDivergenciaXml.objects.filter(nota_id=nota.pk).exists())
         self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(origem__contains=f"NFE:{nota.pk}").exists())
         self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
         self.assertFalse(PedidoCompraEntrega.objects.filter(item__pedido=self.pedido, qtd_recebida__gt=0).exists())
+        self.assertTrue(ProdutoFornecedor.objects.filter(pk=vinculo.pk).exists())
+
+        item_reimportado = self.item_xml(chave=chave)
+        self.assertEqual(item_reimportado.nota.chave_acesso, chave)
+
+    def test_recusa_nf_xml_finalidade_especial_libera_chave(self):
+        chave = "35260822345678000195550010000001234567890157"
+        xml = self.xml(chave=chave).replace("<finNFe>1</finNFe>", "<finNFe>4</finNFe>")
+        resp = self.upload(xml, extra={"pedido_compra": self.pedido.id})
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        fechar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(fechar.status_code, 400, fechar.data)
+        self.assertIn("finalidade fiscal", fechar.data["detail"])
+
+        recusar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/recusar/", {}, format="json")
+        self.assertEqual(recusar.status_code, 200, recusar.data)
+        self.assertFalse(NotaFiscalEntrada.objects.filter(pk=nota.pk).exists())
+
+        reimportar = self.upload(xml, extra={"pedido_compra": self.pedido.id})
+        self.assertEqual(NotaFiscalEntrada.objects.get(pk=reimportar.data["id"]).chave_acesso, chave)
+
+    def test_recusa_nf_xml_efetivada_nao_libera_chave(self):
+        nota, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890158")
+        chave = nota.chave_acesso
+        fechar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(fechar.status_code, 200, fechar.data)
+
+        recusar = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/recusar/", {}, format="json")
+        self.assertEqual(recusar.status_code, 400, recusar.data)
+        self.upload(self.xml(chave=chave), status_code=400)
 
     def test_efetivacao_xml_e_idempotente_e_bloqueia_alteracoes_apos_fechamento(self):
         nota, item1, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890147")
