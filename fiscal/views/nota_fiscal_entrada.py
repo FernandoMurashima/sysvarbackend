@@ -739,6 +739,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             if nota.pedido_compra_id:
                 if not item.pedido_item_id or item.pedido_item.pedido_id != nota.pedido_compra_id:
                     raise ValueError("Item XML sem vínculo seguro com item do Pedido de Compra.")
+                divergencias = [div for div in item.divergencias_pedido() if div.get("bloqueia")]
+                if divergencias:
+                    raise ValueError(divergencias[0]["mensagem"])
                 saldo = Decimal(item.pedido_item.qtd or 0) - self._qtd_recebida_item(item.pedido_item)
                 if Decimal(item.quantidade_interna_efetivada or item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_recebida)) > saldo:
                     raise ValueError("Quantidade recebida do XML ultrapassa o saldo permitido do Pedido.")

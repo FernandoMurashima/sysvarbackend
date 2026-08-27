@@ -723,7 +723,39 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(item2b.pedido_item_id, self.pedido_item.id)
         resp = self.client.post(f"/api/fiscal/notas-entrada/{nota2.id}/fechar/")
         self.assertEqual(resp.status_code, 400, resp.data)
-        self.assertIn("saldo permitido", resp.data["detail"])
+        self.assertIn("saldo", resp.data["detail"])
+
+    def test_efetivacao_xml_com_pedido_bloqueia_preco_nf_acima_do_pedido(self):
+        self.pedido_item.preco_unit = Decimal("4.99")
+        self.pedido_item.save(update_fields=["preco_unit"])
+        nota, _, item2 = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890154", pedido=True)
+        self.assertEqual(item2.pedido_item_id, self.pedido_item.id)
+
+        resumo = self.client.get(f"/api/fiscal/notas-entrada/{nota.id}/resumo-conciliacao/")
+        self.assertEqual(resumo.status_code, 200, resumo.data)
+        self.assertEqual(resumo.data["bloqueios_pedido_count"], 1)
+        self.assertEqual(resumo.data["divergencias_pedido"][0]["tipo"], "PRECO_ACIMA_PEDIDO")
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Preço unitário da NF-e", resp.data["detail"])
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertFalse(PedidoCompraEntrega.objects.filter(item=self.pedido_item).exists())
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(origem__contains=f"NFE:{nota.pk}").exists())
+
+    def test_efetivacao_xml_com_pedido_permite_preco_nf_menor_que_pedido(self):
+        self.pedido_item.preco_unit = Decimal("6.00")
+        self.pedido_item.save(update_fields=["preco_unit"])
+        nota, _, item2 = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890155", pedido=True)
+        self.assertEqual(item2.pedido_item_id, self.pedido_item.id)
+        self.assertEqual(item2.divergencias_pedido(), [])
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.FECHADA)
 
     def test_snapshot_nao_muda_com_alteracao_posterior_do_vinculo(self):
         nota, item1, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890153")

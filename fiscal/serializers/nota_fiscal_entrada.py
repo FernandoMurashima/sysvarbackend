@@ -221,6 +221,7 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
     quantidade_faltante = serializers.SerializerMethodField()
     valor_divergente = serializers.SerializerMethodField()
     quantidade_interna_recebida = serializers.SerializerMethodField()
+    divergencias_pedido = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaFiscalEntradaItemXml
@@ -253,6 +254,9 @@ class NotaFiscalEntradaItemXmlSerializer(serializers.ModelSerializer):
     def get_quantidade_interna_recebida(self, obj):
         value = quantidade_interna_recebida(obj)
         return str(value) if value is not None else None
+
+    def get_divergencias_pedido(self, obj):
+        return obj.divergencias_pedido()
 
 
 class NotaFiscalEntradaDivergenciaXmlSerializer(serializers.ModelSerializer):

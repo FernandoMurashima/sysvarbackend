@@ -2,11 +2,20 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db import models
-from django.db.models import UniqueConstraint, Index
+from django.db.models import Q, UniqueConstraint, Index
 
 
 def _money(value):
     return Decimal(value or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _fmt_money(value):
+    return f"R$ {_money(value):.2f}".replace(".", ",")
+
+
+def _fmt_qty(value):
+    text = f"{Decimal(value or 0).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP):f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",") or "0"
 
 
 class NotaFiscalEntrada(models.Model):
@@ -172,12 +181,26 @@ class NotaFiscalEntrada(models.Model):
     def resumo_conciliacao_xml(self):
         total = self.itens_xml.count()
         conciliados = self.itens_xml.filter(produto__isnull=False).count()
+        divergencias_pedido = self.divergencias_pedido_xml()
+        bloqueios_pedido = [div for div in divergencias_pedido if div.get("bloqueia")]
         return {
             "total_itens": total,
             "itens_conciliados": conciliados,
             "itens_pendentes": total - conciliados,
             "nota_conciliada": total > 0 and conciliados == total,
+            "divergencias_pedido": divergencias_pedido,
+            "divergencias_pedido_count": len(divergencias_pedido),
+            "bloqueios_pedido_count": len(bloqueios_pedido),
+            "possui_divergencia_pedido": bool(divergencias_pedido),
         }
+
+    def divergencias_pedido_xml(self):
+        if not self.xml_importado or not self.pedido_compra_id:
+            return []
+        divergencias = []
+        for item in self.itens_xml.select_related("produto", "pedido_item", "pedido_item__produto").order_by("numero_item"):
+            divergencias.extend(item.divergencias_pedido())
+        return divergencias
 
     def resumo_conferencia_xml(self):
         itens = list(self.itens_xml.select_related("produto_fornecedor", "produto__unidade").all())
@@ -337,6 +360,94 @@ class NotaFiscalEntradaItemXml(models.Model):
     @property
     def conciliado(self):
         return self.produto_id is not None
+
+    def divergencias_pedido(self):
+        if not self.nota_id or not self.nota.pedido_compra_id:
+            return []
+        if not self.pedido_item_id or self.pedido_item.pedido_id != self.nota.pedido_compra_id:
+            return [
+                self._divergencia_pedido(
+                    "SEM_VINCULO_PEDIDO",
+                    "Sem vínculo seguro com item do Pedido",
+                    "Item XML sem vínculo seguro com item aprovado do Pedido de Compra.",
+                )
+            ]
+
+        divergencias = []
+        preco_xml = Decimal(self.valor_unitario_comercial or 0)
+        preco_pedido = Decimal(self.pedido_item.preco_unit or 0)
+        if preco_xml > preco_pedido:
+            divergencias.append(
+                self._divergencia_pedido(
+                    "PRECO_ACIMA_PEDIDO",
+                    "Preço NF acima do Pedido",
+                    f"Preço unitário da NF-e ({_fmt_money(preco_xml)}) maior que o preço aprovado do Pedido ({_fmt_money(preco_pedido)}).",
+                    preco_nf=preco_xml,
+                    preco_pedido=preco_pedido,
+                )
+            )
+
+        quantidade = self.quantidade_interna_recebida if self.quantidade_recebida is not None else self.quantidade_interna_fiscal
+        saldo = self.saldo_pedido_disponivel
+        if quantidade is not None and quantidade > saldo:
+            divergencias.append(
+                self._divergencia_pedido(
+                    "QUANTIDADE_ACIMA_SALDO",
+                    "Quantidade NF acima do saldo",
+                    f"Quantidade do XML ({_fmt_qty(quantidade)}) maior que o saldo disponível do Pedido ({_fmt_qty(saldo)}).",
+                    quantidade_nf=quantidade,
+                    saldo_pedido=saldo,
+                )
+            )
+        return divergencias
+
+    @property
+    def quantidade_interna_fiscal(self):
+        if not self.produto_fornecedor_id:
+            return None
+        return Decimal(self.produto_fornecedor.converter_quantidade_fornecedor(self.quantidade_comercial or 0))
+
+    @property
+    def quantidade_interna_recebida(self):
+        if self.quantidade_recebida is None or not self.produto_fornecedor_id:
+            return None
+        return Decimal(self.produto_fornecedor.converter_quantidade_fornecedor(self.quantidade_recebida))
+
+    @property
+    def saldo_pedido_disponivel(self):
+        if not self.pedido_item_id:
+            return Decimal("0")
+        itens = NotaFiscalEntradaItem.objects.filter(
+            pedido_item=self.pedido_item,
+            nota__pedido_compra_id=self.pedido_item.pedido_id,
+            nota__status=NotaFiscalEntrada.Status.FECHADA,
+        ).exclude(nota=self.nota)
+        total_legado = sum(Decimal(item.qtd_recebida or 0) for item in itens)
+        itens_xml = NotaFiscalEntradaItemXml.objects.filter(
+            pedido_item=self.pedido_item,
+            nota__pedido_compra_id=self.pedido_item.pedido_id,
+        ).exclude(nota__status=NotaFiscalEntrada.Status.CANCELADA).exclude(nota=self.nota)
+        total_xml = sum(
+            Decimal(item.quantidade_interna_efetivada or 0)
+            for item in itens_xml.filter(Q(nota__status=NotaFiscalEntrada.Status.FECHADA) | Q(quantidade_interna_efetivada__isnull=False))
+        )
+        return Decimal(self.pedido_item.qtd or 0) - total_legado - total_xml
+
+    def _divergencia_pedido(self, tipo, titulo, mensagem, **valores):
+        produto = self.produto or getattr(self.pedido_item, "produto", None)
+        data = {
+            "item_xml": self.pk,
+            "numero_item": self.numero_item,
+            "pedido_item": self.pedido_item_id,
+            "produto": getattr(produto, "pk", None),
+            "produto_descricao": getattr(produto, "descricao", None) or self.descricao_produto,
+            "tipo": tipo,
+            "titulo": titulo,
+            "mensagem": mensagem,
+            "bloqueia": True,
+        }
+        data.update({key: str(value) for key, value in valores.items()})
+        return data
 
     @property
     def conferido(self):
