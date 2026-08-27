@@ -660,12 +660,12 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(nota.status, NotaFiscalEntrada.Status.FECHADA)
         self.assertEqual(item1.quantidade_comercial, Decimal("3.000000"))
         self.assertEqual(item1.quantidade_recebida, Decimal("2.000000"))
-        self.assertEqual(item1.quantidade_interna_efetivada, Decimal("20.000000"))
+        self.assertEqual(item1.quantidade_interna_efetivada, Decimal("30.000000"))
         self.assertEqual(item1.fator_conversao_efetivado, Decimal("10.000000"))
         self.assertEqual(item1.unidade_fornecedor_efetivada, "FD")
-        self.assertEqual(item2.quantidade_interna_efetivada, Decimal("0.000000"))
-        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("20.000"))
-        self.assertFalse(ProdutoUsoConsumoEstoque.objects.filter(empresa=self.empresa, loja=self.loja, produto=self.produto_alt).exists())
+        self.assertEqual(item2.quantidade_interna_efetivada, Decimal("2.000000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("30.000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto_alt).saldo, Decimal("2.000"))
         div = NotaFiscalEntradaDivergenciaXml.objects.get(item_xml=item1)
         self.assertEqual(div.status, NotaFiscalEntradaDivergenciaXml.Status.PENDENTE)
         titulo = Pagar.objects.get(nfe_id=nota.pk)
@@ -674,6 +674,20 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(titulo.valor_divergencia_mercadoria, Decimal("20.00"))
         self.assertFalse(PedidoCompra.objects.filter(pk=self.pedido.pk, status="AT").exists())
         self.assertTrue(AuditLog.objects.filter(metadata__legacy_action="fechar_xml").exists())
+
+    def test_recusa_nf_xml_aberta_nao_movimenta_estoque_financeiro_ou_pedido(self):
+        nota, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890156", pedido=True, falta=True)
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.id}/cancelar/",
+            {"motivo": "Recusa operacional da entrada", "confirmar_avisos": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.CANCELADA)
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(origem__contains=f"NFE:{nota.pk}").exists())
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+        self.assertFalse(PedidoCompraEntrega.objects.filter(item__pedido=self.pedido, qtd_recebida__gt=0).exists())
 
     def test_efetivacao_xml_e_idempotente_e_bloqueia_alteracoes_apos_fechamento(self):
         nota, item1, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890147")
@@ -716,7 +730,7 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.pedido.refresh_from_db()
         entrega = self.pedido_item.entregas.get()
         self.assertEqual(entrega.qtd_recebida, Decimal("2.000"))
-        self.assertEqual(self.pedido.status, "AP")
+        self.assertEqual(self.pedido.status, "AT")
         self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 0)
 
         nota2, _, item2b = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890152", pedido=True)

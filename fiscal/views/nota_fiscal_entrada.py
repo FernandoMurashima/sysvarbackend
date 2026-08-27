@@ -743,7 +743,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 if divergencias:
                     raise ValueError(divergencias[0]["mensagem"])
                 saldo = Decimal(item.pedido_item.qtd or 0) - self._qtd_recebida_item(item.pedido_item)
-                if Decimal(item.quantidade_interna_efetivada or item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_recebida)) > saldo:
+                qtd_fiscal = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_comercial or 0))
+                if qtd_fiscal > saldo:
                     raise ValueError("Quantidade recebida do XML ultrapassa o saldo permitido do Pedido.")
 
     def _movimentar_estoque_xml(self, nota):
@@ -755,7 +756,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
         movimentos = 0
         for item in nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").order_by("numero_item"):
-            qtd = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_recebida or 0))
+            qtd = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_comercial or 0))
             item.unidade_fornecedor_efetivada = item.produto_fornecedor.unidade_fornecedor
             item.fator_conversao_efetivado = item.produto_fornecedor.fator_conversao
             item.quantidade_interna_efetivada = qtd

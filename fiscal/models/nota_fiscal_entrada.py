@@ -387,7 +387,7 @@ class NotaFiscalEntradaItemXml(models.Model):
                 )
             )
 
-        quantidade = self.quantidade_interna_recebida if self.quantidade_recebida is not None else self.quantidade_interna_fiscal
+        quantidade = self.quantidade_interna_fiscal
         saldo = self.saldo_pedido_disponivel
         if quantidade is not None and quantidade > saldo:
             divergencias.append(
