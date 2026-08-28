@@ -734,6 +734,7 @@ class ProdutoUsoConsumoEstoqueSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source='produto.descricao', read_only=True)
     produto_referencia = serializers.CharField(source='produto.referencia', read_only=True)
     produto_tipo = serializers.CharField(source='produto.tipo_produto', read_only=True)
+    produto_ativo = serializers.BooleanField(source='produto.ativo', read_only=True)
     unidade_codigo = serializers.CharField(source='produto.unidade.Codigo', read_only=True)
     unidade_descricao = serializers.CharField(source='produto.unidade.Descricao', read_only=True)
     loja_nome = serializers.CharField(source='loja.nome_loja', read_only=True)

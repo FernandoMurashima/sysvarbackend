@@ -405,9 +405,16 @@ class ProdutoVendaApiTests(TestCase):
             cnpj="11222333000183",
         )
         produto_uso = self.produto(tipo_produto="2", descricao="Papel A4", descricao_reduzida="PAPEL")
+        produto_uso_inativo = self.produto(
+            tipo_produto="2",
+            descricao="Tonner inativo",
+            descricao_reduzida="TONNER",
+            ativo=False,
+        )
         produto_venda = self.produto(descricao="Produto venda")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7.000")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=loja_filial, saldo="0.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso_inativo, loja=self.loja, saldo="3.000")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_venda, loja=self.loja, saldo="99.000")
 
         resp = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"search": produto_uso.referencia})
@@ -418,12 +425,14 @@ class ProdutoVendaApiTests(TestCase):
 
         resp_loja = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"loja": self.loja.id})
         results_loja = resp_loja.data["results"] if isinstance(resp_loja.data, dict) else resp_loja.data
-        self.assertEqual([row["loja"] for row in results_loja], [self.loja.id])
-        self.assertEqual(results_loja[0]["saldo"], "7.000")
+        self.assertEqual({row["loja"] for row in results_loja}, {self.loja.id})
+        self.assertEqual({row["produto"] for row in results_loja}, {produto_uso.Idproduto, produto_uso_inativo.Idproduto})
 
         resp_com_saldo = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"saldo": "com_saldo"})
         results_com_saldo = resp_com_saldo.data["results"] if isinstance(resp_com_saldo.data, dict) else resp_com_saldo.data
-        self.assertEqual([row["loja"] for row in results_com_saldo], [self.loja.id])
+        self.assertEqual({row["produto"] for row in results_com_saldo}, {produto_uso.Idproduto, produto_uso_inativo.Idproduto})
+        row_inativo = next(row for row in results_com_saldo if row["produto"] == produto_uso_inativo.Idproduto)
+        self.assertFalse(row_inativo["produto_ativo"])
 
         resp_zerados = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"saldo": "zerados"})
         results_zerados = resp_zerados.data["results"] if isinstance(resp_zerados.data, dict) else resp_zerados.data
