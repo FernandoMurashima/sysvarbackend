@@ -2293,6 +2293,10 @@ class EstoqueViewSet(BaseViewSet):
             qs = qs.filter(Idloja__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        access = EffectiveAccessService(self.request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (self.request.user.is_superuser or access.is_company_master()):
+            qs = qs.filter(Idloja_id__in=allowed)
         loja = self.request.query_params.get('loja')
         referencia = self.request.query_params.get('referencia')
         ean = self.request.query_params.get('ean')
@@ -2332,6 +2336,10 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
             qs = qs.filter(Idloja__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        access = EffectiveAccessService(self.request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (self.request.user.is_superuser or access.is_company_master()):
+            qs = qs.filter(Idloja_id__in=allowed)
         loja = self.request.query_params.get('loja')
         referencia = self.request.query_params.get('referencia')
         ean = self.request.query_params.get('ean')

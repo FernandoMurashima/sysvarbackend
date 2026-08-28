@@ -5,7 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from accounts.models import UserModulePermission
+from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema
 from .models import (
@@ -836,4 +836,85 @@ class ProdutoVendaApiTests(TestCase):
         self.assertEqual(produto.cfop_venda_dentro, "5102")
         self.assertTrue(ProdutoVendaHistorico.objects.filter(produto=produto, tipo_evento=ProdutoVendaHistorico.ALTERACAO_FISCAL).exists())
         self.assertTrue(AuditLog.objects.filter(model="produto", object_id=str(produto.pk), metadata__legacy_action="update_fiscal").exists())
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class EstoqueAcessoLojaApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Estoque", documento="55222333000181", plano_completo=True)
+        self.outra_empresa = Empresa.objects.create(nome="Empresa Estoque B", documento="55222333000182", plano_completo=True)
+        self.loja_1 = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 1", apelido_loja="L1", cnpj="55222333000181")
+        self.loja_2 = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 2", apelido_loja="L2", cnpj="55222333000183")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja B", apelido_loja="LB", cnpj="55222333000182")
+        self.master = get_user_model().objects.create_user("estoque-master", "estoque-master@example.com", "123", empresa=self.empresa, type="Admin")
+        self.restrito = get_user_model().objects.create_user(
+            "estoque-restrito",
+            "estoque-restrito@example.com",
+            "123",
+            empresa=self.empresa,
+            loja=self.loja_1,
+            type="Regular",
+        )
+        self.estoque_modulo, _ = ModuloSistema.objects.get_or_create(
+            chave="estoque",
+            defaults={"nome": "Estoque", "categoria": ModuloSistema.CATEGORIA_BASICO, "basico": True},
+        )
+        EmpresaContrato.objects.update_or_create(
+            empresa=self.empresa,
+            defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": self.master},
+        )
+        EmpresaContrato.objects.update_or_create(
+            empresa=self.outra_empresa,
+            defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True},
+        )
+        EmpresaModulo.objects.update_or_create(empresa=self.empresa, modulo=self.estoque_modulo, defaults={"contratado": True})
+        EmpresaModulo.objects.update_or_create(empresa=self.outra_empresa, modulo=self.estoque_modulo, defaults={"contratado": True})
+        perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome="Consulta Estoque")
+        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.estoque_modulo, acesso=UserModulePermission.Access.VIEW)
+        self.restrito.perfil_principal = perfil
+        self.restrito.save(update_fields=["perfil_principal"])
+        self.restrito.lojas.add(self.loja_1)
+        self.estoque_1 = Estoque.objects.create(CodigodeBarra="7890000000001", referencia="REF-A", Idloja=self.loja_1, Estoque="5.000", reserva="0.000")
+        self.estoque_2 = Estoque.objects.create(CodigodeBarra="7890000000002", referencia="REF-A", Idloja=self.loja_2, Estoque="9.000", reserva="0.000")
+        self.estoque_outra_empresa = Estoque.objects.create(CodigodeBarra="7890000000003", referencia="REF-B", Idloja=self.loja_outra_empresa, Estoque="11.000", reserva="0.000")
+        EstoqueMovimentacao.objects.create(Idloja=self.loja_1, CodigodeBarra=self.estoque_1.CodigodeBarra, referencia="REF-A", tipo=EstoqueMovimentacao.TIPO_ENTRADA, quantidade="5.000", saldo_anterior="0.000", saldo_posterior="5.000", documento="L1")
+        EstoqueMovimentacao.objects.create(Idloja=self.loja_2, CodigodeBarra=self.estoque_2.CodigodeBarra, referencia="REF-A", tipo=EstoqueMovimentacao.TIPO_ENTRADA, quantidade="9.000", saldo_anterior="0.000", saldo_posterior="9.000", documento="L2")
+        EstoqueMovimentacao.objects.create(Idloja=self.loja_outra_empresa, CodigodeBarra=self.estoque_outra_empresa.CodigodeBarra, referencia="REF-B", tipo=EstoqueMovimentacao.TIPO_ENTRADA, quantidade="11.000", saldo_anterior="0.000", saldo_posterior="11.000", documento="LB")
+
+    def results(self, resp):
+        return resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
+
+    def test_usuario_master_consulta_todas_as_lojas_da_empresa(self):
+        self.client.force_authenticate(self.master)
+        resp = self.client.get("/api/produto/estoque/", {"referencia": "REF-A"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual({row["Idloja"] for row in self.results(resp)}, {self.loja_1.id, self.loja_2.id})
+
+    def test_usuario_restrito_consulta_somente_estoque_da_loja_permitida(self):
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/estoque/", {"referencia": "REF-A"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual([row["Idloja"] for row in self.results(resp)], [self.loja_1.id])
+
+    def test_usuario_restrito_nao_consulta_estoque_de_loja_nao_autorizada(self):
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/estoque/", {"loja": self.loja_2.id})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.results(resp), [])
+
+    def test_usuario_restrito_nao_consulta_movimentacao_de_loja_nao_autorizada(self):
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/estoque-movimentacao/", {"loja": self.loja_2.id})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.results(resp), [])
+
+    def test_consultas_de_estoque_isolam_empresas(self):
+        self.client.force_authenticate(self.master)
+        estoque_resp = self.client.get("/api/produto/estoque/")
+        mov_resp = self.client.get("/api/produto/estoque-movimentacao/")
+        self.assertEqual(estoque_resp.status_code, 200, estoque_resp.content)
+        self.assertEqual(mov_resp.status_code, 200, mov_resp.content)
+        self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(estoque_resp)})
+        self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(mov_resp)})
 
