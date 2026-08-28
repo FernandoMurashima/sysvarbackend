@@ -634,6 +634,7 @@ class Command(BaseCommand):
                         quantidade=saldo,
                         saldo_anterior=0,
                         saldo_posterior=saldo,
+                        origem=EstoqueMovimentacao.ORIGEM_AJUSTE_MANUAL,
                         documento="CARGA-INICIAL",
                         observacao="Carga inicial da base demonstrativa",
                     )
@@ -753,6 +754,7 @@ class Command(BaseCommand):
                 quantidade=quantidade,
                 saldo_anterior=anterior,
                 saldo_posterior=posterior,
+                origem=EstoqueMovimentacao.ORIGEM_VENDA,
                 documento=documento,
                 observacao=f"Venda demonstrativa PDV {documento}",
             )

@@ -418,6 +418,7 @@ class Command(BaseCommand):
                         quantidade=8,
                         saldo_anterior=0,
                         saldo_posterior=8,
+                        origem=EstoqueMovimentacao.ORIGEM_AJUSTE_MANUAL,
                         documento="SEED-E2",
                         observacao="Carga inicial de teste empresa 2",
                     )

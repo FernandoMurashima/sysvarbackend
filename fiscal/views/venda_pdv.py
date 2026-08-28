@@ -786,6 +786,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             custo_medio_apos=custo_unitario,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_VENDA,
             documento=venda.documento,
             observacao=f"Venda PDV {venda.documento}",
         )
@@ -1764,6 +1765,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             custo_medio_apos=custo_medio_apos,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO,
             documento=devolucao.documento,
             observacao=f"Devolução da venda {devolucao.venda.documento}",
         )

@@ -113,6 +113,7 @@ class Command(BaseCommand):
                                 quantidade=8,
                                 saldo_anterior=0,
                                 saldo_posterior=8,
+                                origem=EstoqueMovimentacao.ORIGEM_AJUSTE_MANUAL,
                                 documento="BASE-TESTE",
                                 observacao="Carga inicial de produtos de teste",
                             )

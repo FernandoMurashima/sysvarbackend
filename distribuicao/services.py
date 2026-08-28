@@ -392,6 +392,7 @@ def confirmar_distribuicao(distribuicao, user):
             quantidade=qtd,
             saldo_anterior=decimal_qtd(est.Estoque),
             saldo_posterior=decimal_qtd(est.Estoque),
+            origem=EstoqueMovimentacao.ORIGEM_TRANSFERENCIA,
             documento=distribuicao.numero,
             observacao="Reserva de distribuição",
         )
@@ -877,6 +878,7 @@ def autorizar_nota_distribuicao(nota, user=None):
             custo_total=decimal_money(qtd * item.custo_unitario),
             saldo_anterior=anterior,
             saldo_posterior=est.Estoque,
+            origem=EstoqueMovimentacao.ORIGEM_TRANSFERENCIA,
             documento=nota.numero,
             observacao="Autorização NF-e distribuição",
         )
@@ -1012,6 +1014,7 @@ def confirmar_recebimento(transito, quantidade_recebida, documento=None):
         custo_total=decimal_money(qtd * transito.pedido_item.custo_unitario),
         saldo_anterior=anterior,
         saldo_posterior=estoque.Estoque,
+        origem=EstoqueMovimentacao.ORIGEM_TRANSFERENCIA,
         documento=documento or transito.pedido.nfe_numero or transito.pedido.numero,
         observacao="Recebimento de distribuição",
     )

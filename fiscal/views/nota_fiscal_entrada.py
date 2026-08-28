@@ -855,6 +855,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_NFE,
             documento=documento,
             observacao=f"Nota fiscal de entrada XML {nota.numero};ITEM:{item.pk}",
         )
@@ -1516,6 +1517,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_NFE,
             documento=documento,
             observacao=f"Cancelamento NF-e XML {nota.numero};ITEM:{item.pk};MOTIVO:{motivo}"[:255],
         )
@@ -1698,6 +1700,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             custo_medio_apos=_q4(produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or custo_movimento),
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_NFE,
             documento=documento,
             observacao=f"Nota fiscal de entrada {nota.numero}",
         )
@@ -1952,6 +1955,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 custo_medio_apos=custo_medio_apos,
                 saldo_anterior=anterior,
                 saldo_posterior=posterior,
+                origem=EstoqueMovimentacao.ORIGEM_NFE,
                 documento=documento,
                 observacao=f"Nota fiscal de entrada {nota.numero}",
             )

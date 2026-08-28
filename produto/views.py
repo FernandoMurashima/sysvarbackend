@@ -1677,6 +1677,7 @@ class OrdemProducaoViewSet(BaseViewSet):
                 custo_medio_apos=custo_unitario,
                 saldo_anterior=anterior,
                 saldo_posterior=posterior,
+                origem=EstoqueMovimentacao.ORIGEM_PRODUCAO,
                 documento=ordem.numero,
                 observacao=f'Baixa de insumo OP {ordem.numero}',
             )
@@ -1727,6 +1728,7 @@ class OrdemProducaoViewSet(BaseViewSet):
             custo_medio_apos=custo_medio_apos,
             saldo_anterior=anterior,
             saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_PRODUCAO,
             documento=ordem.numero,
             observacao=f'Entrada de produto acabado OP {ordem.numero}',
         )
@@ -1952,6 +1954,7 @@ class OrdemProducaoViewSet(BaseViewSet):
                 custo_medio_apos=custo_unitario,
                 saldo_anterior=origem_anterior,
                 saldo_posterior=origem_posterior,
+                origem=EstoqueMovimentacao.ORIGEM_TRANSFERENCIA,
                 documento=documento,
                 observacao=obs,
             )
@@ -1966,6 +1969,7 @@ class OrdemProducaoViewSet(BaseViewSet):
                 custo_medio_apos=custo_unitario,
                 saldo_anterior=destino_anterior,
                 saldo_posterior=destino_posterior,
+                origem=EstoqueMovimentacao.ORIGEM_TRANSFERENCIA,
                 documento=documento,
                 observacao=f'Distribuição OP {ordem.numero} recebida de {loja_origem.nome_loja}',
             )
@@ -2404,7 +2408,12 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         estoque.Estoque = posterior
         estoque.reserva = reserva
         estoque.save(update_fields=['referencia', 'Estoque', 'reserva'])
-        serializer.save(referencia=referencia or '', saldo_anterior=anterior, saldo_posterior=posterior)
+        serializer.save(
+            referencia=referencia or '',
+            saldo_anterior=anterior,
+            saldo_posterior=posterior,
+            origem=EstoqueMovimentacao.ORIGEM_AJUSTE_MANUAL,
+        )
 
 
 class ProdutoUsoConsumoEstoqueViewSet(viewsets.ReadOnlyModelViewSet):
@@ -2597,6 +2606,7 @@ class InventarioEstoqueViewSet(BaseViewSet):
                 quantidade=item.diferenca,
                 saldo_anterior=anterior,
                 saldo_posterior=item.saldo_contado,
+                origem=EstoqueMovimentacao.ORIGEM_INVENTARIO,
                 documento=documento,
                 observacao=f'Ajuste por inventário {inv.descricao}',
             )

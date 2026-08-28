@@ -1240,6 +1240,22 @@ class ProdutoUsoConsumoMovimentacao(models.Model):
 
 
 class EstoqueMovimentacao(models.Model):
+    ORIGEM_NFE = 'NFE'
+    ORIGEM_VENDA = 'VENDA'
+    ORIGEM_DEVOLUCAO = 'DEVOLUCAO'
+    ORIGEM_TRANSFERENCIA = 'TRANSFERENCIA'
+    ORIGEM_INVENTARIO = 'INVENTARIO'
+    ORIGEM_PRODUCAO = 'PRODUCAO'
+    ORIGEM_AJUSTE_MANUAL = 'AJUSTE_MANUAL'
+    ORIGEM_CHOICES = [
+        (ORIGEM_NFE, 'NF-e'),
+        (ORIGEM_VENDA, 'Venda'),
+        (ORIGEM_DEVOLUCAO, 'Devolução'),
+        (ORIGEM_TRANSFERENCIA, 'Transferência'),
+        (ORIGEM_INVENTARIO, 'Inventário'),
+        (ORIGEM_PRODUCAO, 'Produção'),
+        (ORIGEM_AJUSTE_MANUAL, 'Ajuste manual'),
+    ]
     TIPO_ENTRADA = 'ENTRADA'
     TIPO_SAIDA = 'SAIDA'
     TIPO_AJUSTE = 'AJUSTE'
@@ -1266,6 +1282,7 @@ class EstoqueMovimentacao(models.Model):
     custo_medio_apos = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     saldo_anterior = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     saldo_posterior = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    origem = models.CharField(max_length=20, choices=ORIGEM_CHOICES, blank=True, default='', db_index=True)
     documento = models.CharField(max_length=50, null=True, blank=True)
     observacao = models.CharField(max_length=255, null=True, blank=True)
     data_movimento = models.DateTimeField(default=timezone.now, db_index=True)
