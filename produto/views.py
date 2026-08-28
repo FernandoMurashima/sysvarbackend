@@ -2377,7 +2377,7 @@ class EstoqueViewSet(BaseViewSet):
             if empresa_id:
                 produto_qs = produto_qs.filter(empresa_id=empresa_id)
             if colecao:
-                produto_qs = produto_qs.filter(colecao__Codigo=colecao)
+                produto_qs = produto_qs.filter(Q(colecao_id=colecao) | Q(colecao__Codigo=colecao))
             if estacao:
                 produto_qs = produto_qs.filter(colecao__Estacao=estacao)
             refs = produto_qs.exclude(referencia__isnull=True).values_list('referencia', flat=True)
@@ -2387,12 +2387,23 @@ class EstoqueViewSet(BaseViewSet):
     @action(detail=False, methods=['get'], url_path='consulta-referencia')
     def consulta_referencia(self, request):
         termo = (request.query_params.get('referencia') or request.query_params.get('ean') or request.query_params.get('search') or '').strip()
+        colecao = request.query_params.get('colecao')
         qs = self._estoque_scope_queryset().select_related('Idloja')
-        if not termo:
+        if colecao:
+            produto_qs = Produto.objects.filter(tipo_produto__in=('1', '3'))
+            empresa_id = self._empresa_id_usuario()
+            if empresa_id:
+                produto_qs = produto_qs.filter(empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                return Response([])
+            produto_qs = produto_qs.filter(Q(colecao_id=colecao) | Q(colecao__Codigo=colecao))
+            refs = produto_qs.exclude(referencia__isnull=True).exclude(referencia='').values_list('referencia', flat=True)
+            qs = qs.filter(referencia__in=refs)
+        if not termo and not colecao:
             return Response([])
         if termo.isdigit() and len(termo) >= 8:
             qs = qs.filter(CodigodeBarra=termo)
-        else:
+        elif termo:
             qs = qs.filter(referencia=termo)
         eans = list(qs.values_list('CodigodeBarra', flat=True))
         refs = list(qs.values_list('referencia', flat=True).distinct())
