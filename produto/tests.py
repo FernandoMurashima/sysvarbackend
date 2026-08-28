@@ -1,8 +1,10 @@
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermission
@@ -917,4 +919,43 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(mov_resp.status_code, 200, mov_resp.content)
         self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(estoque_resp)})
         self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(mov_resp)})
+
+    def test_movimentacao_filtra_por_loja_tipo_datas_e_combinacao(self):
+        self.client.force_authenticate(self.master)
+        mov_antigo = EstoqueMovimentacao.objects.get(documento="L1")
+        mov_saida = EstoqueMovimentacao.objects.get(documento="L2")
+        data_recente = timezone.localdate()
+        data_antiga = data_recente - timedelta(days=5)
+        data_inicio = data_recente - timedelta(days=1)
+        data_fim_antiga = data_antiga
+        data_fim_recente = data_recente + timedelta(days=1)
+        mov_antigo.data_movimento = timezone.make_aware(datetime.combine(data_antiga, time(10, 0)))
+        mov_antigo.save(update_fields=["data_movimento"])
+        mov_saida.tipo = EstoqueMovimentacao.TIPO_SAIDA
+        mov_saida.data_movimento = timezone.make_aware(datetime.combine(data_recente, time(10, 0)))
+        mov_saida.save(update_fields=["tipo", "data_movimento"])
+
+        resp_loja = self.client.get("/api/produto/estoque-movimentacao/", {"loja": self.loja_1.id})
+        self.assertEqual({row["documento"] for row in self.results(resp_loja)}, {"L1"})
+
+        resp_tipo = self.client.get("/api/produto/estoque-movimentacao/", {"tipo": EstoqueMovimentacao.TIPO_SAIDA})
+        self.assertEqual({row["documento"] for row in self.results(resp_tipo)}, {"L2"})
+
+        resp_inicio = self.client.get("/api/produto/estoque-movimentacao/", {"data_inicio": data_inicio.isoformat()})
+        self.assertEqual({row["documento"] for row in self.results(resp_inicio)}, {"L2"})
+
+        resp_fim = self.client.get("/api/produto/estoque-movimentacao/", {"data_fim": data_fim_antiga.isoformat()})
+        self.assertEqual({row["documento"] for row in self.results(resp_fim)}, {"L1"})
+
+        resp_combinado = self.client.get(
+            "/api/produto/estoque-movimentacao/",
+            {
+                "loja": self.loja_2.id,
+                "tipo": EstoqueMovimentacao.TIPO_SAIDA,
+                "data_inicio": data_inicio.isoformat(),
+                "data_fim": data_fim_recente.isoformat(),
+                "search": "REF-A",
+            },
+        )
+        self.assertEqual([row["documento"] for row in self.results(resp_combinado)], ["L2"])
 

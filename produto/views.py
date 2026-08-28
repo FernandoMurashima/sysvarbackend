@@ -5,7 +5,9 @@ from rest_framework.response import Response
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, time
 
 from auditoria.models import AuditAction, AuditCategory
 from auditoria.services import AuditService
@@ -2345,6 +2347,8 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
         ean = self.request.query_params.get('ean')
         tipo = self.request.query_params.get('tipo')
         search = self.request.query_params.get('search')
+        data_inicio = self.request.query_params.get('data_inicio')
+        data_fim = self.request.query_params.get('data_fim')
         if loja:
             qs = qs.filter(Idloja_id=loja)
         if referencia:
@@ -2355,6 +2359,14 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
             qs = qs.filter(tipo=tipo)
         if search:
             qs = qs.filter(Q(referencia__icontains=search) | Q(CodigodeBarra__icontains=search) | Q(documento__icontains=search))
+        if data_inicio:
+            inicio = parse_date(data_inicio)
+            if inicio:
+                qs = qs.filter(data_movimento__gte=timezone.make_aware(datetime.combine(inicio, time.min)))
+        if data_fim:
+            fim = parse_date(data_fim)
+            if fim:
+                qs = qs.filter(data_movimento__lte=timezone.make_aware(datetime.combine(fim, time.max)))
         return qs
 
     @transaction.atomic
