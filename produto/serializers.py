@@ -323,10 +323,32 @@ class EstoqueSerializer(serializers.ModelSerializer):
 
 
 class EstoqueMovimentacaoSerializer(serializers.ModelSerializer):
+    cor = serializers.SerializerMethodField()
+    tamanho = serializers.SerializerMethodField()
+
     class Meta:
         model = EstoqueMovimentacao
         fields = '__all__'
         read_only_fields = ('saldo_anterior', 'saldo_posterior', 'data_movimento')
+
+    def _sku(self, obj):
+        cache = self.context.setdefault('_estoque_mov_skus', {})
+        if obj.CodigodeBarra not in cache:
+            cache[obj.CodigodeBarra] = (
+                ProdutoDetalhe.objects
+                .select_related('idcor', 'idtamanho')
+                .filter(ean13=obj.CodigodeBarra)
+                .first()
+            )
+        return cache[obj.CodigodeBarra]
+
+    def get_cor(self, obj):
+        sku = self._sku(obj)
+        return getattr(getattr(sku, 'idcor', None), 'Descricao', '') or ''
+
+    def get_tamanho(self, obj):
+        sku = self._sku(obj)
+        return getattr(getattr(sku, 'idtamanho', None), 'Tamanho', '') or ''
 
 
 class InventarioEstoqueItemSerializer(serializers.ModelSerializer):

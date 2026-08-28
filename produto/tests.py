@@ -974,3 +974,49 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(origens[self.estoque_1.CodigodeBarra], "NFE")
         self.assertEqual(origens[self.estoque_2.CodigodeBarra], "")
 
+    def test_movimentacao_expoe_cor_e_tamanho_do_sku_quando_disponivel(self):
+        unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
+        grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade")
+        cor = Cor.objects.create(empresa=self.empresa, Descricao="Azul", Codigo="AZ", Cor="Azul")
+        tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=grade, Tamanho="M")
+        colecao = Colecao.objects.create(empresa=self.empresa, Descricao="Colecao SKU", Codigo="55", Estacao="01")
+        grupo = Grupo.objects.create(empresa=self.empresa, Codigo="01", CodigoRef="01", Descricao="Grupo SKU", Margem=0)
+        subgrupo = Subgrupo.objects.create(empresa=self.empresa, Idgrupo=grupo, Descricao="Subgrupo SKU", Margem=0)
+        Ncm.objects.create(empresa=self.empresa, ncm="6109.10.00", descricao="Produto SKU")
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao="Produto Grade",
+            descricao_reduzida="GRADE",
+            unidade=unidade,
+            colecao=colecao,
+            grupo=grupo,
+            subgrupo=subgrupo,
+            grade=grade,
+            ncm="6109.10.00",
+        )
+        ConfigEan.objects.create(empresa=self.empresa, company_prefix="5555")
+        sku = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho)
+        mov_com_sku = EstoqueMovimentacao.objects.create(
+            Idloja=self.loja_1,
+            CodigodeBarra=sku.ean13,
+            referencia=produto.referencia or "REF-SKU",
+            tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+            quantidade="1.000",
+            saldo_anterior="0.000",
+            saldo_posterior="1.000",
+        )
+
+        self.client.force_authenticate(self.master)
+        resp = self.client.get("/api/produto/estoque-movimentacao/", {"ean": sku.ean13})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        row = self.results(resp)[0]
+        self.assertEqual(row["Idmovimento"], mov_com_sku.Idmovimento)
+        self.assertEqual(row["cor"], "Azul")
+        self.assertEqual(row["tamanho"], "M")
+
+        resp_sem_sku = self.client.get("/api/produto/estoque-movimentacao/", {"ean": self.estoque_1.CodigodeBarra})
+        row_sem_sku = self.results(resp_sem_sku)[0]
+        self.assertEqual(row_sem_sku["cor"], "")
+        self.assertEqual(row_sem_sku["tamanho"], "")
+
