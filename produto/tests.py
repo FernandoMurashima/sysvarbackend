@@ -1008,6 +1008,42 @@ class EstoqueAcessoLojaApiTests(TestCase):
         resp_ean = self.client.get("/api/produto/estoque/consulta-referencia/", {"ean": sku.ean13, "saldo": "com_saldo"})
         self.assertEqual({row["loja"] for row in self.results(resp_ean)}, {self.loja_1.id, self.loja_2.id})
 
+    def test_consulta_referencia_com_loja_nao_retorna_referencia_apenas_de_outra_loja(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101777")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_2, Estoque="4.000", reserva="0.000")
+
+        self.client.force_authenticate(self.master)
+        resp = self.client.get("/api/produto/estoque/consulta-referencia/", {"referencia": produto.referencia, "loja": self.loja_1.id})
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.results(resp), [])
+
+    def test_usuario_restrito_nao_ve_referencia_de_loja_nao_permitida_na_consulta_especifica(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101778")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_2, Estoque="4.000", reserva="0.000")
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/estoque/consulta-referencia/", {"referencia": produto.referencia})
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.results(resp), [])
+
+    def test_uso_consumo_respeita_loja_permitida_e_mantem_inativo_com_saldo(self):
+        unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade UC", Codigo="UC")
+        produto_loja_1 = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso L1", descricao_reduzida="Uso L1", unidade=unidade, ativo=False)
+        produto_loja_2 = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso L2", descricao_reduzida="Uso L2", unidade=unidade)
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_loja_1, loja=self.loja_1, saldo="3.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_loja_2, loja=self.loja_2, saldo="7.000")
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"loja": self.loja_1.id})
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = self.results(resp)
+        self.assertEqual({row["loja"] for row in rows}, {self.loja_1.id})
+        self.assertEqual({row["produto"] for row in rows}, {produto_loja_1.Idproduto})
+        self.assertFalse(rows[0]["produto_ativo"])
+
     def test_consulta_colecao_especifica_filtra_estacao_colecao_referencia_e_saldos(self):
         produto_a, sku_a, _, _, colecao_a = self.criar_produto_com_sku(referencia_esperada="260101001", colecao_codigo="26", estacao="01")
         produto_b, sku_b, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260201002", colecao_codigo="26", estacao="02")
