@@ -959,3 +959,19 @@ class EstoqueAcessoLojaApiTests(TestCase):
         )
         self.assertEqual([row["documento"] for row in self.results(resp_combinado)], ["L2"])
 
+    def test_movimentacao_expoe_origem_legivel_quando_disponivel(self):
+        self.client.force_authenticate(self.master)
+        mov_nfe = EstoqueMovimentacao.objects.get(documento="L1")
+        mov_nfe.documento = "NFE:123"
+        mov_nfe.save(update_fields=["documento"])
+        mov_sem_origem = EstoqueMovimentacao.objects.get(documento="L2")
+        mov_sem_origem.documento = ""
+        mov_sem_origem.observacao = ""
+        mov_sem_origem.save(update_fields=["documento", "observacao"])
+
+        resp = self.client.get("/api/produto/estoque-movimentacao/", {"referencia": "REF-A"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        origens = {row["CodigodeBarra"]: row["origem"] for row in self.results(resp)}
+        self.assertEqual(origens[self.estoque_1.CodigodeBarra], "NF-e")
+        self.assertEqual(origens[self.estoque_2.CodigodeBarra], "")
+

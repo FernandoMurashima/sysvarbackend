@@ -323,10 +323,30 @@ class EstoqueSerializer(serializers.ModelSerializer):
 
 
 class EstoqueMovimentacaoSerializer(serializers.ModelSerializer):
+    origem = serializers.SerializerMethodField()
+
     class Meta:
         model = EstoqueMovimentacao
         fields = '__all__'
         read_only_fields = ('saldo_anterior', 'saldo_posterior', 'data_movimento')
+
+    def get_origem(self, obj):
+        texto = f"{obj.documento or ''} {obj.observacao or ''}".lower()
+        if 'nfe' in texto or 'nf-e' in texto or 'nota fiscal' in texto:
+            return 'NF-e'
+        if 'venda' in texto:
+            return 'Venda'
+        if 'devolu' in texto:
+            return 'Devolução'
+        if 'distribui' in texto or 'transfer' in texto or (obj.documento or '').upper().startswith('DIST-'):
+            return 'Transferência'
+        if 'invent' in texto or (obj.documento or '').upper().startswith('INV-'):
+            return 'Inventário'
+        if 'produção' in texto or 'producao' in texto or ' op ' in f" {texto} ":
+            return 'Produção'
+        if obj.tipo == EstoqueMovimentacao.TIPO_AJUSTE:
+            return 'Ajuste manual'
+        return ''
 
 
 class InventarioEstoqueItemSerializer(serializers.ModelSerializer):
