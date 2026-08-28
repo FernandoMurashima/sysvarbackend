@@ -120,6 +120,31 @@ class ProdutoFornecedorApiTests(TestCase):
     def results(self, resp):
         return resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
 
+    def criar_produto_com_sku(self, referencia_esperada="260101001", colecao_codigo="26", estacao="01"):
+        unidade = Unidade.objects.create(empresa=self.empresa, Descricao=f"Unidade {referencia_esperada}", Codigo=f"U{referencia_esperada[-2:]}")
+        grade = Grade.objects.create(empresa=self.empresa, Descricao=f"Grade {referencia_esperada}")
+        cor = Cor.objects.create(empresa=self.empresa, Descricao=f"Azul {referencia_esperada}", Codigo=f"AZ{referencia_esperada[-2:]}", Cor="Azul")
+        tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=grade, Tamanho=f"M{referencia_esperada[-1]}")
+        colecao = Colecao.objects.create(empresa=self.empresa, Descricao=f"Colecao {referencia_esperada}", Codigo=colecao_codigo, Estacao=estacao)
+        grupo = Grupo.objects.create(empresa=self.empresa, Codigo=referencia_esperada[-2:], CodigoRef=referencia_esperada[-2:], Descricao=f"Grupo {referencia_esperada}", Margem=0)
+        subgrupo = Subgrupo.objects.create(empresa=self.empresa, Idgrupo=grupo, Descricao=f"Subgrupo {referencia_esperada}", Margem=0)
+        Ncm.objects.get_or_create(empresa=self.empresa, ncm="6109.10.00", defaults={"descricao": "Produto SKU"})
+        ConfigEan.objects.get_or_create(empresa=self.empresa, company_prefix="5555")
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao=f"Produto {referencia_esperada}",
+            descricao_reduzida=f"P{referencia_esperada[-3:]}",
+            unidade=unidade,
+            colecao=colecao,
+            grupo=grupo,
+            subgrupo=subgrupo,
+            grade=grade,
+            ncm="6109.10.00",
+        )
+        sku = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho)
+        return produto, sku, cor, tamanho, colecao
+
     def test_cria_vinculo_valido_com_descricao_gtin_e_auditoria(self):
         resp = self.post_vinculo()
         vinculo = ProdutoFornecedor.objects.get(pk=resp.data["id"])
@@ -896,6 +921,31 @@ class EstoqueAcessoLojaApiTests(TestCase):
     def results(self, resp):
         return resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
 
+    def criar_produto_com_sku(self, referencia_esperada="260101001", colecao_codigo="26", estacao="01"):
+        unidade = Unidade.objects.create(empresa=self.empresa, Descricao=f"Unidade {referencia_esperada}", Codigo=f"U{referencia_esperada[-2:]}")
+        grade = Grade.objects.create(empresa=self.empresa, Descricao=f"Grade {referencia_esperada}")
+        cor = Cor.objects.create(empresa=self.empresa, Descricao=f"Azul {referencia_esperada}", Codigo=f"AZ{referencia_esperada[-2:]}", Cor="Azul")
+        tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=grade, Tamanho=f"M{referencia_esperada[-1]}")
+        colecao = Colecao.objects.create(empresa=self.empresa, Descricao=f"Colecao {referencia_esperada}", Codigo=colecao_codigo, Estacao=estacao)
+        grupo = Grupo.objects.create(empresa=self.empresa, Codigo=referencia_esperada[-2:], CodigoRef=referencia_esperada[-2:], Descricao=f"Grupo {referencia_esperada}", Margem=0)
+        subgrupo = Subgrupo.objects.create(empresa=self.empresa, Idgrupo=grupo, Descricao=f"Subgrupo {referencia_esperada}", Margem=0)
+        Ncm.objects.get_or_create(empresa=self.empresa, ncm="6109.10.00", defaults={"descricao": "Produto SKU"})
+        ConfigEan.objects.get_or_create(empresa=self.empresa, company_prefix="5555")
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao=f"Produto {referencia_esperada}",
+            descricao_reduzida=f"P{referencia_esperada[-3:]}",
+            unidade=unidade,
+            colecao=colecao,
+            grupo=grupo,
+            subgrupo=subgrupo,
+            grade=grade,
+            ncm="6109.10.00",
+        )
+        sku = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho)
+        return produto, sku, cor, tamanho, colecao
+
     def test_usuario_master_consulta_todas_as_lojas_da_empresa(self):
         self.client.force_authenticate(self.master)
         resp = self.client.get("/api/produto/estoque/", {"referencia": "REF-A"})
@@ -928,6 +978,59 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(mov_resp.status_code, 200, mov_resp.content)
         self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(estoque_resp)})
         self.assertNotIn(self.loja_outra_empresa.id, {row["Idloja"] for row in self.results(mov_resp)})
+
+    def test_consulta_referencia_especifica_isola_empresa_loja_e_retorna_saldos(self):
+        produto, sku, cor, tamanho, _ = self.criar_produto_com_sku()
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque="8.000", reserva="2.000")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_2, Estoque="3.000", reserva="0.000")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_outra_empresa, Estoque="99.000", reserva="0.000")
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.get("/api/produto/estoque/consulta-referencia/", {"referencia": produto.referencia})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = self.results(resp)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["referencia"], produto.referencia)
+        self.assertEqual(row["produto"], produto.descricao_reduzida)
+        self.assertEqual(row["loja"], self.loja_1.id)
+        self.assertEqual(row["cor"], cor.Descricao)
+        self.assertEqual(row["tamanho"], tamanho.Tamanho)
+        self.assertEqual(row["ean"], sku.ean13)
+        self.assertEqual(Decimal(str(row["fisico"])), Decimal("8.000"))
+        self.assertEqual(Decimal(str(row["reservado"])), Decimal("2.000"))
+        self.assertEqual(Decimal(str(row["disponivel"])), Decimal("6.000"))
+
+        resp_loja = self.client.get("/api/produto/estoque/consulta-referencia/", {"referencia": produto.referencia, "loja": self.loja_2.id})
+        self.assertEqual(self.results(resp_loja), [])
+
+        self.client.force_authenticate(self.master)
+        resp_ean = self.client.get("/api/produto/estoque/consulta-referencia/", {"ean": sku.ean13, "saldo": "com_saldo"})
+        self.assertEqual({row["loja"] for row in self.results(resp_ean)}, {self.loja_1.id, self.loja_2.id})
+
+    def test_consulta_colecao_especifica_filtra_estacao_colecao_referencia_e_saldos(self):
+        produto_a, sku_a, _, _, colecao_a = self.criar_produto_com_sku(referencia_esperada="260101001", colecao_codigo="26", estacao="01")
+        produto_b, sku_b, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260201002", colecao_codigo="26", estacao="02")
+        Estoque.objects.create(CodigodeBarra=sku_a.ean13, referencia=produto_a.referencia, Idloja=self.loja_1, Estoque="8.000", reserva="2.000")
+        Estoque.objects.create(CodigodeBarra=sku_a.ean13, referencia=produto_a.referencia, Idloja=self.loja_2, Estoque="0.000", reserva="0.000")
+        Estoque.objects.create(CodigodeBarra=sku_b.ean13, referencia=produto_b.referencia, Idloja=self.loja_1, Estoque="5.000", reserva="1.000")
+
+        self.client.force_authenticate(self.master)
+        resp_estacao = self.client.get("/api/produto/estoque/consulta-colecao/", {"estacao": "01"})
+        self.assertEqual({row["referencia"] for row in self.results(resp_estacao)}, {produto_a.referencia})
+
+        resp_colecao = self.client.get("/api/produto/estoque/consulta-colecao/", {"colecao": colecao_a.Idcolecao})
+        self.assertEqual({row["referencia"] for row in self.results(resp_colecao)}, {produto_a.referencia})
+
+        resp_combinado = self.client.get(
+            "/api/produto/estoque/consulta-colecao/",
+            {"estacao": "01", "colecao": colecao_a.Idcolecao, "referencia": produto_a.referencia, "saldo": "com_saldo"},
+        )
+        rows = self.results(resp_combinado)
+        self.assertEqual([row["loja"] for row in rows], [self.loja_1.id])
+        self.assertEqual(Decimal(str(rows[0]["fisico"])), Decimal("8.000"))
+        self.assertEqual(Decimal(str(rows[0]["reservado"])), Decimal("2.000"))
+        self.assertEqual(Decimal(str(rows[0]["disponivel"])), Decimal("6.000"))
 
     def test_movimentacao_filtra_por_loja_tipo_datas_e_combinacao(self):
         self.client.force_authenticate(self.master)

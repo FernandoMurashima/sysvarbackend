@@ -2292,6 +2292,61 @@ class EstoqueViewSet(BaseViewSet):
     queryset = Estoque.objects.all()
     serializer_class = EstoqueSerializer
 
+    def _estoque_scope_queryset(self):
+        qs = Estoque.objects.all().order_by('referencia', 'CodigodeBarra', 'Idloja_id')
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idloja__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        access = EffectiveAccessService(self.request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (self.request.user.is_superuser or access.is_company_master()):
+            qs = qs.filter(Idloja_id__in=allowed)
+        loja = self.request.query_params.get('loja')
+        if loja:
+            qs = qs.filter(Idloja_id=loja)
+        return qs
+
+    def _estoque_consulta_row(self, estoque, sku_por_ean, produto_por_ref=None):
+        sku = sku_por_ean.get(estoque.CodigodeBarra)
+        produto = getattr(sku, 'produto', None) or (produto_por_ref or {}).get(estoque.referencia or '')
+        fisico = Decimal(estoque.Estoque or 0)
+        reservado = Decimal(estoque.reserva or 0)
+        return {
+            'referencia': estoque.referencia or getattr(produto, 'referencia', '') or '',
+            'produto': getattr(produto, 'descricao_reduzida', None) or getattr(produto, 'descricao', '') or '',
+            'loja': estoque.Idloja_id,
+            'loja_nome': getattr(estoque.Idloja, 'nome_loja', '') or '',
+            'cor': getattr(getattr(sku, 'idcor', None), 'Descricao', '') or '',
+            'tamanho': getattr(getattr(sku, 'idtamanho', None), 'Tamanho', '') or '',
+            'ean': estoque.CodigodeBarra,
+            'fisico': fisico,
+            'reservado': reservado,
+            'disponivel': fisico - reservado,
+        }
+
+    def _filtrar_saldo_consulta(self, rows):
+        saldo = self.request.query_params.get('saldo')
+        if saldo == 'com_saldo':
+            return [row for row in rows if row['disponivel'] > 0]
+        if saldo == 'zerados':
+            return [row for row in rows if row['disponivel'] == 0]
+        return rows
+
+    def _sku_map(self, eans):
+        return {
+            sku.ean13: sku
+            for sku in ProdutoDetalhe.objects.select_related('produto', 'idcor', 'idtamanho').filter(ean13__in=eans)
+        }
+
+    def _produto_ref_map(self, refs):
+        qs = Produto.objects.select_related('colecao').filter(referencia__in=refs)
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        return {produto.referencia: produto for produto in qs}
+
     def get_queryset(self):
         qs = Estoque.objects.all().order_by('referencia', 'CodigodeBarra', 'Idloja_id')
         empresa_id = self._empresa_id_usuario()
@@ -2328,6 +2383,53 @@ class EstoqueViewSet(BaseViewSet):
             refs = produto_qs.exclude(referencia__isnull=True).values_list('referencia', flat=True)
             qs = qs.filter(referencia__in=refs)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='consulta-referencia')
+    def consulta_referencia(self, request):
+        termo = (request.query_params.get('referencia') or request.query_params.get('ean') or request.query_params.get('search') or '').strip()
+        qs = self._estoque_scope_queryset().select_related('Idloja')
+        if not termo:
+            return Response([])
+        if termo.isdigit() and len(termo) >= 8:
+            qs = qs.filter(CodigodeBarra=termo)
+        else:
+            qs = qs.filter(referencia=termo)
+        eans = list(qs.values_list('CodigodeBarra', flat=True))
+        refs = list(qs.values_list('referencia', flat=True).distinct())
+        sku_por_ean = self._sku_map(eans)
+        produto_por_ref = self._produto_ref_map(refs)
+        rows = [self._estoque_consulta_row(estoque, sku_por_ean, produto_por_ref) for estoque in qs]
+        rows = self._filtrar_saldo_consulta(rows)
+        return Response(rows)
+
+    @action(detail=False, methods=['get'], url_path='consulta-colecao')
+    def consulta_colecao(self, request):
+        estacao = request.query_params.get('estacao')
+        colecao = request.query_params.get('colecao')
+        referencia = request.query_params.get('referencia')
+        produto_qs = Produto.objects.select_related('colecao').filter(tipo_produto__in=('1', '3'))
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            produto_qs = produto_qs.filter(empresa_id=empresa_id)
+        elif not request.user.is_superuser:
+            return Response([])
+        if estacao:
+            produto_qs = produto_qs.filter(colecao__Estacao=estacao)
+        if colecao:
+            produto_qs = produto_qs.filter(Q(colecao_id=colecao) | Q(colecao__Codigo=colecao))
+        if referencia:
+            produto_qs = produto_qs.filter(referencia=referencia)
+        produto_qs = produto_qs.exclude(referencia__isnull=True).exclude(referencia='')
+        refs = list(produto_qs.values_list('referencia', flat=True))
+        if not refs:
+            return Response([])
+        qs = self._estoque_scope_queryset().select_related('Idloja').filter(referencia__in=refs)
+        eans = list(qs.values_list('CodigodeBarra', flat=True))
+        sku_por_ean = self._sku_map(eans)
+        produto_por_ref = {produto.referencia: produto for produto in produto_qs}
+        rows = [self._estoque_consulta_row(estoque, sku_por_ean, produto_por_ref) for estoque in qs]
+        rows = self._filtrar_saldo_consulta(rows)
+        return Response(rows)
 
 
 class EstoqueMovimentacaoViewSet(BaseViewSet):
