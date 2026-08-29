@@ -1032,6 +1032,29 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(item.referencia, produto.referencia)
         self.assertEqual(item.saldo_sistema, Decimal("8.000"))
 
+    def test_admin_cria_inventario_com_payload_da_tela(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="350101903", colecao_codigo="35")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_2, Estoque="4.000", reserva="0.000")
+
+        self.client.force_authenticate(self.master)
+        resp = self.client.post(
+            "/api/produto/inventario-estoque/",
+            {
+                "Idloja": self.loja_2.id,
+                "descricao": "Contagem payload tela",
+                "data_abertura": timezone.localdate().isoformat(),
+                "observacao": None,
+                "status": "ABERTO",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.content)
+        inv = InventarioEstoque.objects.get(pk=resp.data["Idinventario"])
+        self.assertEqual(inv.Idloja_id, self.loja_2.id)
+        self.assertEqual(inv.status, InventarioEstoque.STATUS_ABERTO)
+        self.assertEqual(inv.itens.get(CodigodeBarra=sku.ean13).saldo_sistema, Decimal("4.000"))
+
     def test_inclui_ean_valido_da_empresa_com_saldo_zero_na_loja(self):
         produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101882")
         inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
