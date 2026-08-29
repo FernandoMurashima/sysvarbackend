@@ -18,6 +18,8 @@ from .models import (
     EstoqueMovimentacao,
     Grade,
     Grupo,
+    InventarioEstoque,
+    InventarioEstoqueItem,
     Ncm,
     Produto,
     ProdutoDetalhe,
@@ -890,7 +892,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
             "123",
             empresa=self.empresa,
             loja=self.loja_1,
-            type="Regular",
+            type="Gerente",
         )
         self.estoque_modulo, _ = ModuloSistema.objects.get_or_create(
             chave="estoque",
@@ -907,7 +909,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
         EmpresaModulo.objects.update_or_create(empresa=self.empresa, modulo=self.estoque_modulo, defaults={"contratado": True})
         EmpresaModulo.objects.update_or_create(empresa=self.outra_empresa, modulo=self.estoque_modulo, defaults={"contratado": True})
         perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome="Consulta Estoque")
-        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.estoque_modulo, acesso=UserModulePermission.Access.VIEW)
+        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.estoque_modulo, acesso=UserModulePermission.Access.EDIT)
         self.restrito.perfil_principal = perfil
         self.restrito.save(update_fields=["perfil_principal"])
         self.restrito.lojas.add(self.loja_1)
@@ -969,6 +971,117 @@ class EstoqueAcessoLojaApiTests(TestCase):
         resp = self.client.get("/api/produto/estoque-movimentacao/", {"loja": self.loja_2.id})
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(self.results(resp), [])
+
+    def test_usuario_acessa_inventario_de_loja_permitida(self):
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario L1")
+        InventarioEstoque.objects.create(Idloja=self.loja_2, descricao="Inventario L2")
+
+        self.client.force_authenticate(self.restrito)
+        list_resp = self.client.get("/api/produto/inventario-estoque/")
+        detail_resp = self.client.get(f"/api/produto/inventario-estoque/{inv.pk}/")
+
+        self.assertEqual(list_resp.status_code, 200, list_resp.content)
+        self.assertEqual({row["Idinventario"] for row in self.results(list_resp)}, {inv.pk})
+        self.assertEqual(detail_resp.status_code, 200, detail_resp.content)
+        self.assertEqual(detail_resp.data["Idloja"], self.loja_1.id)
+
+    def test_usuario_restrito_nao_acessa_nem_cria_inventario_de_loja_nao_permitida(self):
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_2, descricao="Inventario L2", status=InventarioEstoque.STATUS_FECHADO)
+
+        self.client.force_authenticate(self.restrito)
+        detail_resp = self.client.get(f"/api/produto/inventario-estoque/{inv.pk}/")
+        create_resp = self.client.post(
+            "/api/produto/inventario-estoque/",
+            {"Idloja": self.loja_2.id, "descricao": "Bloqueado"},
+            format="json",
+        )
+
+        self.assertEqual(detail_resp.status_code, 404, detail_resp.content)
+        self.assertEqual(create_resp.status_code, 403, create_resp.content)
+
+    def test_bloqueia_segundo_inventario_aberto_para_mesma_loja(self):
+        InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Aberto")
+
+        self.client.force_authenticate(self.master)
+        resp = self.client.post(
+            "/api/produto/inventario-estoque/",
+            {"Idloja": self.loja_1.id, "descricao": "Duplicado"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("Idloja", resp.data)
+
+    def test_criacao_gera_itens_iniciais_por_sku_e_preserva_saldo_original(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101881")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque="8.000", reserva="0.000")
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.post(
+            "/api/produto/inventario-estoque/",
+            {"Idloja": self.loja_1.id, "descricao": "Contagem L1"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.content)
+        inv = InventarioEstoque.objects.get(pk=resp.data["Idinventario"])
+        item = inv.itens.get(CodigodeBarra=sku.ean13)
+        self.assertEqual(inv.status, InventarioEstoque.STATUS_ABERTO)
+        self.assertEqual(inv.Idloja_id, self.loja_1.id)
+        self.assertEqual(item.referencia, produto.referencia)
+        self.assertEqual(item.saldo_sistema, Decimal("8.000"))
+
+    def test_inclui_ean_valido_da_empresa_com_saldo_zero_na_loja(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101882")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.post(
+            "/api/produto/inventario-estoque-item/",
+            {"inventario": inv.pk, "CodigodeBarra": sku.ean13},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.content)
+        item = InventarioEstoqueItem.objects.get(pk=resp.data["Idinventarioitem"])
+        self.assertEqual(item.referencia, produto.referencia)
+        self.assertEqual(item.saldo_sistema, Decimal("0.000"))
+        self.assertFalse(item.contado)
+
+        update_resp = self.client.patch(
+            f"/api/produto/inventario-estoque-item/{item.pk}/",
+            {"saldo_contado": "2.000"},
+            format="json",
+        )
+        self.assertEqual(update_resp.status_code, 200, update_resp.content)
+        item.refresh_from_db()
+        self.assertTrue(item.contado)
+        self.assertEqual(item.saldo_contado, Decimal("2.000"))
+
+    def test_rejeita_ean_inexistente_ou_de_outra_empresa_no_inventario(self):
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        unidade = Unidade.objects.create(empresa=self.outra_empresa, Descricao="Unidade Outra", Codigo="UOB")
+        grade = Grade.objects.create(empresa=self.outra_empresa, Descricao="Grade Outra")
+        cor = Cor.objects.create(empresa=self.outra_empresa, Descricao="Cor Outra", Codigo="COB", Cor="Outra")
+        tamanho = Tamanho.objects.create(empresa=self.outra_empresa, idgrade=grade, Tamanho="M")
+        ConfigEan.objects.get_or_create(empresa=self.outra_empresa, company_prefix="6666")
+        produto_outra = Produto.objects.create(empresa=self.outra_empresa, tipo_produto="1", referencia="990101001", descricao="Outro", descricao_reduzida="Outro", unidade=unidade, grade=grade)
+        sku_outra = ProdutoDetalhe.objects.create(produto=produto_outra, idcor=cor, idtamanho=tamanho)
+
+        self.client.force_authenticate(self.restrito)
+        inexistente = self.client.post(
+            "/api/produto/inventario-estoque-item/",
+            {"inventario": inv.pk, "CodigodeBarra": "7890000000999"},
+            format="json",
+        )
+        outra_empresa = self.client.post(
+            "/api/produto/inventario-estoque-item/",
+            {"inventario": inv.pk, "CodigodeBarra": sku_outra.ean13},
+            format="json",
+        )
+
+        self.assertEqual(inexistente.status_code, 400, inexistente.content)
+        self.assertEqual(outra_empresa.status_code, 400, outra_empresa.content)
 
     def test_consultas_de_estoque_isolam_empresas(self):
         self.client.force_authenticate(self.master)

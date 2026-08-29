@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from django.db import transaction
 from django.db.models import Count, Q, Sum
@@ -2624,26 +2624,21 @@ class InventarioEstoqueViewSet(BaseViewSet):
     queryset = InventarioEstoque.objects.all()
     serializer_class = InventarioEstoqueSerializer
 
-    def get_queryset(self):
-        qs = InventarioEstoque.objects.prefetch_related('itens').select_related('Idloja')
-        empresa_id = self._empresa_id_usuario()
-        if empresa_id:
-            qs = qs.filter(Idloja__empresa_id=empresa_id)
-        elif not self.request.user.is_superuser:
-            return qs.none()
-        loja = self.request.query_params.get('loja')
-        status_q = self.request.query_params.get('status')
-        if loja:
-            qs = qs.filter(Idloja_id=loja)
-        if status_q:
-            qs = qs.filter(status=status_q)
-        return qs
+    def _allowed_store_ids(self):
+        access = EffectiveAccessService(self.request.user)
+        if self.request.user.is_superuser or access.is_company_master() or getattr(self.request.user, "type", "") == "Admin":
+            return None
+        return access.allowed_store_ids()
 
-    @action(detail=True, methods=['post'], url_path='gerar-itens')
-    def gerar_itens(self, request, pk=None):
-        inv = self.get_object()
-        if inv.status != InventarioEstoque.STATUS_ABERTO:
-            return Response({'detail': 'Somente inventário aberto pode gerar itens.'}, status=status.HTTP_400_BAD_REQUEST)
+    def _ensure_loja_operacional_permitida(self, loja):
+        user = self.request.user
+        if getattr(user, "empresa_id", None) and loja.empresa_id != user.empresa_id:
+            raise ValidationError({'Idloja': 'Loja fora do contexto da empresa.'})
+        allowed = self._allowed_store_ids()
+        if allowed is not None and loja.id not in allowed:
+            raise PermissionDenied('Loja fora do escopo permitido.')
+
+    def _gerar_itens_iniciais(self, inv):
         estoques = Estoque.objects.filter(Idloja=inv.Idloja).order_by('referencia', 'CodigodeBarra')
         created = 0
         for est in estoques:
@@ -2659,7 +2654,42 @@ class InventarioEstoqueViewSet(BaseViewSet):
             )
             if was_created:
                 created += 1
-        return Response({'created': created})
+        return created
+
+    def get_queryset(self):
+        qs = InventarioEstoque.objects.prefetch_related('itens').select_related('Idloja')
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(Idloja__empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        allowed = self._allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(Idloja_id__in=allowed)
+        loja = self.request.query_params.get('loja')
+        status_q = self.request.query_params.get('status')
+        if loja:
+            qs = qs.filter(Idloja_id=loja)
+        if status_q:
+            qs = qs.filter(status=status_q)
+        return qs
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        loja = serializer.validated_data.get('Idloja')
+        self._ensure_loja_operacional_permitida(loja)
+        extra = {'status': InventarioEstoque.STATUS_ABERTO}
+        if not serializer.validated_data.get('data_abertura'):
+            extra['data_abertura'] = timezone.localdate()
+        inv = serializer.save(**extra)
+        self._gerar_itens_iniciais(inv)
+
+    @action(detail=True, methods=['post'], url_path='gerar-itens')
+    def gerar_itens(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Somente inventário aberto pode gerar itens.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'created': self._gerar_itens_iniciais(inv)})
 
     @action(detail=True, methods=['post'], url_path='validar')
     @transaction.atomic
@@ -2738,6 +2768,12 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
     queryset = InventarioEstoqueItem.objects.all()
     serializer_class = InventarioEstoqueItemSerializer
 
+    def _allowed_store_ids(self):
+        access = EffectiveAccessService(self.request.user)
+        if self.request.user.is_superuser or access.is_company_master() or getattr(self.request.user, "type", "") == "Admin":
+            return None
+        return access.allowed_store_ids()
+
     def get_queryset(self):
         qs = InventarioEstoqueItem.objects.all().order_by('referencia', 'CodigodeBarra')
         empresa_id = self._empresa_id_usuario()
@@ -2745,10 +2781,22 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
             qs = qs.filter(inventario__Idloja__empresa_id=empresa_id)
         elif not self.request.user.is_superuser:
             return qs.none()
+        allowed = self._allowed_store_ids()
+        if allowed is not None:
+            qs = qs.filter(inventario__Idloja_id__in=allowed)
         inventario = self.request.query_params.get('inventario')
         if inventario:
             qs = qs.filter(inventario_id=inventario)
         return qs
+
+    def perform_create(self, serializer):
+        inventario = serializer.validated_data.get('inventario')
+        if inventario.status != InventarioEstoque.STATUS_ABERTO:
+            raise ValidationError({'inventario': 'Somente inventário aberto pode receber itens.'})
+        allowed = self._allowed_store_ids()
+        if allowed is not None and inventario.Idloja_id not in allowed:
+            raise PermissionDenied('Loja fora do escopo permitido.')
+        serializer.save(contado=False, saldo_contado=0)
 
     def perform_update(self, serializer):
         item = self.get_object()

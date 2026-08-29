@@ -357,6 +357,20 @@ class InventarioEstoqueItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('diferenca',)
 
+    def validate(self, attrs):
+        inventario = attrs.get('inventario', getattr(self.instance, 'inventario', None))
+        ean = attrs.get('CodigodeBarra', getattr(self.instance, 'CodigodeBarra', None))
+        if not inventario or not ean or self.instance:
+            return attrs
+        sku = ProdutoDetalhe.objects.select_related('produto').filter(ean13=ean).first()
+        if not sku:
+            raise serializers.ValidationError({'CodigodeBarra': 'EAN não encontrado no cadastro de SKUs.'})
+        if sku.produto.empresa_id != inventario.Idloja.empresa_id:
+            raise serializers.ValidationError({'CodigodeBarra': 'EAN fora do contexto da empresa do inventário.'})
+        attrs['referencia'] = sku.produto.referencia or attrs.get('referencia', '')
+        attrs['saldo_sistema'] = Decimal('0')
+        return attrs
+
 
 class InventarioEstoqueSerializer(serializers.ModelSerializer):
     itens = InventarioEstoqueItemSerializer(many=True, read_only=True)
@@ -370,6 +384,18 @@ class InventarioEstoqueSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventarioEstoque
         fields = '__all__'
+
+    def validate(self, attrs):
+        if self.instance:
+            return attrs
+        loja = attrs.get('Idloja')
+        if loja and InventarioEstoque.objects.filter(
+            Idloja=loja,
+            status=InventarioEstoque.STATUS_ABERTO,
+        ).exists():
+            raise serializers.ValidationError({'Idloja': 'Já existe inventário aberto para esta loja.'})
+        attrs['status'] = InventarioEstoque.STATUS_ABERTO
+        return attrs
 
     def get_total_itens(self, obj):
         return obj.itens.count()
