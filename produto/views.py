@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, filters
+from rest_framework import viewsets, status, filters, parsers
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -2656,6 +2656,110 @@ class InventarioEstoqueViewSet(BaseViewSet):
                 created += 1
         return created
 
+    def _texto_importacao(self, request):
+        arquivo = request.FILES.get('arquivo') if hasattr(request, 'FILES') else None
+        if arquivo:
+            try:
+                return arquivo.read().decode('utf-8-sig')
+            except UnicodeDecodeError as exc:
+                raise ValidationError({'arquivo': 'Arquivo deve estar em codificação textual válida.'}) from exc
+        return str(request.data.get('conteudo') or '')
+
+    def _preview_importacao(self, inv, texto=None, registros=None):
+        raw_rows = []
+        if registros is not None:
+            for idx, row in enumerate(registros, start=1):
+                raw_rows.append((idx, str(row.get('ean') or ''), row.get('quantidade')))
+        else:
+            for idx, line in enumerate((texto or '').splitlines(), start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                parts = [part.strip() for part in stripped.split(',')]
+                if len(parts) != 2:
+                    raw_rows.append((idx, '', None))
+                else:
+                    raw_rows.append((idx, parts[0], parts[1]))
+
+        eans = {ean for _, ean, _ in raw_rows if ean}
+        skus = {
+            sku.ean13: sku
+            for sku in ProdutoDetalhe.objects.select_related('produto').filter(ean13__in=eans)
+        }
+        invalidas = []
+        inexistentes = []
+        outra_empresa = []
+        consolidados = {}
+        duplicidades = {}
+        for line, ean, qtd_raw in raw_rows:
+            errors = []
+            if not ean or len(ean) != 13 or not ean.isdigit():
+                errors.append('EAN inválido.')
+            try:
+                qtd = Decimal(str(qtd_raw).replace(',', '.'))
+            except Exception:
+                qtd = None
+                errors.append('Quantidade inválida.')
+            if qtd is not None and qtd < 0:
+                errors.append('Quantidade negativa.')
+            sku = skus.get(ean)
+            if not errors and not sku:
+                errors.append('EAN inexistente.')
+                inexistentes.append(ean)
+            if not errors and sku.produto.empresa_id != inv.Idloja.empresa_id:
+                errors.append('EAN de outra empresa.')
+                outra_empresa.append(ean)
+            if errors:
+                invalidas.append({'linha': line, 'ean': ean, 'quantidade': str(qtd_raw or ''), 'erros': errors})
+                continue
+            if ean in consolidados:
+                duplicidades[ean] = duplicidades.get(ean, 1) + 1
+            consolidados[ean] = consolidados.get(ean, Decimal('0')) + qtd
+
+        validas = [{'ean': ean, 'quantidade': str(qtd)} for ean, qtd in consolidados.items()]
+        return {
+            'total_linhas': len(raw_rows),
+            'linhas_validas': len(validas),
+            'linhas_invalidas': len(invalidas),
+            'eans_inexistentes': sorted(set(inexistentes)),
+            'eans_outra_empresa': sorted(set(outra_empresa)),
+            'duplicidades': [{'ean': ean, 'ocorrencias': count, 'quantidade_consolidada': str(consolidados[ean])} for ean, count in sorted(duplicidades.items())],
+            'validas': validas,
+            'invalidas': invalidas,
+        }
+
+    def _aplicar_importacao_validas(self, inv, validas):
+        eans = [row['ean'] for row in validas]
+        skus = {
+            sku.ean13: sku
+            for sku in ProdutoDetalhe.objects.select_related('produto').filter(ean13__in=eans, produto__empresa_id=inv.Idloja.empresa_id)
+        }
+        atualizados = 0
+        criados = 0
+        for row in validas:
+            ean = row['ean']
+            if ean not in skus:
+                raise ValidationError({'ean': f'EAN {ean} não pertence ao contexto válido do inventário.'})
+            qtd = Decimal(str(row['quantidade']))
+            if qtd < 0:
+                raise ValidationError({'quantidade': 'Quantidade contada não pode ser negativa.'})
+            item, created = InventarioEstoqueItem.objects.select_for_update().get_or_create(
+                inventario=inv,
+                CodigodeBarra=ean,
+                defaults={
+                    'referencia': skus[ean].produto.referencia or '',
+                    'saldo_sistema': 0,
+                    'saldo_contado': 0,
+                    'contado': False,
+                },
+            )
+            item.saldo_contado = qtd
+            item.contado = True
+            item.save(update_fields=['saldo_contado', 'diferenca', 'contado'])
+            criados += 1 if created else 0
+            atualizados += 0 if created else 1
+        return {'criados': criados, 'atualizados': atualizados}
+
     def get_queryset(self):
         qs = InventarioEstoque.objects.prefetch_related('itens').select_related('Idloja')
         empresa_id = self._empresa_id_usuario()
@@ -2736,6 +2840,26 @@ class InventarioEstoqueViewSet(BaseViewSet):
         data = InventarioEstoqueItemSerializer(item, context=self.get_serializer_context()).data
         data['created'] = created
         return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='importar-preview', parser_classes=[parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser])
+    def importar_preview(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Inventário fechado não aceita importação.'}, status=status.HTTP_400_BAD_REQUEST)
+        texto = self._texto_importacao(request)
+        if not texto.strip():
+            return Response({'detail': 'Arquivo vazio.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._preview_importacao(inv, texto=texto))
+
+    @action(detail=True, methods=['post'], url_path='importar-aplicar')
+    @transaction.atomic
+    def importar_aplicar(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Inventário fechado não aceita importação.'}, status=status.HTTP_400_BAD_REQUEST)
+        preview = self._preview_importacao(inv, registros=request.data.get('validas') or [])
+        resultado = self._aplicar_importacao_validas(inv, preview['validas'])
+        return Response({**preview, **resultado})
 
     @action(detail=True, methods=['post'], url_path='validar')
     @transaction.atomic

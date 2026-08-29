@@ -439,7 +439,7 @@ class ProdutoVendaApiTests(TestCase):
             ativo=False,
         )
         produto_venda = self.produto(descricao="Produto venda")
-        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=loja_filial, saldo="0.000")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso_inativo, loja=self.loja, saldo="3.000")
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_venda, loja=self.loja, saldo="99.000")
@@ -474,15 +474,15 @@ class ProdutoVendaApiTests(TestCase):
         )
         produto_uso = self.produto(tipo_produto="2", descricao="Papel A4", descricao_reduzida="PAPEL")
         produto_venda = self.produto(descricao="Produto venda")
-        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_uso, loja=self.loja, saldo="7")
         ProdutoUsoConsumoMovimentacao.objects.create(
             empresa=self.empresa,
             produto=produto_uso,
             loja=self.loja,
             tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA,
-            quantidade="7.000",
+            quantidade="7",
             saldo_anterior="0.000",
-            saldo_posterior="7.000",
+            saldo_posterior="7",
             documento="NFE:21:ENTRADA",
             origem="NFE:21",
             destino=self.loja.nome_loja,
@@ -504,8 +504,8 @@ class ProdutoVendaApiTests(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["produto_tipo"], "2")
         self.assertEqual(results[0]["loja"], self.loja.id)
-        self.assertEqual(results[0]["quantidade"], "7.000")
-        self.assertEqual(results[0]["saldo_posterior"], "7.000")
+        self.assertEqual(results[0]["quantidade"], "7")
+        self.assertEqual(results[0]["saldo_posterior"], "7")
 
         resp_loja = self.client.get("/api/produto/produto-uso-consumo-movimentacao/", {"loja": loja_filial.id})
         results_loja = resp_loja.data["results"] if isinstance(resp_loja.data, dict) else resp_loja.data
@@ -1145,7 +1145,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
     def test_leitura_incremental_primeira_e_multiplas_preserva_saldo_original(self):
         produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101884")
         inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
-        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("7.000"))
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("7"))
 
         self.client.force_authenticate(self.restrito)
         primeira = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13, "modo": "incremental"}, format="json")
@@ -1157,7 +1157,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertTrue(item.contado)
         self.assertEqual(item.saldo_contado, Decimal("2.000"))
         self.assertEqual(item.diferenca, Decimal("-5.000"))
-        self.assertEqual(item.saldo_sistema, Decimal("7.000"))
+        self.assertEqual(item.saldo_sistema, Decimal("7"))
         self.assertEqual(InventarioEstoqueItem.objects.filter(inventario=inv, CodigodeBarra=sku.ean13).count(), 1)
 
     def test_leitura_incremental_inclui_ean_valido_ausente_sem_duplicar(self):
@@ -1215,6 +1215,83 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(item.saldo_sistema, Decimal("3.000"))
         self.assertEqual(item.saldo_contado, Decimal("0.000"))
         self.assertEqual(item.diferenca, Decimal("-3.000"))
+
+    def test_importacao_preview_txt_csv_valida_sem_alterar_banco(self):
+        _, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101888")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia="REF", saldo_sistema=Decimal("4.000"))
+
+        self.client.force_authenticate(self.restrito)
+        for nome in ["contagem.txt", "contagem.csv"]:
+            arquivo = SimpleUploadedFile(nome, f"{sku.ean13},5\n{sku.ean13},2\n".encode("utf-8"), content_type="text/plain")
+            resp = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-preview/", {"arquivo": arquivo}, format="multipart")
+            self.assertEqual(resp.status_code, 200, resp.content)
+            self.assertEqual(resp.data["total_linhas"], 2)
+            self.assertEqual(resp.data["linhas_validas"], 1)
+            self.assertEqual(resp.data["linhas_invalidas"], 0)
+            self.assertEqual(resp.data["validas"], [{"ean": sku.ean13, "quantidade": "7"}])
+            self.assertEqual(resp.data["duplicidades"][0]["ean"], sku.ean13)
+            item.refresh_from_db()
+            self.assertFalse(item.contado)
+            self.assertEqual(item.saldo_contado, Decimal("0.000"))
+
+    def test_importacao_preview_identifica_erros(self):
+        _, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101889")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        unidade = Unidade.objects.create(empresa=self.outra_empresa, Descricao="Unidade Import", Codigo="UIB")
+        grade = Grade.objects.create(empresa=self.outra_empresa, Descricao="Grade Import")
+        cor = Cor.objects.create(empresa=self.outra_empresa, Descricao="Cor Import", Codigo="CIB", Cor="Outra")
+        tamanho = Tamanho.objects.create(empresa=self.outra_empresa, idgrade=grade, Tamanho="P")
+        ConfigEan.objects.get_or_create(empresa=self.outra_empresa, company_prefix="8888")
+        produto_outra = Produto.objects.create(empresa=self.outra_empresa, tipo_produto="1", referencia="990101003", descricao="Outro", descricao_reduzida="Outro", unidade=unidade, grade=grade)
+        sku_outra = ProdutoDetalhe.objects.create(produto=produto_outra, idcor=cor, idtamanho=tamanho)
+
+        self.client.force_authenticate(self.restrito)
+        conteudo = f"{sku.ean13},3\n7890000000999,1\n{sku_outra.ean13},1\n{sku.ean13},abc\n{sku.ean13},-1\nlinha-invalida\n"
+        resp = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-preview/", {"conteudo": conteudo}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["linhas_validas"], 1)
+        self.assertEqual(resp.data["linhas_invalidas"], 5)
+        self.assertEqual(resp.data["eans_inexistentes"], ["7890000000999"])
+        self.assertEqual(resp.data["eans_outra_empresa"], [sku_outra.ean13])
+        self.assertFalse(InventarioEstoqueItem.objects.filter(inventario=inv).exists())
+
+    def test_importacao_aplica_validos_existente_e_ausente_sem_movimentar_estoque(self):
+        produto_a, sku_a, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101890")
+        produto_b, sku_b, _, _, _ = self.criar_produto_com_sku(referencia_esperada="270101891", colecao_codigo="27")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_a.ean13, referencia=produto_a.referencia, saldo_sistema=Decimal("8.000"))
+        movs_antes = EstoqueMovimentacao.objects.count()
+
+        self.client.force_authenticate(self.restrito)
+        preview = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-preview/", {"conteudo": f"{sku_a.ean13},6\n{sku_b.ean13},2\n{sku_b.ean13},3\n"}, format="json")
+        resp = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-aplicar/", {"validas": preview.data["validas"]}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item.refresh_from_db()
+        novo = InventarioEstoqueItem.objects.get(inventario=inv, CodigodeBarra=sku_b.ean13)
+        self.assertEqual(item.saldo_sistema, Decimal("8.000"))
+        self.assertEqual(item.saldo_contado, Decimal("6.000"))
+        self.assertEqual(item.diferenca, Decimal("-2.000"))
+        self.assertTrue(item.contado)
+        self.assertEqual(novo.referencia, produto_b.referencia)
+        self.assertEqual(novo.saldo_sistema, Decimal("0.000"))
+        self.assertEqual(novo.saldo_contado, Decimal("5.000"))
+        self.assertEqual(InventarioEstoqueItem.objects.filter(inventario=inv, CodigodeBarra=sku_b.ean13).count(), 1)
+        self.assertEqual(EstoqueMovimentacao.objects.count(), movs_antes)
+
+    def test_importacao_bloqueada_em_inventario_fechado(self):
+        _, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101892")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario", status=InventarioEstoque.STATUS_FECHADO)
+
+        self.client.force_authenticate(self.restrito)
+        preview = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-preview/", {"conteudo": f"{sku.ean13},1\n"}, format="json")
+        aplicar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-aplicar/", {"validas": [{"ean": sku.ean13, "quantidade": "1"}]}, format="json")
+
+        self.assertEqual(preview.status_code, 400, preview.content)
+        self.assertEqual(aplicar.status_code, 400, aplicar.content)
+        self.assertFalse(InventarioEstoqueItem.objects.filter(inventario=inv).exists())
 
     def test_consultas_de_estoque_isolam_empresas(self):
         self.client.force_authenticate(self.master)
@@ -1311,7 +1388,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
         produto_loja_1 = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso L1", descricao_reduzida="Uso L1", unidade=unidade, ativo=False)
         produto_loja_2 = Produto.objects.create(empresa=self.empresa, tipo_produto="2", descricao="Uso L2", descricao_reduzida="Uso L2", unidade=unidade)
         ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_loja_1, loja=self.loja_1, saldo="3.000")
-        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_loja_2, loja=self.loja_2, saldo="7.000")
+        ProdutoUsoConsumoEstoque.objects.create(empresa=self.empresa, produto=produto_loja_2, loja=self.loja_2, saldo="7")
 
         self.client.force_authenticate(self.restrito)
         resp = self.client.get("/api/produto/produto-uso-consumo-estoque/", {"loja": self.loja_1.id})
