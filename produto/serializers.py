@@ -352,14 +352,46 @@ class EstoqueMovimentacaoSerializer(serializers.ModelSerializer):
 
 
 class InventarioEstoqueItemSerializer(serializers.ModelSerializer):
+    produto_descricao = serializers.SerializerMethodField()
+    cor = serializers.SerializerMethodField()
+    tamanho = serializers.SerializerMethodField()
+
     class Meta:
         model = InventarioEstoqueItem
         fields = '__all__'
         read_only_fields = ('diferenca',)
 
+    def _sku(self, obj):
+        cache = self.context.setdefault('_inventario_skus', {})
+        if obj.CodigodeBarra not in cache:
+            cache[obj.CodigodeBarra] = (
+                ProdutoDetalhe.objects
+                .select_related('produto', 'idcor', 'idtamanho')
+                .filter(ean13=obj.CodigodeBarra)
+                .first()
+            )
+        return cache[obj.CodigodeBarra]
+
+    def get_produto_descricao(self, obj):
+        sku = self._sku(obj)
+        produto = getattr(sku, 'produto', None)
+        return getattr(produto, 'descricao_reduzida', None) or getattr(produto, 'descricao', '') or ''
+
+    def get_cor(self, obj):
+        sku = self._sku(obj)
+        return getattr(getattr(sku, 'idcor', None), 'Descricao', '') or ''
+
+    def get_tamanho(self, obj):
+        sku = self._sku(obj)
+        return getattr(getattr(sku, 'idtamanho', None), 'Tamanho', '') or ''
+
     def validate(self, attrs):
         inventario = attrs.get('inventario', getattr(self.instance, 'inventario', None))
         ean = attrs.get('CodigodeBarra', getattr(self.instance, 'CodigodeBarra', None))
+        if self.instance and 'saldo_sistema' in attrs:
+            raise serializers.ValidationError({'saldo_sistema': 'Saldo original do inventário não pode ser alterado.'})
+        if 'saldo_contado' in attrs and Decimal(attrs['saldo_contado']) < 0:
+            raise serializers.ValidationError({'saldo_contado': 'Quantidade contada não pode ser negativa.'})
         if not inventario or not ean or self.instance:
             return attrs
         sku = ProdutoDetalhe.objects.select_related('produto').filter(ean13=ean).first()

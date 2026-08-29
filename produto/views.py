@@ -2787,6 +2787,26 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
         inventario = self.request.query_params.get('inventario')
         if inventario:
             qs = qs.filter(inventario_id=inventario)
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            skus = ProdutoDetalhe.objects.select_related('produto', 'idcor', 'idtamanho').filter(
+                Q(ean13__icontains=search)
+                | Q(produto__referencia__icontains=search)
+                | Q(produto__descricao__icontains=search)
+                | Q(produto__descricao_reduzida__icontains=search)
+                | Q(idcor__Descricao__icontains=search)
+                | Q(idtamanho__Tamanho__icontains=search)
+            )
+            if empresa_id:
+                skus = skus.filter(produto__empresa_id=empresa_id)
+            qs = qs.filter(Q(CodigodeBarra__icontains=search) | Q(referencia__icontains=search) | Q(CodigodeBarra__in=skus.values('ean13')))
+        situacao = self.request.query_params.get('situacao')
+        if situacao == 'pendentes':
+            qs = qs.filter(contado=False)
+        elif situacao == 'contados':
+            qs = qs.filter(contado=True)
+        elif situacao == 'divergentes':
+            qs = qs.filter(contado=True).exclude(diferenca=0)
         return qs
 
     def perform_create(self, serializer):

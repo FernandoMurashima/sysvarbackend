@@ -1083,6 +1083,65 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(inexistente.status_code, 400, inexistente.content)
         self.assertEqual(outra_empresa.status_code, 400, outra_empresa.content)
 
+    def test_pesquisa_itens_inventario_por_ean_referencia_descricao_cor_e_tamanho(self):
+        produto, sku, cor, tamanho, _ = self.criar_produto_com_sku(referencia_esperada="260101883")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("4.000"))
+        InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra="7890000000998", referencia="OUTRA", saldo_sistema=Decimal("1.000"))
+
+        self.client.force_authenticate(self.restrito)
+        cases = [sku.ean13, produto.referencia, produto.descricao, cor.Descricao, tamanho.Tamanho]
+        for term in cases:
+            resp = self.client.get("/api/produto/inventario-estoque-item/", {"inventario": inv.pk, "search": term})
+            self.assertEqual(resp.status_code, 200, resp.content)
+            self.assertEqual([row["Idinventarioitem"] for row in self.results(resp)], [item.pk])
+            self.assertEqual(self.results(resp)[0]["produto_descricao"], produto.descricao_reduzida)
+            self.assertEqual(self.results(resp)[0]["cor"], cor.Descricao)
+            self.assertEqual(self.results(resp)[0]["tamanho"], tamanho.Tamanho)
+
+    def test_filtros_situacao_itens_inventario(self):
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        pendente = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra="7890000000911", referencia="PEND", saldo_sistema=Decimal("3.000"), saldo_contado=Decimal("0.000"), contado=False)
+        contado = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra="7890000000912", referencia="CONT", saldo_sistema=Decimal("2.000"), saldo_contado=Decimal("2.000"), contado=True)
+        divergente = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra="7890000000913", referencia="DIV", saldo_sistema=Decimal("5.000"), saldo_contado=Decimal("1.000"), contado=True)
+
+        self.client.force_authenticate(self.restrito)
+        expected = {
+            "pendentes": [pendente.pk],
+            "contados": [contado.pk, divergente.pk],
+            "divergentes": [divergente.pk],
+        }
+        for situacao, ids in expected.items():
+            resp = self.client.get("/api/produto/inventario-estoque-item/", {"inventario": inv.pk, "situacao": situacao})
+            self.assertEqual(resp.status_code, 200, resp.content)
+            self.assertEqual([row["Idinventarioitem"] for row in self.results(resp)], ids)
+
+    def test_lancamento_manual_zero_diferenca_e_saldo_original_preservado(self):
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra="7890000000921", referencia="MAN", saldo_sistema=Decimal("6.000"))
+
+        self.client.force_authenticate(self.restrito)
+        zero = self.client.patch(
+            f"/api/produto/inventario-estoque-item/{item.pk}/",
+            {"saldo_contado": "0.000"},
+            format="json",
+        )
+        self.assertEqual(zero.status_code, 200, zero.content)
+        item.refresh_from_db()
+        self.assertTrue(item.contado)
+        self.assertEqual(item.saldo_contado, Decimal("0.000"))
+        self.assertEqual(item.diferenca, Decimal("-6.000"))
+        self.assertEqual(item.saldo_sistema, Decimal("6.000"))
+
+        alterar_original = self.client.patch(
+            f"/api/produto/inventario-estoque-item/{item.pk}/",
+            {"saldo_sistema": "9.000", "saldo_contado": "2.000"},
+            format="json",
+        )
+        self.assertEqual(alterar_original.status_code, 400, alterar_original.content)
+        item.refresh_from_db()
+        self.assertEqual(item.saldo_sistema, Decimal("6.000"))
+
     def test_consultas_de_estoque_isolam_empresas(self):
         self.client.force_authenticate(self.master)
         estoque_resp = self.client.get("/api/produto/estoque/")
