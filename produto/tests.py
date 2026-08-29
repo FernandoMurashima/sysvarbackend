@@ -1422,6 +1422,61 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(inv.descricao, "Fechado")
         self.assertEqual(item.saldo_contado, Decimal("1.000"))
 
+    def test_consulta_inventario_fechado_preserva_historico_sem_movimentar_estoque(self):
+        produto_ok, sku_ok, _, _, _ = self.criar_produto_com_sku(referencia_esperada="320101900", colecao_codigo="32")
+        produto_sobra, sku_sobra, _, _, _ = self.criar_produto_com_sku(referencia_esperada="330101901", colecao_codigo="33")
+        produto_falta, sku_falta, _, _, _ = self.criar_produto_com_sku(referencia_esperada="340101902", colecao_codigo="34")
+        Estoque.objects.create(CodigodeBarra=sku_ok.ean13, referencia=produto_ok.referencia, Idloja=self.loja_1, Estoque=Decimal("99.000"), reserva=Decimal("0.000"))
+        Estoque.objects.create(CodigodeBarra=sku_sobra.ean13, referencia=produto_sobra.referencia, Idloja=self.loja_1, Estoque=Decimal("99.000"), reserva=Decimal("0.000"))
+        Estoque.objects.create(CodigodeBarra=sku_falta.ean13, referencia=produto_falta.referencia, Idloja=self.loja_1, Estoque=Decimal("99.000"), reserva=Decimal("0.000"))
+        inv = InventarioEstoque.objects.create(
+            Idloja=self.loja_1,
+            descricao="Historico",
+            status=InventarioEstoque.STATUS_FECHADO,
+            data_fechamento=timezone.localdate(),
+        )
+        InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_ok.ean13, referencia=produto_ok.referencia, saldo_sistema=Decimal("3.000"), saldo_contado=Decimal("3.000"), contado=True)
+        InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_sobra.ean13, referencia=produto_sobra.referencia, saldo_sistema=Decimal("2.000"), saldo_contado=Decimal("5.000"), contado=True)
+        InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_falta.ean13, referencia=produto_falta.referencia, saldo_sistema=Decimal("7.000"), saldo_contado=Decimal("1.000"), contado=True)
+        movs_antes = EstoqueMovimentacao.objects.count()
+
+        self.client.force_authenticate(self.restrito)
+        detail = self.client.get(f"/api/produto/inventario-estoque/{inv.pk}/")
+        list_resp = self.client.get("/api/produto/inventario-estoque/", {"status": InventarioEstoque.STATUS_FECHADO})
+
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(list_resp.status_code, 200, list_resp.content)
+        self.assertIn(inv.pk, {row["Idinventario"] for row in self.results(list_resp)})
+        self.assertEqual(detail.data["status"], InventarioEstoque.STATUS_FECHADO)
+        self.assertEqual(detail.data["total_itens"], 3)
+        self.assertEqual(detail.data["total_sem_divergencia"], 1)
+        self.assertEqual(detail.data["total_sobra"], 1)
+        self.assertEqual(detail.data["total_falta"], 1)
+        self.assertEqual(detail.data["total_divergencias"], 2)
+        by_ean = {item["CodigodeBarra"]: item for item in detail.data["itens"]}
+        self.assertEqual(Decimal(by_ean[sku_ok.ean13]["saldo_sistema"]), Decimal("3.000"))
+        self.assertEqual(Decimal(by_ean[sku_sobra.ean13]["saldo_sistema"]), Decimal("2.000"))
+        self.assertEqual(Decimal(by_ean[sku_falta.ean13]["saldo_sistema"]), Decimal("7.000"))
+        self.assertEqual(Decimal(by_ean[sku_sobra.ean13]["diferenca"]), Decimal("3.000"))
+        self.assertEqual(Decimal(by_ean[sku_falta.ean13]["diferenca"]), Decimal("-6.000"))
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=sku_ok.ean13, Idloja=self.loja_1).Estoque, Decimal("99.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.count(), movs_antes)
+
+    def test_consulta_inventario_fechado_respeita_empresa_e_lojas_permitidas(self):
+        permitido = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Permitido", status=InventarioEstoque.STATUS_FECHADO)
+        bloqueado_loja = InventarioEstoque.objects.create(Idloja=self.loja_2, descricao="Bloqueado", status=InventarioEstoque.STATUS_FECHADO)
+        bloqueado_empresa = InventarioEstoque.objects.create(Idloja=self.loja_outra_empresa, descricao="Outra empresa", status=InventarioEstoque.STATUS_FECHADO)
+
+        self.client.force_authenticate(self.restrito)
+        list_resp = self.client.get("/api/produto/inventario-estoque/", {"status": InventarioEstoque.STATUS_FECHADO})
+        detail_loja = self.client.get(f"/api/produto/inventario-estoque/{bloqueado_loja.pk}/")
+        detail_empresa = self.client.get(f"/api/produto/inventario-estoque/{bloqueado_empresa.pk}/")
+
+        self.assertEqual(list_resp.status_code, 200, list_resp.content)
+        self.assertEqual({row["Idinventario"] for row in self.results(list_resp)}, {permitido.pk})
+        self.assertEqual(detail_loja.status_code, 404, detail_loja.content)
+        self.assertEqual(detail_empresa.status_code, 404, detail_empresa.content)
+
     def test_auditoria_registra_eventos_relevantes_do_inventario(self):
         produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="310101899", colecao_codigo="31")
         Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque=Decimal("1.000"), reserva=Decimal("0.000"))
