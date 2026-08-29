@@ -2786,14 +2786,30 @@ class InventarioEstoqueViewSet(BaseViewSet):
         if not serializer.validated_data.get('data_abertura'):
             extra['data_abertura'] = timezone.localdate()
         inv = serializer.save(**extra)
-        self._gerar_itens_iniciais(inv)
+        created = self._gerar_itens_iniciais(inv)
+        _audit('InventarioEstoque', str(inv.pk), {'status': inv.status, 'itens_gerados': created}, self.request, 'inventario_criado')
+
+    def perform_update(self, serializer):
+        inv = self.get_object()
+        if inv.status == InventarioEstoque.STATUS_FECHADO:
+            raise ValidationError({'status': 'Inventário fechado é somente consulta.'})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        inv = self.get_object()
+        if inv.status == InventarioEstoque.STATUS_FECHADO:
+            return Response({'detail': 'Inventário fechado é somente consulta.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='gerar-itens')
     def gerar_itens(self, request, pk=None):
         inv = self.get_object()
         if inv.status != InventarioEstoque.STATUS_ABERTO:
             return Response({'detail': 'Somente inventário aberto pode gerar itens.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'created': self._gerar_itens_iniciais(inv)})
+        created = self._gerar_itens_iniciais(inv)
+        if created:
+            _audit('InventarioEstoque', str(inv.pk), {'itens_gerados': created}, request, 'inventario_itens_gerados')
+        return Response({'created': created})
 
     @action(detail=True, methods=['post'], url_path='ler-ean')
     @transaction.atomic
@@ -2837,6 +2853,14 @@ class InventarioEstoqueViewSet(BaseViewSet):
             item.saldo_contado = quantidade
         item.contado = True
         item.save(update_fields=['saldo_contado', 'diferenca', 'contado'])
+        _audit('InventarioEstoqueItem', str(item.pk), {
+            'inventario': inv.pk,
+            'ean': item.CodigodeBarra,
+            'modo': modo,
+            'saldo_contado': str(item.saldo_contado),
+            'diferenca': str(item.diferenca),
+            'created': created,
+        }, request, 'inventario_contagem_lida')
         data = InventarioEstoqueItemSerializer(item, context=self.get_serializer_context()).data
         data['created'] = created
         return Response(data)
@@ -2859,6 +2883,13 @@ class InventarioEstoqueViewSet(BaseViewSet):
             return Response({'detail': 'Inventário fechado não aceita importação.'}, status=status.HTTP_400_BAD_REQUEST)
         preview = self._preview_importacao(inv, registros=request.data.get('validas') or [])
         resultado = self._aplicar_importacao_validas(inv, preview['validas'])
+        _audit('InventarioEstoque', str(inv.pk), {
+            'total_linhas': preview['total_linhas'],
+            'linhas_validas': preview['linhas_validas'],
+            'criados': resultado['criados'],
+            'atualizados': resultado['atualizados'],
+            'duplicidades': preview['duplicidades'],
+        }, request, 'inventario_importacao_aplicada')
         return Response({**preview, **resultado})
 
     @action(detail=True, methods=['post'], url_path='validar')
@@ -2876,11 +2907,18 @@ class InventarioEstoqueViewSet(BaseViewSet):
         inv.status = InventarioEstoque.STATUS_VALIDADO
         inv.save(update_fields=['status'])
         divergencias = inv.itens.exclude(diferenca=0).count()
+        diferenca_total = sum((item.diferenca or 0) for item in inv.itens.all())
+        _audit('InventarioEstoque', str(inv.pk), {
+            'status': inv.status,
+            'total_itens': total_itens,
+            'divergencias': divergencias,
+            'diferenca_total': str(diferenca_total),
+        }, request, 'inventario_validado')
         return Response({
             'inventario': self.get_serializer(inv).data,
             'total_itens': total_itens,
             'divergencias': divergencias,
-            'diferenca_total': str(sum((item.diferenca or 0) for item in inv.itens.all())),
+            'diferenca_total': str(diferenca_total),
         })
 
     @action(detail=True, methods=['post'], url_path='fechar')
@@ -2900,11 +2938,48 @@ class InventarioEstoqueViewSet(BaseViewSet):
         if pendentes:
             return Response({'detail': f'Existem {pendentes} item(ns) sem contagem.'}, status=status.HTTP_400_BAD_REQUEST)
         documento = f'INV-{inv.pk}'
+        movimentos = 0
+        for item in inv.itens.select_for_update().filter(contado=True).exclude(diferenca=0).order_by('CodigodeBarra'):
+            estoque, _ = Estoque.objects.select_for_update().get_or_create(
+                Idloja=inv.Idloja,
+                CodigodeBarra=item.CodigodeBarra,
+                defaults={
+                    'referencia': item.referencia or '',
+                    'Estoque': 0,
+                    'reserva': 0,
+                },
+            )
+            saldo_anterior = Decimal(estoque.Estoque or 0)
+            saldo_posterior = Decimal(item.saldo_contado or 0)
+            diferenca = saldo_posterior - saldo_anterior
+            if diferenca == 0:
+                continue
+            estoque.referencia = item.referencia or estoque.referencia or ''
+            estoque.Estoque = saldo_posterior
+            estoque.save(update_fields=['referencia', 'Estoque'])
+            EstoqueMovimentacao.objects.create(
+                Idloja=inv.Idloja,
+                CodigodeBarra=item.CodigodeBarra,
+                referencia=item.referencia or '',
+                tipo=EstoqueMovimentacao.TIPO_AJUSTE,
+                quantidade=diferenca,
+                saldo_anterior=saldo_anterior,
+                saldo_posterior=saldo_posterior,
+                origem=EstoqueMovimentacao.ORIGEM_INVENTARIO,
+                documento=documento,
+                observacao=f'Ajuste por inventário {inv.pk}',
+            )
+            movimentos += 1
         inv.status = InventarioEstoque.STATUS_FECHADO
         inv.data_fechamento = timezone.localdate()
         inv.save(update_fields=['status', 'data_fechamento'])
+        _audit('InventarioEstoque', str(inv.pk), {
+            'status': inv.status,
+            'movimentos_gerados': movimentos,
+            'documento': documento,
+        }, request, 'inventario_fechado')
         data = self.get_serializer(inv).data
-        data['movimentos_gerados'] = 0
+        data['movimentos_gerados'] = movimentos
         data['documento'] = documento
         return Response(data)
 
@@ -2968,4 +3043,16 @@ class InventarioEstoqueItemViewSet(BaseViewSet):
         item = self.get_object()
         if item.inventario.status != InventarioEstoque.STATUS_ABERTO:
             raise ValidationError({'inventario': 'Somente itens de inventário aberto podem ser alterados.'})
-        serializer.save(contado=True)
+        saved = serializer.save(contado=True)
+        _audit('InventarioEstoqueItem', str(saved.pk), {
+            'inventario': saved.inventario_id,
+            'ean': saved.CodigodeBarra,
+            'saldo_contado': str(saved.saldo_contado),
+            'diferenca': str(saved.diferenca),
+        }, self.request, 'inventario_contagem_alterada')
+
+    def destroy(self, request, *args, **kwargs):
+        item = self.get_object()
+        if item.inventario.status == InventarioEstoque.STATUS_FECHADO:
+            return Response({'detail': 'Inventário fechado é somente consulta.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)

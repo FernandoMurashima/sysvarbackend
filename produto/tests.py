@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -1313,7 +1314,7 @@ class EstoqueAcessoLojaApiTests(TestCase):
         self.assertEqual(resp.data["total_falta"], 1)
         self.assertEqual(resp.data["total_divergencias"], 2)
 
-    def test_finalizacao_bloqueia_pendencias_e_preserva_estoque_fisico(self):
+    def test_finalizacao_bloqueia_pendencias_e_ajusta_estoque_fisico(self):
         produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101893")
         Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque=Decimal("8.000"), reserva=Decimal("0.000"))
         inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Fechamento", status=InventarioEstoque.STATUS_VALIDADO)
@@ -1337,8 +1338,114 @@ class EstoqueAcessoLojaApiTests(TestCase):
         estoque = Estoque.objects.get(CodigodeBarra=sku.ean13, Idloja=self.loja_1)
         self.assertEqual(inv.status, InventarioEstoque.STATUS_FECHADO)
         self.assertEqual(contado.saldo_sistema, Decimal("8.000"))
-        self.assertEqual(estoque.Estoque, Decimal("8.000"))
-        self.assertEqual(EstoqueMovimentacao.objects.count(), movs_antes)
+        self.assertEqual(estoque.Estoque, Decimal("6.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.count(), movs_antes + 1)
+
+    def test_finalizacao_gera_ajustes_rastreaveis_para_falta_e_sobra_sem_movimentar_igual(self):
+        produto_falta, sku_falta, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101894")
+        produto_sobra, sku_sobra, _, _, _ = self.criar_produto_com_sku(referencia_esperada="270101895", colecao_codigo="27")
+        produto_ok, sku_ok, _, _, _ = self.criar_produto_com_sku(referencia_esperada="280101896", colecao_codigo="28")
+        Estoque.objects.create(CodigodeBarra=sku_falta.ean13, referencia=produto_falta.referencia, Idloja=self.loja_1, Estoque=Decimal("10.000"), reserva=Decimal("0.000"))
+        Estoque.objects.create(CodigodeBarra=sku_sobra.ean13, referencia=produto_sobra.referencia, Idloja=self.loja_1, Estoque=Decimal("2.000"), reserva=Decimal("0.000"))
+        Estoque.objects.create(CodigodeBarra=sku_ok.ean13, referencia=produto_ok.referencia, Idloja=self.loja_1, Estoque=Decimal("4.000"), reserva=Decimal("0.000"))
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Ajustes", status=InventarioEstoque.STATUS_VALIDADO)
+        item_falta = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_falta.ean13, referencia=produto_falta.referencia, saldo_sistema=Decimal("10.000"), saldo_contado=Decimal("6.000"), contado=True)
+        item_sobra = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_sobra.ean13, referencia=produto_sobra.referencia, saldo_sistema=Decimal("2.000"), saldo_contado=Decimal("5.000"), contado=True)
+        item_ok = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku_ok.ean13, referencia=produto_ok.referencia, saldo_sistema=Decimal("4.000"), saldo_contado=Decimal("4.000"), contado=True)
+        documento = f"INV-{inv.pk}"
+
+        self.client.force_authenticate(self.restrito)
+        resp = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/finalizar/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["movimentos_gerados"], 2)
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=sku_falta.ean13, Idloja=self.loja_1).Estoque, Decimal("6.000"))
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=sku_sobra.ean13, Idloja=self.loja_1).Estoque, Decimal("5.000"))
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=sku_ok.ean13, Idloja=self.loja_1).Estoque, Decimal("4.000"))
+        falta = EstoqueMovimentacao.objects.get(documento=documento, CodigodeBarra=sku_falta.ean13)
+        sobra = EstoqueMovimentacao.objects.get(documento=documento, CodigodeBarra=sku_sobra.ean13)
+        self.assertEqual(falta.tipo, EstoqueMovimentacao.TIPO_AJUSTE)
+        self.assertEqual(falta.origem, EstoqueMovimentacao.ORIGEM_INVENTARIO)
+        self.assertEqual(falta.quantidade, Decimal("-4.000"))
+        self.assertEqual(falta.saldo_anterior, Decimal("10.000"))
+        self.assertEqual(falta.saldo_posterior, Decimal("6.000"))
+        self.assertEqual(sobra.quantidade, Decimal("3.000"))
+        self.assertEqual(sobra.saldo_anterior, Decimal("2.000"))
+        self.assertEqual(sobra.saldo_posterior, Decimal("5.000"))
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=documento, CodigodeBarra=sku_ok.ean13).exists())
+        item_falta.refresh_from_db()
+        item_sobra.refresh_from_db()
+        item_ok.refresh_from_db()
+        self.assertEqual(item_falta.saldo_sistema, Decimal("10.000"))
+        self.assertEqual(item_sobra.saldo_sistema, Decimal("2.000"))
+        self.assertEqual(item_ok.saldo_sistema, Decimal("4.000"))
+
+    def test_finalizacao_e_atomica_e_segunda_tentativa_nao_duplica_movimentos(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="290101897", colecao_codigo="29")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque=Decimal("9.000"), reserva=Decimal("0.000"))
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Atomico", status=InventarioEstoque.STATUS_VALIDADO)
+        InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("9.000"), saldo_contado=Decimal("4.000"), contado=True)
+
+        self.client.force_authenticate(self.restrito)
+        with patch("produto.views.EstoqueMovimentacao.objects.create", side_effect=RuntimeError("falha movimento")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/finalizar/", {}, format="json")
+        inv.refresh_from_db()
+        self.assertEqual(inv.status, InventarioEstoque.STATUS_VALIDADO)
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=sku.ean13, Idloja=self.loja_1).Estoque, Decimal("9.000"))
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"INV-{inv.pk}").exists())
+
+        fechado = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/finalizar/", {}, format="json")
+        segunda = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/finalizar/", {}, format="json")
+        self.assertEqual(fechado.status_code, 200, fechado.content)
+        self.assertEqual(segunda.status_code, 400, segunda.content)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"INV-{inv.pk}").count(), 1)
+
+    def test_inventario_fechado_bloqueia_operacoes_mutaveis(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="300101898", colecao_codigo="30")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Fechado", status=InventarioEstoque.STATUS_FECHADO)
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("1.000"), saldo_contado=Decimal("1.000"), contado=True)
+
+        self.client.force_authenticate(self.restrito)
+        header = self.client.patch(f"/api/produto/inventario-estoque/{inv.pk}/", {"descricao": "Alterado"}, format="json")
+        manual = self.client.patch(f"/api/produto/inventario-estoque-item/{item.pk}/", {"saldo_contado": "2.000"}, format="json")
+        pistola = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13}, format="json")
+        preview = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-preview/", {"conteudo": f"{sku.ean13},2\n"}, format="json")
+        aplicar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/importar-aplicar/", {"validas": [{"ean": sku.ean13, "quantidade": "2"}]}, format="json")
+        gerar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/gerar-itens/", {}, format="json")
+        validar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/validar/", {}, format="json")
+
+        for resp in [header, manual, pistola, preview, aplicar, gerar, validar]:
+            self.assertEqual(resp.status_code, 400, resp.content)
+        inv.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(inv.descricao, "Fechado")
+        self.assertEqual(item.saldo_contado, Decimal("1.000"))
+
+    def test_auditoria_registra_eventos_relevantes_do_inventario(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="310101899", colecao_codigo="31")
+        Estoque.objects.create(CodigodeBarra=sku.ean13, referencia=produto.referencia, Idloja=self.loja_1, Estoque=Decimal("1.000"), reserva=Decimal("0.000"))
+
+        self.client.force_authenticate(self.restrito)
+        criado = self.client.post("/api/produto/inventario-estoque/", {"Idloja": self.loja_1.id, "descricao": "Auditado"}, format="json")
+        self.assertEqual(criado.status_code, 201, criado.content)
+        inv = InventarioEstoque.objects.get(pk=criado.data["Idinventario"])
+        item = inv.itens.get(CodigodeBarra=sku.ean13)
+        manual = self.client.patch(f"/api/produto/inventario-estoque-item/{item.pk}/", {"saldo_contado": "1.000"}, format="json")
+        for pendente in inv.itens.exclude(pk=item.pk):
+            pendente.saldo_contado = pendente.saldo_sistema
+            pendente.contado = True
+            pendente.save()
+        validar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/validar/", {}, format="json")
+        fechar = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/finalizar/", {}, format="json")
+
+        self.assertEqual(manual.status_code, 200, manual.content)
+        self.assertEqual(validar.status_code, 200, validar.content)
+        self.assertEqual(fechar.status_code, 200, fechar.content)
+        self.assertTrue(AuditLog.objects.filter(model="InventarioEstoque", object_id=str(inv.pk), metadata__legacy_action="inventario_criado").exists())
+        self.assertTrue(AuditLog.objects.filter(model="InventarioEstoqueItem", object_id=str(item.pk), metadata__legacy_action="inventario_contagem_alterada").exists())
+        self.assertTrue(AuditLog.objects.filter(model="InventarioEstoque", object_id=str(inv.pk), metadata__legacy_action="inventario_validado").exists())
+        self.assertTrue(AuditLog.objects.filter(model="InventarioEstoque", object_id=str(inv.pk), metadata__legacy_action="inventario_fechado").exists())
 
     def test_consultas_de_estoque_isolam_empresas(self):
         self.client.force_authenticate(self.master)
