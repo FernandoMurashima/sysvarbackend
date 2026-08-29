@@ -1142,6 +1142,80 @@ class EstoqueAcessoLojaApiTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.saldo_sistema, Decimal("6.000"))
 
+    def test_leitura_incremental_primeira_e_multiplas_preserva_saldo_original(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101884")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("7.000"))
+
+        self.client.force_authenticate(self.restrito)
+        primeira = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13, "modo": "incremental"}, format="json")
+        segunda = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13, "modo": "incremental"}, format="json")
+
+        self.assertEqual(primeira.status_code, 200, primeira.content)
+        self.assertEqual(segunda.status_code, 200, segunda.content)
+        item.refresh_from_db()
+        self.assertTrue(item.contado)
+        self.assertEqual(item.saldo_contado, Decimal("2.000"))
+        self.assertEqual(item.diferenca, Decimal("-5.000"))
+        self.assertEqual(item.saldo_sistema, Decimal("7.000"))
+        self.assertEqual(InventarioEstoqueItem.objects.filter(inventario=inv, CodigodeBarra=sku.ean13).count(), 1)
+
+    def test_leitura_incremental_inclui_ean_valido_ausente_sem_duplicar(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101885")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+
+        self.client.force_authenticate(self.restrito)
+        primeira = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13}, format="json")
+        segunda = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13}, format="json")
+
+        self.assertEqual(primeira.status_code, 200, primeira.content)
+        self.assertTrue(primeira.data["created"])
+        self.assertEqual(segunda.status_code, 200, segunda.content)
+        item = InventarioEstoqueItem.objects.get(inventario=inv, CodigodeBarra=sku.ean13)
+        self.assertEqual(item.referencia, produto.referencia)
+        self.assertEqual(item.saldo_sistema, Decimal("0.000"))
+        self.assertEqual(item.saldo_contado, Decimal("2.000"))
+        self.assertEqual(InventarioEstoqueItem.objects.filter(inventario=inv, CodigodeBarra=sku.ean13).count(), 1)
+
+    def test_leitura_rejeita_ean_inexistente_de_outra_empresa_e_inventario_fechado(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101886")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        fechado = InventarioEstoque.objects.create(Idloja=self.loja_2, descricao="Fechado", status=InventarioEstoque.STATUS_FECHADO)
+        unidade = Unidade.objects.create(empresa=self.outra_empresa, Descricao="Unidade Leitura", Codigo="ULB")
+        grade = Grade.objects.create(empresa=self.outra_empresa, Descricao="Grade Leitura")
+        cor = Cor.objects.create(empresa=self.outra_empresa, Descricao="Cor Leitura", Codigo="CLB", Cor="Outra")
+        tamanho = Tamanho.objects.create(empresa=self.outra_empresa, idgrade=grade, Tamanho="G")
+        ConfigEan.objects.get_or_create(empresa=self.outra_empresa, company_prefix="7777")
+        produto_outra = Produto.objects.create(empresa=self.outra_empresa, tipo_produto="1", referencia="990101002", descricao="Outro", descricao_reduzida="Outro", unidade=unidade, grade=grade)
+        sku_outra = ProdutoDetalhe.objects.create(produto=produto_outra, idcor=cor, idtamanho=tamanho)
+
+        self.client.force_authenticate(self.master)
+        inexistente = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": "7890000000999"}, format="json")
+        outra_empresa = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku_outra.ean13}, format="json")
+        fechado_resp = self.client.post(f"/api/produto/inventario-estoque/{fechado.pk}/ler-ean/", {"ean": sku.ean13}, format="json")
+
+        self.assertEqual(inexistente.status_code, 400, inexistente.content)
+        self.assertEqual(outra_empresa.status_code, 400, outra_empresa.content)
+        self.assertEqual(fechado_resp.status_code, 400, fechado_resp.content)
+        self.assertFalse(InventarioEstoqueItem.objects.filter(inventario=inv, CodigodeBarra__in=["7890000000999", sku_outra.ean13]).exists())
+
+    def test_leitura_modo_quantidade_e_zero_sem_alterar_saldo_original(self):
+        produto, sku, _, _, _ = self.criar_produto_com_sku(referencia_esperada="260101887")
+        inv = InventarioEstoque.objects.create(Idloja=self.loja_1, descricao="Inventario")
+        item = InventarioEstoqueItem.objects.create(inventario=inv, CodigodeBarra=sku.ean13, referencia=produto.referencia, saldo_sistema=Decimal("3.000"), saldo_contado=Decimal("1.000"), contado=True)
+
+        self.client.force_authenticate(self.restrito)
+        qtd = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13, "modo": "quantidade", "quantidade": "5.000"}, format="json")
+        zero = self.client.post(f"/api/produto/inventario-estoque/{inv.pk}/ler-ean/", {"ean": sku.ean13, "modo": "quantidade", "quantidade": "0.000"}, format="json")
+
+        self.assertEqual(qtd.status_code, 200, qtd.content)
+        self.assertEqual(zero.status_code, 200, zero.content)
+        item.refresh_from_db()
+        self.assertTrue(item.contado)
+        self.assertEqual(item.saldo_sistema, Decimal("3.000"))
+        self.assertEqual(item.saldo_contado, Decimal("0.000"))
+        self.assertEqual(item.diferenca, Decimal("-3.000"))
+
     def test_consultas_de_estoque_isolam_empresas(self):
         self.client.force_authenticate(self.master)
         estoque_resp = self.client.get("/api/produto/estoque/")

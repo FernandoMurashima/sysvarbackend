@@ -2691,6 +2691,52 @@ class InventarioEstoqueViewSet(BaseViewSet):
             return Response({'detail': 'Somente inventário aberto pode gerar itens.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'created': self._gerar_itens_iniciais(inv)})
 
+    @action(detail=True, methods=['post'], url_path='ler-ean')
+    @transaction.atomic
+    def ler_ean(self, request, pk=None):
+        inv = self.get_object()
+        if inv.status != InventarioEstoque.STATUS_ABERTO:
+            return Response({'detail': 'Inventário fechado não aceita leitura.'}, status=status.HTTP_400_BAD_REQUEST)
+        ean = ''.join(ch for ch in str(request.data.get('ean') or '') if ch.isdigit())
+        if len(ean) != 13:
+            return Response({'detail': 'Informe um EAN-13 válido.'}, status=status.HTTP_400_BAD_REQUEST)
+        modo = request.data.get('modo') or 'incremental'
+        if modo not in {'incremental', 'quantidade'}:
+            return Response({'detail': 'Modo de leitura inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        sku = ProdutoDetalhe.objects.select_related('produto').filter(ean13=ean).first()
+        if not sku:
+            return Response({'detail': 'EAN não encontrado no cadastro de SKUs.'}, status=status.HTTP_400_BAD_REQUEST)
+        if sku.produto.empresa_id != inv.Idloja.empresa_id:
+            return Response({'detail': 'EAN fora do contexto da empresa do inventário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        item, created = InventarioEstoqueItem.objects.select_for_update().get_or_create(
+            inventario=inv,
+            CodigodeBarra=ean,
+            defaults={
+                'referencia': sku.produto.referencia or '',
+                'saldo_sistema': 0,
+                'saldo_contado': 0,
+                'contado': False,
+            },
+        )
+        if modo == 'incremental':
+            item.saldo_contado = Decimal(item.saldo_contado or 0) + Decimal('1')
+        else:
+            if 'quantidade' not in request.data:
+                return Response({'detail': 'Informe a quantidade para o modo quantidade.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                quantidade = Decimal(str(request.data.get('quantidade')))
+            except Exception:
+                return Response({'detail': 'Quantidade inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+            if quantidade < 0:
+                return Response({'detail': 'Quantidade contada não pode ser negativa.'}, status=status.HTTP_400_BAD_REQUEST)
+            item.saldo_contado = quantidade
+        item.contado = True
+        item.save(update_fields=['saldo_contado', 'diferenca', 'contado'])
+        data = InventarioEstoqueItemSerializer(item, context=self.get_serializer_context()).data
+        data['created'] = created
+        return Response(data)
+
     @action(detail=True, methods=['post'], url_path='validar')
     @transaction.atomic
     def validar(self, request, pk=None):
