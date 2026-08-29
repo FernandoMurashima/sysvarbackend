@@ -2896,39 +2896,15 @@ class InventarioEstoqueViewSet(BaseViewSet):
         inv = self.get_object()
         if inv.status != InventarioEstoque.STATUS_VALIDADO:
             return Response({'detail': 'Valide o inventário antes de finalizar.'}, status=status.HTTP_400_BAD_REQUEST)
+        pendentes = inv.itens.filter(contado=False).count()
+        if pendentes:
+            return Response({'detail': f'Existem {pendentes} item(ns) sem contagem.'}, status=status.HTTP_400_BAD_REQUEST)
         documento = f'INV-{inv.pk}'
-        movimentos = 0
-        for item in inv.itens.all():
-            if item.diferenca == 0:
-                continue
-            mov_tipo = EstoqueMovimentacao.TIPO_AJUSTE
-            est, _ = Estoque.objects.select_for_update().get_or_create(
-                CodigodeBarra=item.CodigodeBarra,
-                Idloja=inv.Idloja,
-                defaults={'referencia': item.referencia, 'Estoque': 0, 'reserva': 0},
-            )
-            anterior = est.Estoque or 0
-            est.Estoque = item.saldo_contado
-            est.referencia = item.referencia
-            est.save(update_fields=['Estoque', 'referencia'])
-            EstoqueMovimentacao.objects.create(
-                Idloja=inv.Idloja,
-                CodigodeBarra=item.CodigodeBarra,
-                referencia=item.referencia,
-                tipo=mov_tipo,
-                quantidade=item.diferenca,
-                saldo_anterior=anterior,
-                saldo_posterior=item.saldo_contado,
-                origem=EstoqueMovimentacao.ORIGEM_INVENTARIO,
-                documento=documento,
-                observacao=f'Ajuste por inventário {inv.descricao}',
-            )
-            movimentos += 1
         inv.status = InventarioEstoque.STATUS_FECHADO
         inv.data_fechamento = timezone.localdate()
         inv.save(update_fields=['status', 'data_fechamento'])
         data = self.get_serializer(inv).data
-        data['movimentos_gerados'] = movimentos
+        data['movimentos_gerados'] = 0
         data['documento'] = documento
         return Response(data)
 

@@ -408,7 +408,11 @@ class InventarioEstoqueSerializer(serializers.ModelSerializer):
     itens = InventarioEstoqueItemSerializer(many=True, read_only=True)
     total_itens = serializers.SerializerMethodField()
     total_contados = serializers.SerializerMethodField()
+    total_pendentes = serializers.SerializerMethodField()
+    total_sem_divergencia = serializers.SerializerMethodField()
     total_divergencias = serializers.SerializerMethodField()
+    total_sobra = serializers.SerializerMethodField()
+    total_falta = serializers.SerializerMethodField()
     saldo_sistema_total = serializers.SerializerMethodField()
     saldo_contado_total = serializers.SerializerMethodField()
     diferenca_total = serializers.SerializerMethodField()
@@ -435,8 +439,20 @@ class InventarioEstoqueSerializer(serializers.ModelSerializer):
     def get_total_contados(self, obj):
         return obj.itens.filter(contado=True).count()
 
+    def get_total_pendentes(self, obj):
+        return obj.itens.filter(contado=False).count()
+
+    def get_total_sem_divergencia(self, obj):
+        return obj.itens.filter(contado=True, diferenca=0).count()
+
     def get_total_divergencias(self, obj):
-        return obj.itens.exclude(diferenca=0).count()
+        return obj.itens.filter(contado=True).exclude(diferenca=0).count()
+
+    def get_total_sobra(self, obj):
+        return obj.itens.filter(contado=True, diferenca__gt=0).count()
+
+    def get_total_falta(self, obj):
+        return obj.itens.filter(contado=True, diferenca__lt=0).count()
 
     def get_saldo_sistema_total(self, obj):
         return sum((item.saldo_sistema or 0) for item in obj.itens.all())
