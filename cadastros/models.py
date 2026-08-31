@@ -967,6 +967,42 @@ class Cargo(models.Model):
         return self.descricao
 
 
+class CentroCusto(models.Model):
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="centros_custo", db_index=True)
+    codigo = models.CharField(max_length=30)
+    descricao = models.CharField(max_length=120)
+    ativo = models.BooleanField(default=True, db_index=True)
+    data_cadastro = models.DateTimeField(default=timezone.now, db_index=True)
+    data_atualizacao = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["codigo"]
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "codigo"], name="uq_empresa_centro_custo_codigo"),
+        ]
+        indexes = [
+            models.Index(fields=["empresa", "ativo"], name="idx_ccusto_empresa_ativo"),
+            models.Index(fields=["empresa", "descricao"], name="idx_ccusto_empresa_desc"),
+        ]
+
+    def clean(self):
+        if not self.empresa_id:
+            raise ValidationError({"empresa": "Centro de custo deve pertencer a uma empresa."})
+        self.codigo = (self.codigo or "").strip().upper()
+        self.descricao = (self.descricao or "").strip()
+        if not self.codigo:
+            raise ValidationError({"codigo": "Informe o código do centro de custo."})
+        if not self.descricao:
+            raise ValidationError({"descricao": "Informe a descrição do centro de custo."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.codigo} - {self.descricao}"
+
+
 class Funcionarios(models.Model):
     SITUACAO_ATIVO = "ATIVO"
     SITUACAO_AFASTADO = "AFASTADO"
