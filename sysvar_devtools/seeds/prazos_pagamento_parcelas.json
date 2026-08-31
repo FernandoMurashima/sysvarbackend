@@ -1,0 +1,110 @@
+[
+  {
+    "prazo_codigo": "AV",
+    "ordem": 1,
+    "dias": 0,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "7D",
+    "ordem": 1,
+    "dias": 7,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "14D",
+    "ordem": 1,
+    "dias": 14,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "21D",
+    "ordem": 1,
+    "dias": 21,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "28D",
+    "ordem": 1,
+    "dias": 28,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "30D",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "60D",
+    "ordem": 1,
+    "dias": 60,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "90D",
+    "ordem": 1,
+    "dias": 90,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "120D",
+    "ordem": 1,
+    "dias": 120,
+    "percentual": "100.000000"
+  },
+  {
+    "prazo_codigo": "30-60",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "50.000000"
+  },
+  {
+    "prazo_codigo": "30-60",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "50.000000"
+  },
+  {
+    "prazo_codigo": "30-60-90",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "33.333333"
+  },
+  {
+    "prazo_codigo": "30-60-90",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "33.333333"
+  },
+  {
+    "prazo_codigo": "30-60-90",
+    "ordem": 3,
+    "dias": 90,
+    "percentual": "33.333334"
+  },
+  {
+    "prazo_codigo": "30-60-90-120",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "25.000000"
+  },
+  {
+    "prazo_codigo": "30-60-90-120",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "25.000000"
+  },
+  {
+    "prazo_codigo": "30-60-90-120",
+    "ordem": 3,
+    "dias": 90,
+    "percentual": "25.000000"
+  },
+  {
+    "prazo_codigo": "30-60-90-120",
+    "ordem": 4,
+    "dias": 120,
+    "percentual": "25.000000"
+  }
+]

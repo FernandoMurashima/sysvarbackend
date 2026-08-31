@@ -1,0 +1,257 @@
+[
+{
+  "model": "cadastros.modulosistema",
+  "pk": 1,
+  "fields": {
+    "chave": "operacional",
+    "nome": "Operacional",
+    "descricao": "",
+    "categoria": "BASICO",
+    "basico": true,
+    "ativo": true,
+    "ordem": 10,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 2,
+  "fields": {
+    "chave": "cadastros",
+    "nome": "Cadastros",
+    "descricao": "",
+    "categoria": "BASICO",
+    "basico": true,
+    "ativo": true,
+    "ordem": 20,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 3,
+  "fields": {
+    "chave": "produtos",
+    "nome": "Produtos",
+    "descricao": "",
+    "categoria": "BASICO",
+    "basico": true,
+    "ativo": true,
+    "ordem": 30,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 4,
+  "fields": {
+    "chave": "configuracoes",
+    "nome": "Configurações",
+    "descricao": "",
+    "categoria": "BASICO",
+    "basico": true,
+    "ativo": true,
+    "ordem": 40,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 5,
+  "fields": {
+    "chave": "vendas",
+    "nome": "Vendas",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 100,
+    "dependencias": [
+      "cadastros",
+      "produtos"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 6,
+  "fields": {
+    "chave": "compras",
+    "nome": "Compras",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 110,
+    "dependencias": [
+      "cadastros",
+      "produtos"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 7,
+  "fields": {
+    "chave": "estoque",
+    "nome": "Estoque",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 120,
+    "dependencias": [
+      "produtos"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 8,
+  "fields": {
+    "chave": "financeiro",
+    "nome": "Financeiro",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 130,
+    "dependencias": [
+      "cadastros"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 9,
+  "fields": {
+    "chave": "fiscal",
+    "nome": "Fiscal",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 140,
+    "dependencias": [
+      "cadastros"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 10,
+  "fields": {
+    "chave": "producao",
+    "nome": "Produção",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 150,
+    "dependencias": [
+      "produtos",
+      "estoque"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 11,
+  "fields": {
+    "chave": "distribuicao",
+    "nome": "Distribuição",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 160,
+    "dependencias": [
+      "estoque"
+    ]
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 12,
+  "fields": {
+    "chave": "relatorios",
+    "nome": "Relatórios",
+    "descricao": "",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 170,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 13,
+  "fields": {
+    "chave": "auditoria",
+    "nome": "Auditoria",
+    "descricao": "Consulta central de logs de auditoria do SISVAR.",
+    "categoria": "BASICO",
+    "basico": true,
+    "ativo": true,
+    "ordem": 95,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 14,
+  "fields": {
+    "chave": "requisicoes",
+    "nome": "Requisições",
+    "descricao": "Acesso e criação das próprias requisições.",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 85,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 15,
+  "fields": {
+    "chave": "requisicoes_analise",
+    "nome": "Requisições - análise",
+    "descricao": "Análise, aprovação, devolução e rejeição de requisições.",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 86,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 16,
+  "fields": {
+    "chave": "requisicoes_atendimento",
+    "nome": "Requisições - atendimento",
+    "descricao": "Atendimento operacional de requisições aprovadas.",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 87,
+    "dependencias": []
+  }
+},
+{
+  "model": "cadastros.modulosistema",
+  "pk": 17,
+  "fields": {
+    "chave": "requisicoes_todas",
+    "nome": "Requisições - todas",
+    "descricao": "Consulta gerencial de todas as requisições no escopo.",
+    "categoria": "COMERCIAL",
+    "basico": false,
+    "ativo": true,
+    "ordem": 88,
+    "dependencias": []
+  }
+}
+]

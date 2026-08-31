@@ -1,0 +1,79 @@
+[
+{
+  "model": "produto.unidade",
+  "pk": 1,
+  "fields": {
+    "empresa": 1,
+    "Descricao": "Metro",
+    "Codigo": "M",
+    "permite_decimal": true,
+    "data_cadastro": "2026-07-27T18:01:10.864Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 2,
+  "fields": {
+    "empresa": 1,
+    "Descricao": "Unidade",
+    "Codigo": "Un",
+    "permite_decimal": false,
+    "data_cadastro": "2026-07-27T18:01:20.265Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 3,
+  "fields": {
+    "empresa": 1,
+    "Descricao": "Quilo",
+    "Codigo": "Kg",
+    "permite_decimal": true,
+    "data_cadastro": "2026-07-27T18:01:32.144Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 4,
+  "fields": {
+    "empresa": 1,
+    "Descricao": "Pacote",
+    "Codigo": "Pc",
+    "permite_decimal": false,
+    "data_cadastro": "2026-07-27T18:02:01.370Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 5,
+  "fields": {
+    "empresa": 4,
+    "Descricao": "Un",
+    "Codigo": "UN",
+    "permite_decimal": false,
+    "data_cadastro": "2026-08-12T23:44:22.686Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 6,
+  "fields": {
+    "empresa": 5,
+    "Descricao": "Un",
+    "Codigo": "UN",
+    "permite_decimal": false,
+    "data_cadastro": "2026-08-12T23:44:59.539Z"
+  }
+},
+{
+  "model": "produto.unidade",
+  "pk": 7,
+  "fields": {
+    "empresa": 1,
+    "Descricao": "Litro",
+    "Codigo": "L",
+    "permite_decimal": true,
+    "data_cadastro": "2026-08-14T12:53:48.367Z"
+  }
+}
+]

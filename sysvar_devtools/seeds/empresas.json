@@ -1,0 +1,28 @@
+[
+  {
+    "codigo": "EMP-DEV",
+    "nome": "Sysvar Moda Comércio e Confecções Ltda",
+    "nome_fantasia": "Sysvar Moda",
+    "documento": "42000001000186",
+    "ativo": true,
+    "plano_completo": true,
+    "licenca_master": true,
+    "usa_vendas": true,
+    "usa_compras": true,
+    "usa_estoque": true,
+    "usa_financeiro": true,
+    "usa_fiscal": true,
+    "regime_tributario": "LUCRO_REAL",
+    "ambiente_fiscal": "HOMOLOGACAO",
+    "uf_fiscal": "RJ",
+    "inscricao_estadual": "12345678",
+    "serie_nfce": 1,
+    "proximo_numero_nfce": 1,
+    "serie_nfe": 1,
+    "proximo_numero_nfe": 1,
+    "usa_producao": true,
+    "usa_ficha_tecnica": true,
+    "usa_faccao": true,
+    "usa_distribuicao_producao": true
+  }
+]

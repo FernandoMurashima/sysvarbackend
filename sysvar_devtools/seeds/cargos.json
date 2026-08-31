@@ -1,0 +1,46 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "ADMIN",
+    "descricao": "Administrador",
+    "ativo": true,
+    "participa_vendas": false,
+    "permite_comissao": false,
+    "autoridade_operacional_loja": false,
+    "permite_multiplas_lojas": true,
+    "gerencial": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "GERENTE",
+    "descricao": "Gerente",
+    "ativo": true,
+    "participa_vendas": true,
+    "permite_comissao": false,
+    "autoridade_operacional_loja": true,
+    "permite_multiplas_lojas": false,
+    "gerencial": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "CAIXA",
+    "descricao": "Caixa",
+    "ativo": true,
+    "participa_vendas": false,
+    "permite_comissao": false,
+    "autoridade_operacional_loja": false,
+    "permite_multiplas_lojas": false,
+    "gerencial": false
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "VENDEDOR",
+    "descricao": "Vendedor",
+    "ativo": true,
+    "participa_vendas": true,
+    "permite_comissao": true,
+    "autoridade_operacional_loja": false,
+    "permite_multiplas_lojas": false,
+    "gerencial": false
+  }
+]

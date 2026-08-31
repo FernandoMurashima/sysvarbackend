@@ -1,0 +1,23 @@
+[
+  {
+    "codigo_seed": "PACK-ALF-PADRAO",
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Pack Alfabético Padrão",
+    "grade_codigo": "ALF",
+    "ativo": true
+  },
+  {
+    "codigo_seed": "PACK-NUMF-PADRAO",
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Pack Numérico Feminino Padrão",
+    "grade_codigo": "NUMF",
+    "ativo": true
+  },
+  {
+    "codigo_seed": "PACK-CALC-PADRAO",
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Pack Calçados Padrão",
+    "grade_codigo": "CALC",
+    "ativo": true
+  }
+]

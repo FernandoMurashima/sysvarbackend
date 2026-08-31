@@ -1,0 +1,18 @@
+[
+  {
+    "codigo_seed": "PADRAO",
+    "empresa_codigo": "EMP-DEV",
+    "NomeTabela": "Tabela Padrão",
+    "DataInicio": "2026-01-05",
+    "Promocao": false,
+    "DataFim": null
+  },
+  {
+    "codigo_seed": "PROMOCIONAL",
+    "empresa_codigo": "EMP-DEV",
+    "NomeTabela": "Tabela Promocional",
+    "DataInicio": "2026-01-05",
+    "Promocao": true,
+    "DataFim": null
+  }
+]

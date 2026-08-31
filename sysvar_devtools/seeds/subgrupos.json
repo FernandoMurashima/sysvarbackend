@@ -1,0 +1,127 @@
+[
+  {
+    "grupo_codigo": "CALCA",
+    "Codigo": "CAL-JEANS",
+    "Descricao": "Jeans"
+  },
+  {
+    "grupo_codigo": "CALCA",
+    "Codigo": "CAL-ALF",
+    "Descricao": "Alfaiataria"
+  },
+  {
+    "grupo_codigo": "CALCA",
+    "Codigo": "CAL-LEG",
+    "Descricao": "Legging"
+  },
+  {
+    "grupo_codigo": "SAIA",
+    "Codigo": "SAI-CUR",
+    "Descricao": "Curta"
+  },
+  {
+    "grupo_codigo": "SAIA",
+    "Codigo": "SAI-MID",
+    "Descricao": "Midi"
+  },
+  {
+    "grupo_codigo": "SAIA",
+    "Codigo": "SAI-LON",
+    "Descricao": "Longa"
+  },
+  {
+    "grupo_codigo": "BLUSA",
+    "Codigo": "BLU-MC",
+    "Descricao": "Manga Curta"
+  },
+  {
+    "grupo_codigo": "BLUSA",
+    "Codigo": "BLU-ML",
+    "Descricao": "Manga Longa"
+  },
+  {
+    "grupo_codigo": "BLUSA",
+    "Codigo": "BLU-REG",
+    "Descricao": "Regata"
+  },
+  {
+    "grupo_codigo": "VESTIDO",
+    "Codigo": "VES-CUR",
+    "Descricao": "Curto"
+  },
+  {
+    "grupo_codigo": "VESTIDO",
+    "Codigo": "VES-MID",
+    "Descricao": "Midi"
+  },
+  {
+    "grupo_codigo": "VESTIDO",
+    "Codigo": "VES-LON",
+    "Descricao": "Longo"
+  },
+  {
+    "grupo_codigo": "TOP",
+    "Codigo": "TOP-CROP",
+    "Descricao": "Cropped"
+  },
+  {
+    "grupo_codigo": "TOP",
+    "Codigo": "TOP-FAI",
+    "Descricao": "Faixa"
+  },
+  {
+    "grupo_codigo": "CASACO",
+    "Codigo": "CAS-JAQ",
+    "Descricao": "Jaqueta"
+  },
+  {
+    "grupo_codigo": "CASACO",
+    "Codigo": "CAS-BLA",
+    "Descricao": "Blazer"
+  },
+  {
+    "grupo_codigo": "CASACO",
+    "Codigo": "CAS-CAR",
+    "Descricao": "Cardigã"
+  },
+  {
+    "grupo_codigo": "CALCADO",
+    "Codigo": "CALC-SAN",
+    "Descricao": "Sandália"
+  },
+  {
+    "grupo_codigo": "CALCADO",
+    "Codigo": "CALC-TEN",
+    "Descricao": "Tênis"
+  },
+  {
+    "grupo_codigo": "CALCADO",
+    "Codigo": "CALC-SAP",
+    "Descricao": "Sapato"
+  },
+  {
+    "grupo_codigo": "BIJUTERIA",
+    "Codigo": "BIJ-BRI",
+    "Descricao": "Brinco"
+  },
+  {
+    "grupo_codigo": "BIJUTERIA",
+    "Codigo": "BIJ-COL",
+    "Descricao": "Colar"
+  },
+  {
+    "grupo_codigo": "BIJUTERIA",
+    "Codigo": "BIJ-PUL",
+    "Descricao": "Pulseira"
+  },
+  {
+    "grupo_codigo": "BIJUTERIA",
+    "Codigo": "BIJ-ANE",
+    "Descricao": "Anel"
+  },
+  {
+    "grupo_codigo": "BIJUTERIA",
+    "Codigo": "BIJ-CONJ",
+    "Descricao": "Conjunto"
+  }
+]

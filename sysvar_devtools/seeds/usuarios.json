@@ -1,0 +1,147 @@
+[
+  {
+    "username": "takeshi",
+    "first_name": "Takeshi",
+    "last_name": "",
+    "email": "takeshi@sysvar.test",
+    "password": "Ftju7439@",
+    "type": "Admin",
+    "empresa_codigo": null,
+    "loja_codigo": null,
+    "lojas_permitidas": [],
+    "perfil_principal": null,
+    "is_staff": true,
+    "is_superuser": true,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "admin.sysvar",
+    "first_name": "Ricardo",
+    "last_name": "Almeida",
+    "email": "admin@sysvar.test",
+    "password": "ftju7439",
+    "type": "Admin",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": null,
+    "lojas_permitidas": [
+      "BARRA",
+      "TIJUCA",
+      "CENTRO",
+      "FABRICA"
+    ],
+    "perfil_principal": "Administrador delegado",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "gerente.barra",
+    "first_name": "Mariana",
+    "last_name": "Costa",
+    "email": "gerente.barra@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Gerente",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "BARRA",
+    "lojas_permitidas": [
+      "BARRA"
+    ],
+    "perfil_principal": "Gerente",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "caixa.barra",
+    "first_name": "Juliana",
+    "last_name": "Rocha",
+    "email": "caixa.barra@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Caixa",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "BARRA",
+    "lojas_permitidas": [
+      "BARRA"
+    ],
+    "perfil_principal": "Caixa",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "gerente.tijuca",
+    "first_name": "Bruno",
+    "last_name": "Carvalho",
+    "email": "gerente.tijuca@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Gerente",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "TIJUCA",
+    "lojas_permitidas": [
+      "TIJUCA"
+    ],
+    "perfil_principal": "Gerente",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "caixa.tijuca",
+    "first_name": "Fernanda",
+    "last_name": "Lima",
+    "email": "caixa.tijuca@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Caixa",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "TIJUCA",
+    "lojas_permitidas": [
+      "TIJUCA"
+    ],
+    "perfil_principal": "Caixa",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "gerente.centro",
+    "first_name": "Patrícia",
+    "last_name": "Gomes",
+    "email": "gerente.centro@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Gerente",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "CENTRO",
+    "lojas_permitidas": [
+      "CENTRO"
+    ],
+    "perfil_principal": "Gerente",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  },
+  {
+    "username": "caixa.centro",
+    "first_name": "Daniela",
+    "last_name": "Alves",
+    "email": "caixa.centro@sysvar.test",
+    "password": "Sysvar@123",
+    "type": "Caixa",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "CENTRO",
+    "lojas_permitidas": [
+      "CENTRO"
+    ],
+    "perfil_principal": "Caixa",
+    "is_staff": false,
+    "is_superuser": false,
+    "is_active": true,
+    "deve_trocar_senha": false
+  }
+]

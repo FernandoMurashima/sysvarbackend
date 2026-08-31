@@ -1,0 +1,227 @@
+[
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 1,
+  "fields": {
+    "perfil": 1,
+    "codigo": "funcionario.salario",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 2,
+  "fields": {
+    "perfil": 1,
+    "codigo": "produto.custo",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 3,
+  "fields": {
+    "perfil": 10,
+    "codigo": "funcionario.salario",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 4,
+  "fields": {
+    "perfil": 10,
+    "codigo": "produto.custo",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 5,
+  "fields": {
+    "perfil": 9,
+    "codigo": "funcionario.salario",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 6,
+  "fields": {
+    "perfil": 2,
+    "codigo": "requisicoes.fazer",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 7,
+  "fields": {
+    "perfil": 2,
+    "codigo": "requisicoes.aprovar",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 8,
+  "fields": {
+    "perfil": 2,
+    "codigo": "requisicoes.atender",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 9,
+  "fields": {
+    "perfil": 2,
+    "codigo": "pedido_compra.aprovar",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 10,
+  "fields": {
+    "perfil": 2,
+    "codigo": "vendas.autorizar_desconto",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 11,
+  "fields": {
+    "perfil": 2,
+    "codigo": "funcionario.salario",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 12,
+  "fields": {
+    "perfil": 2,
+    "codigo": "produto.custo",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 13,
+  "fields": {
+    "perfil": 4,
+    "codigo": "requisicoes.fazer",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 14,
+  "fields": {
+    "perfil": 4,
+    "codigo": "requisicoes.aprovar",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 15,
+  "fields": {
+    "perfil": 4,
+    "codigo": "requisicoes.atender",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 16,
+  "fields": {
+    "perfil": 4,
+    "codigo": "pedido_compra.aprovar",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 17,
+  "fields": {
+    "perfil": 4,
+    "codigo": "vendas.autorizar_desconto",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 18,
+  "fields": {
+    "perfil": 4,
+    "codigo": "funcionario.salario",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 19,
+  "fields": {
+    "perfil": 4,
+    "codigo": "produto.custo",
+    "permitido": false
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 20,
+  "fields": {
+    "perfil": 1,
+    "codigo": "requisicoes.fazer",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 21,
+  "fields": {
+    "perfil": 1,
+    "codigo": "requisicoes.aprovar",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 22,
+  "fields": {
+    "perfil": 1,
+    "codigo": "requisicoes.atender",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 23,
+  "fields": {
+    "perfil": 1,
+    "codigo": "pedido_compra.aprovar",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 24,
+  "fields": {
+    "perfil": 1,
+    "codigo": "vendas.autorizar_desconto",
+    "permitido": true
+  }
+},
+{
+  "model": "accounts.perfilprocesspermission",
+  "pk": 25,
+  "fields": {
+    "perfil": 1,
+    "codigo": "cotacao.aprovar",
+    "permitido": true
+  }
+}
+]

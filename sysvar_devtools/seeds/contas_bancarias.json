@@ -1,0 +1,62 @@
+[
+  {
+    "codigo_seed": "BCO-FABRICA",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "FABRICA",
+    "descricao": "Conta Central - Fábrica",
+    "banco": "Itaú",
+    "agencia": "1234",
+    "conta": "10001-1",
+    "tipo_conta": "CORRENTE",
+    "pix_chave": "financeiro@sysvar.test",
+    "conta_contabil": null,
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "ativo": true
+  },
+  {
+    "codigo_seed": "BCO-BARRA",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "BARRA",
+    "descricao": "Conta Loja Barra",
+    "banco": "Itaú",
+    "agencia": "1234",
+    "conta": "10002-0",
+    "tipo_conta": "CORRENTE",
+    "pix_chave": "barra@sysvar.test",
+    "conta_contabil": null,
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "ativo": true
+  },
+  {
+    "codigo_seed": "BCO-TIJUCA",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "TIJUCA",
+    "descricao": "Conta Loja Tijuca",
+    "banco": "Itaú",
+    "agencia": "1234",
+    "conta": "10003-8",
+    "tipo_conta": "CORRENTE",
+    "pix_chave": "tijuca@sysvar.test",
+    "conta_contabil": null,
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "ativo": true
+  },
+  {
+    "codigo_seed": "BCO-CENTRO",
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "CENTRO",
+    "descricao": "Conta Loja Centro",
+    "banco": "Itaú",
+    "agencia": "1234",
+    "conta": "10004-6",
+    "tipo_conta": "CORRENTE",
+    "pix_chave": "centro@sysvar.test",
+    "conta_contabil": null,
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "ativo": true
+  }
+]

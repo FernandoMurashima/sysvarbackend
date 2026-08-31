@@ -1,0 +1,3362 @@
+[
+{
+  "model": "cadastros.planocontabil",
+  "pk": 1,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.01",
+    "descricao": "Grupo 1.1.01",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.869Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 2,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.02",
+    "descricao": "Grupo 1.1.02",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.875Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 3,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03",
+    "descricao": "Grupo 1.1.03",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.880Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 4,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.01",
+    "descricao": "Grupo 2.1.01",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.886Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 5,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1.01",
+    "descricao": "Capital Social",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 111,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.892Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 6,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.2.01",
+    "descricao": "Devolução de venda de mercadorias",
+    "classe": "RECEITA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.897Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 7,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1.01",
+    "descricao": "Venda Loja Física",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 117,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.901Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 8,
+  "fields": {
+    "empresa": 1,
+    "codigo": "9.1.01",
+    "descricao": "Transferências entre caixas e bancos",
+    "classe": "RESULTADO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.905Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 9,
+  "fields": {
+    "empresa": 1,
+    "codigo": "9.9.99",
+    "descricao": "Ajustes financeiros manuais",
+    "classe": "RESULTADO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:49:24.909Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 19,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1",
+    "descricao": "ATIVO",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.032Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 20,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1",
+    "descricao": "ATIVO CIRCULANTE",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 19,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.038Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 21,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.01.001",
+    "descricao": "Caixa Loja Matriz",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 1,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.043Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 22,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.01.002",
+    "descricao": "Caixa Loja Filial",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 1,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.048Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 23,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.01.003",
+    "descricao": "Caixa Fabrica",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 1,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.055Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 24,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.01.004",
+    "descricao": "Caixa Master",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 1,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.065Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 25,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.02.001",
+    "descricao": "Conta Corrente Conta Itau - Max",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 2,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.077Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 26,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.02.002",
+    "descricao": "Conta Corrente Itau - Barra",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 2,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.083Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 27,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.02.003",
+    "descricao": "Conta Corrente Itau - Tijuca",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 2,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.089Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 28,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.02.004",
+    "descricao": "PIX a Receber",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 2,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.096Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 29,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03.001",
+    "descricao": "Clientes",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 3,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.117Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 30,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03.002",
+    "descricao": "Cartões de Crédito a Receber",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 3,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.121Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 31,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03.003",
+    "descricao": "Cartões de Débito a Receber",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 3,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.128Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 32,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03.004",
+    "descricao": "Cheques a Receber",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 3,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.132Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 33,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.03.005",
+    "descricao": "Convênios a Receber",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 3,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.138Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 34,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04",
+    "descricao": "Grupo 1.1.04",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.144Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 35,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.001",
+    "descricao": "Estoque Moda Feminina",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.149Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 36,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.002",
+    "descricao": "Estoque Moda Masculina",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.154Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 37,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.003",
+    "descricao": "Estoque Acessórios",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.160Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 38,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.004",
+    "descricao": "Estoque Calçados",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.164Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 39,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.005",
+    "descricao": "Estoque Embalagens",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.168Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 40,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.04.006",
+    "descricao": "Mercadorias em Trânsito",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 34,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.173Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 41,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.05",
+    "descricao": "Grupo 1.1.05",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.178Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 42,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.05.001",
+    "descricao": "Adiantamentos a Fornecedores",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 41,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.182Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 43,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.05.002",
+    "descricao": "Adiantamentos a Funcionários",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 41,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.185Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 44,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06",
+    "descricao": "Grupo 1.1.06",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 20,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.189Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 45,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06.001",
+    "descricao": "ICMS a Recuperar",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 44,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.193Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 46,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06.002",
+    "descricao": "ICMS ST a Recuperar",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 44,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.198Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 47,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06.003",
+    "descricao": "PIS a Recuperar",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 44,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.202Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 48,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06.004",
+    "descricao": "COFINS a Recuperar",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 44,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.206Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 49,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.1.06.005",
+    "descricao": "IRRF a Recuperar",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 44,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.211Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 50,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2",
+    "descricao": "ATIVO NÃO CIRCULANTE",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 19,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.214Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 51,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.01",
+    "descricao": "REALIZÁVEL A LONGO PRAZO",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 50,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.216Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 52,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.01.001",
+    "descricao": "Depósitos Judiciais",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 51,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.220Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 53,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.01.002",
+    "descricao": "Empréstimos a Sócios",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 51,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.224Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 54,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02",
+    "descricao": "IMOBILIZADO",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 50,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.228Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 55,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.001",
+    "descricao": "Terrenos",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.231Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 56,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.002",
+    "descricao": "Edificações",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.233Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 57,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.003",
+    "descricao": "Móveis e Utensílios",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.235Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 58,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.004",
+    "descricao": "Máquinas",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.240Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 59,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.005",
+    "descricao": "Equipamentos",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.243Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 60,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.006",
+    "descricao": "Computadores",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.246Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 61,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.007",
+    "descricao": "Impressoras",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.248Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 62,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.008",
+    "descricao": "Equipamentos de Informática",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.252Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 63,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.009",
+    "descricao": "Veículos",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.255Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 64,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.010",
+    "descricao": "Instalações",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.258Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 65,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.02.011",
+    "descricao": "Benfeitorias",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 54,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.261Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 66,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.03",
+    "descricao": "DEPRECIAÇÃO ACUMULADA",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 50,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.263Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 67,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.03.001",
+    "descricao": "Depreciação Móveis",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 66,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.265Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 68,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.03.002",
+    "descricao": "Depreciação Equipamentos",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 66,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.267Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 69,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.03.003",
+    "descricao": "Depreciação Computadores",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 66,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.270Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 70,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.2.03.004",
+    "descricao": "Depreciação Veículos",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 66,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.272Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 71,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.3",
+    "descricao": "INTANGÍVEL",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 19,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.273Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 72,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.3.01",
+    "descricao": "Softwares",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 71,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.276Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 73,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.3.02",
+    "descricao": "Licenças",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 71,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.277Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 74,
+  "fields": {
+    "empresa": 1,
+    "codigo": "1.3.03",
+    "descricao": "Marcas",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": 71,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.279Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 75,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2",
+    "descricao": "PASSIVO",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.283Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 76,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1",
+    "descricao": "PASSIVO CIRCULANTE",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 75,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.286Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 77,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.01.001",
+    "descricao": "Fornecedores",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 4,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.290Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 78,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.01.002",
+    "descricao": "Duplicatas a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 4,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.292Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 79,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02",
+    "descricao": "Grupo 2.1.02",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.294Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 80,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02.001",
+    "descricao": "Salários a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 79,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.296Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 81,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02.002",
+    "descricao": "Pró-labore a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 79,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.298Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 82,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02.003",
+    "descricao": "Comissões a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 79,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.300Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 83,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02.004",
+    "descricao": "Férias a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 79,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.303Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 84,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.02.005",
+    "descricao": "13º Salário a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 79,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.306Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 85,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.03",
+    "descricao": "Grupo 2.1.03",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.308Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 86,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.03.001",
+    "descricao": "FGTS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 85,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.310Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 87,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.03.002",
+    "descricao": "INSS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 85,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.312Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 88,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04",
+    "descricao": "Grupo 2.1.04",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.314Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 89,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.001",
+    "descricao": "ICMS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.316Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 90,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.002",
+    "descricao": "ICMS ST a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.318Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 91,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.003",
+    "descricao": "PIS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.320Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 92,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.004",
+    "descricao": "COFINS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.322Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 93,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.005",
+    "descricao": "ISS a Recolher",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.324Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 94,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.006",
+    "descricao": "Simples Nacional",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.325Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 95,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.007",
+    "descricao": "IRPJ",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.327Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 96,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.04.008",
+    "descricao": "CSLL",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 88,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.329Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 97,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.05",
+    "descricao": "Grupo 2.1.05",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.330Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 98,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.05.001",
+    "descricao": "Cartões a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 97,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.332Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 99,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.06",
+    "descricao": "Grupo 2.1.06",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.333Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 100,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.06.001",
+    "descricao": "Empréstimos Bancários",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 99,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.336Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 101,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.06.002",
+    "descricao": "Financiamentos",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 99,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.337Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 102,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.07",
+    "descricao": "Grupo 2.1.07",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 76,
+    "nivel": 3,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.339Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 103,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.07.001",
+    "descricao": "Aluguéis a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 102,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.341Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 104,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.07.002",
+    "descricao": "Energia a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 102,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.343Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 105,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.07.003",
+    "descricao": "Água a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 102,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.345Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 106,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.1.07.004",
+    "descricao": "Internet a Pagar",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 102,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.347Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 107,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.2",
+    "descricao": "PASSIVO NÃO CIRCULANTE",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 75,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.349Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 108,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.2.01",
+    "descricao": "Empréstimos Longo Prazo",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 107,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.351Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 109,
+  "fields": {
+    "empresa": 1,
+    "codigo": "2.2.02",
+    "descricao": "Financiamentos Longo Prazo",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": 107,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.353Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 110,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3",
+    "descricao": "PATRIMÔNIO LÍQUIDO",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.356Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 111,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1",
+    "descricao": "Grupo 3.1",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 110,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.358Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 112,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1.02",
+    "descricao": "Reserva Legal",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 111,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.362Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 113,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1.03",
+    "descricao": "Reserva de Lucros",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 111,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.367Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 114,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1.04",
+    "descricao": "Lucros Acumulados",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 111,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.369Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 115,
+  "fields": {
+    "empresa": 1,
+    "codigo": "3.1.05",
+    "descricao": "Prejuízos Acumulados",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": 111,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.371Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 116,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4",
+    "descricao": "RECEITAS",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.373Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 117,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1",
+    "descricao": "RECEITAS OPERACIONAIS",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 116,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.374Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 118,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1.02",
+    "descricao": "Venda E-commerce",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 117,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.378Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 119,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1.03",
+    "descricao": "Venda Marketplace",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 117,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.380Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 120,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1.04",
+    "descricao": "Venda Atacado",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 117,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.382Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 121,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.1.05",
+    "descricao": "Venda WhatsApp",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 117,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.385Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 122,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.2",
+    "descricao": "DEDUÇÕES DA RECEITA",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 116,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.388Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 123,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.2.01",
+    "descricao": "Devoluções",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 122,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.389Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 124,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.2.02",
+    "descricao": "Cancelamentos",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 122,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.391Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 125,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.2.03",
+    "descricao": "Descontos Incondicionais",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 122,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.393Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 126,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.3",
+    "descricao": "RECEITAS FINANCEIRAS",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 116,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.396Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 127,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.3.01",
+    "descricao": "Juros Recebidos",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 126,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.398Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 128,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.3.02",
+    "descricao": "Descontos Obtidos",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 126,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.401Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 129,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.3.03",
+    "descricao": "Rendimentos Financeiros",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 126,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.404Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 130,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.4",
+    "descricao": "OUTRAS RECEITAS",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 116,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.407Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 131,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.4.01",
+    "descricao": "Venda de Ativos",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 130,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.409Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 132,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.4.02",
+    "descricao": "Bonificações",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 130,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.411Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 133,
+  "fields": {
+    "empresa": 1,
+    "codigo": "4.4.03",
+    "descricao": "Receitas Diversas",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": 130,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.413Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 134,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5",
+    "descricao": "CUSTOS",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.416Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 135,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.1",
+    "descricao": "CUSTO DAS MERCADORIAS VENDIDAS",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 134,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.418Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 136,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.1.01",
+    "descricao": "CMV Moda Feminina",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 135,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.422Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 137,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.1.02",
+    "descricao": "CMV Moda Masculina",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 135,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.425Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 138,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.1.03",
+    "descricao": "CMV Acessórios",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 135,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.428Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 139,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.1.04",
+    "descricao": "CMV Calçados",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 135,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.430Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 140,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2",
+    "descricao": "CUSTOS DE AQUISIÇÃO",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 134,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.432Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 141,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2.01",
+    "descricao": "Frete sobre Compras",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 140,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.434Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 142,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2.02",
+    "descricao": "Seguro sobre Compras",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 140,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.438Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 143,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2.03",
+    "descricao": "Importações",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 140,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.441Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 144,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2.04",
+    "descricao": "Embalagens",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 140,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.445Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 145,
+  "fields": {
+    "empresa": 1,
+    "codigo": "5.2.05",
+    "descricao": "Etiquetas",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": 140,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.448Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 146,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6",
+    "descricao": "DESPESAS OPERACIONAIS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 1,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.451Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 147,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1",
+    "descricao": "DESPESAS COM PESSOAL",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 146,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.454Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 148,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.01",
+    "descricao": "Salários",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.457Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 149,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.02",
+    "descricao": "Pró-labore",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.459Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 150,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.03",
+    "descricao": "Comissões",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.463Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 151,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.04",
+    "descricao": "Horas Extras",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.466Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 152,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.05",
+    "descricao": "Férias",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.468Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 153,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.06",
+    "descricao": "Décimo Terceiro",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.470Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 154,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.07",
+    "descricao": "FGTS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.474Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 155,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.08",
+    "descricao": "INSS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.475Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 156,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.09",
+    "descricao": "Vale Transporte",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.477Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 157,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.10",
+    "descricao": "Vale Alimentação",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.479Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 158,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.1.11",
+    "descricao": "Plano de Saúde",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 147,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.481Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 159,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2",
+    "descricao": "DESPESAS ADMINISTRATIVAS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 146,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.483Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 160,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.01",
+    "descricao": "Aluguel",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.485Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 161,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.02",
+    "descricao": "Condomínio",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.487Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 162,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.03",
+    "descricao": "Energia",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.489Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 163,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.04",
+    "descricao": "Água",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.491Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 164,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.05",
+    "descricao": "Internet",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.492Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 165,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.06",
+    "descricao": "Telefonia",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.494Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 166,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.07",
+    "descricao": "Material Escritório",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.496Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 167,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.08",
+    "descricao": "Material Limpeza",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.497Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 168,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.09",
+    "descricao": "Honorários Contábeis",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.499Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 169,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.10",
+    "descricao": "Honorários Jurídicos",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.502Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 170,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.11",
+    "descricao": "Correios",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.504Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 171,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.12",
+    "descricao": "Seguros",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.505Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 172,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.2.13",
+    "descricao": "Depreciação",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 159,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.507Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 173,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3",
+    "descricao": "DESPESAS COM VENDAS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 146,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.509Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 174,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.01",
+    "descricao": "Fretes",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.510Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 175,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.02",
+    "descricao": "Embalagens",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.511Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 176,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.03",
+    "descricao": "Publicidade",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.513Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 177,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.04",
+    "descricao": "Marketing",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.515Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 178,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.05",
+    "descricao": "Meta Ads",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.517Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 179,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.06",
+    "descricao": "Google Ads",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.519Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 180,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.07",
+    "descricao": "Influenciadores",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.522Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 181,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.3.08",
+    "descricao": "Eventos",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 173,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.523Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 182,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4",
+    "descricao": "DESPESAS FINANCEIRAS",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 146,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.524Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 183,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.01",
+    "descricao": "Juros",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.525Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 184,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.02",
+    "descricao": "Multas",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.527Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 185,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.03",
+    "descricao": "IOF",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.528Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 186,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.04",
+    "descricao": "Tarifas Bancárias",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.531Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 187,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.05",
+    "descricao": "Taxas Cartão Crédito",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.532Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 188,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.06",
+    "descricao": "Taxas Cartão Débito",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.533Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 189,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.4.07",
+    "descricao": "Taxas PIX",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 182,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.536Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 190,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5",
+    "descricao": "DESPESAS COM TECNOLOGIA",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 146,
+    "nivel": 2,
+    "analitica": false,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.537Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 191,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.01",
+    "descricao": "ERP",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.538Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 192,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.02",
+    "descricao": "Hospedagem",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.540Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 193,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.03",
+    "descricao": "Backup",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.541Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 194,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.04",
+    "descricao": "Licenças",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.542Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 195,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.05",
+    "descricao": "Domínio",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.543Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 196,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.06",
+    "descricao": "Certificado Digital",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.546Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 197,
+  "fields": {
+    "empresa": 1,
+    "codigo": "6.5.07",
+    "descricao": "Equipamentos de TI",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": 190,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-07T12:58:33.547Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 388,
+  "fields": {
+    "empresa": 7,
+    "codigo": "1.1.01",
+    "descricao": "Caixa Geral",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.094Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 389,
+  "fields": {
+    "empresa": 7,
+    "codigo": "1.1.02.001",
+    "descricao": "Banco Conta Movimento",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.094Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 390,
+  "fields": {
+    "empresa": 7,
+    "codigo": "1.1.03",
+    "descricao": "Clientes",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.094Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 391,
+  "fields": {
+    "empresa": 7,
+    "codigo": "2.1.01",
+    "descricao": "Fornecedores",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.094Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 392,
+  "fields": {
+    "empresa": 7,
+    "codigo": "3.1.01",
+    "descricao": "Capital Social",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.097Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 393,
+  "fields": {
+    "empresa": 7,
+    "codigo": "4.1.01",
+    "descricao": "Receita de Venda de Mercadorias",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.097Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 394,
+  "fields": {
+    "empresa": 7,
+    "codigo": "4.1.02",
+    "descricao": "Receita de Venda de Produtos Proprios",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.098Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 395,
+  "fields": {
+    "empresa": 7,
+    "codigo": "5.1.01",
+    "descricao": "CMV",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.098Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 396,
+  "fields": {
+    "empresa": 7,
+    "codigo": "6.1.01",
+    "descricao": "Aluguel",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.100Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 397,
+  "fields": {
+    "empresa": 7,
+    "codigo": "6.2.01",
+    "descricao": "Comissoes sobre vendas",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.101Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 398,
+  "fields": {
+    "empresa": 7,
+    "codigo": "6.3.01",
+    "descricao": "Taxas e tarifas bancarias",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:45.102Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 399,
+  "fields": {
+    "empresa": 8,
+    "codigo": "1.1.01",
+    "descricao": "Caixa Geral",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.845Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 400,
+  "fields": {
+    "empresa": 8,
+    "codigo": "1.1.02.001",
+    "descricao": "Banco Conta Movimento",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 4,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.845Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 401,
+  "fields": {
+    "empresa": 8,
+    "codigo": "1.1.03",
+    "descricao": "Clientes",
+    "classe": "ATIVO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.845Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 402,
+  "fields": {
+    "empresa": 8,
+    "codigo": "2.1.01",
+    "descricao": "Fornecedores",
+    "classe": "PASSIVO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.846Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 403,
+  "fields": {
+    "empresa": 8,
+    "codigo": "3.1.01",
+    "descricao": "Capital Social",
+    "classe": "PATRIMONIO",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.847Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 404,
+  "fields": {
+    "empresa": 8,
+    "codigo": "4.1.01",
+    "descricao": "Receita de Venda de Mercadorias",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.847Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 405,
+  "fields": {
+    "empresa": 8,
+    "codigo": "4.1.02",
+    "descricao": "Receita de Venda de Produtos Proprios",
+    "classe": "RECEITA",
+    "natureza": "CREDITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.848Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 406,
+  "fields": {
+    "empresa": 8,
+    "codigo": "5.1.01",
+    "descricao": "CMV",
+    "classe": "CUSTO",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.849Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 407,
+  "fields": {
+    "empresa": 8,
+    "codigo": "6.1.01",
+    "descricao": "Aluguel",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.850Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 408,
+  "fields": {
+    "empresa": 8,
+    "codigo": "6.2.01",
+    "descricao": "Comissoes sobre vendas",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.850Z"
+  }
+},
+{
+  "model": "cadastros.planocontabil",
+  "pk": 409,
+  "fields": {
+    "empresa": 8,
+    "codigo": "6.3.01",
+    "descricao": "Taxas e tarifas bancarias",
+    "classe": "DESPESA",
+    "natureza": "DEBITO",
+    "conta_pai": null,
+    "nivel": 3,
+    "analitica": true,
+    "ativa": true,
+    "data_cadastro": "2026-07-15T16:55:48.851Z"
+  }
+}
+]

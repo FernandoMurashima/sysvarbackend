@@ -1,0 +1,104 @@
+[
+  {
+    "pack_codigo_seed": "PACK-ALF-PADRAO",
+    "grade_codigo": "ALF",
+    "tamanho": "PP",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-ALF-PADRAO",
+    "grade_codigo": "ALF",
+    "tamanho": "P",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-ALF-PADRAO",
+    "grade_codigo": "ALF",
+    "tamanho": "M",
+    "qtd": 3
+  },
+  {
+    "pack_codigo_seed": "PACK-ALF-PADRAO",
+    "grade_codigo": "ALF",
+    "tamanho": "G",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-ALF-PADRAO",
+    "grade_codigo": "ALF",
+    "tamanho": "GG",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "34",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "36",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "38",
+    "qtd": 3
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "40",
+    "qtd": 3
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "42",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-NUMF-PADRAO",
+    "grade_codigo": "NUMF",
+    "tamanho": "44",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "34",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "35",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "36",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "37",
+    "qtd": 2
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "38",
+    "qtd": 1
+  },
+  {
+    "pack_codigo_seed": "PACK-CALC-PADRAO",
+    "grade_codigo": "CALC",
+    "tamanho": "39",
+    "qtd": 1
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "Codigo": "ALG",
+    "Descricao": "Algodão",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "VIS",
+    "Descricao": "Viscose",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "LIN",
+    "Descricao": "Linho",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "POL",
+    "Descricao": "Poliéster",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "ELA",
+    "Descricao": "Elastano",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "PAM",
+    "Descricao": "Poliamida",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "DEN",
+    "Descricao": "Denim / Jeans",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "SAR",
+    "Descricao": "Sarja",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "TRI",
+    "Descricao": "Tricoline",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "MAL",
+    "Descricao": "Malha",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "REN",
+    "Descricao": "Renda",
+    "Status": "ATIVO"
+  },
+  {
+    "Codigo": "COS",
+    "Descricao": "Couro sintético",
+    "Status": "ATIVO"
+  }
+]

@@ -1,0 +1,2472 @@
+[
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 1,
+  "fields": {
+    "perfil": 1,
+    "modulo": 1,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 2,
+  "fields": {
+    "perfil": 1,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 3,
+  "fields": {
+    "perfil": 1,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 4,
+  "fields": {
+    "perfil": 1,
+    "modulo": 4,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 5,
+  "fields": {
+    "perfil": 1,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 6,
+  "fields": {
+    "perfil": 1,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 7,
+  "fields": {
+    "perfil": 1,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 8,
+  "fields": {
+    "perfil": 1,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 9,
+  "fields": {
+    "perfil": 1,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 10,
+  "fields": {
+    "perfil": 1,
+    "modulo": 10,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 11,
+  "fields": {
+    "perfil": 1,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 13,
+  "fields": {
+    "perfil": 2,
+    "modulo": 1,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 14,
+  "fields": {
+    "perfil": 2,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 15,
+  "fields": {
+    "perfil": 2,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 16,
+  "fields": {
+    "perfil": 2,
+    "modulo": 4,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 17,
+  "fields": {
+    "perfil": 2,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 18,
+  "fields": {
+    "perfil": 2,
+    "modulo": 6,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 19,
+  "fields": {
+    "perfil": 2,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 20,
+  "fields": {
+    "perfil": 2,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 21,
+  "fields": {
+    "perfil": 2,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 22,
+  "fields": {
+    "perfil": 2,
+    "modulo": 10,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 23,
+  "fields": {
+    "perfil": 2,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 25,
+  "fields": {
+    "perfil": 3,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 26,
+  "fields": {
+    "perfil": 3,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 27,
+  "fields": {
+    "perfil": 3,
+    "modulo": 5,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 28,
+  "fields": {
+    "perfil": 3,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 29,
+  "fields": {
+    "perfil": 4,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 30,
+  "fields": {
+    "perfil": 4,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 31,
+  "fields": {
+    "perfil": 4,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 32,
+  "fields": {
+    "perfil": 4,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 33,
+  "fields": {
+    "perfil": 4,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 34,
+  "fields": {
+    "perfil": 5,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 35,
+  "fields": {
+    "perfil": 5,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 36,
+  "fields": {
+    "perfil": 5,
+    "modulo": 12,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 37,
+  "fields": {
+    "perfil": 6,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 38,
+  "fields": {
+    "perfil": 6,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 39,
+  "fields": {
+    "perfil": 6,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 40,
+  "fields": {
+    "perfil": 6,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 41,
+  "fields": {
+    "perfil": 7,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 42,
+  "fields": {
+    "perfil": 7,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 43,
+  "fields": {
+    "perfil": 7,
+    "modulo": 11,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 44,
+  "fields": {
+    "perfil": 8,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 45,
+  "fields": {
+    "perfil": 8,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 46,
+  "fields": {
+    "perfil": 8,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 47,
+  "fields": {
+    "perfil": 9,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 48,
+  "fields": {
+    "perfil": 9,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 49,
+  "fields": {
+    "perfil": 10,
+    "modulo": 1,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 50,
+  "fields": {
+    "perfil": 10,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 51,
+  "fields": {
+    "perfil": 10,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 52,
+  "fields": {
+    "perfil": 10,
+    "modulo": 4,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 53,
+  "fields": {
+    "perfil": 10,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 54,
+  "fields": {
+    "perfil": 10,
+    "modulo": 6,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 55,
+  "fields": {
+    "perfil": 10,
+    "modulo": 7,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 56,
+  "fields": {
+    "perfil": 10,
+    "modulo": 8,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 57,
+  "fields": {
+    "perfil": 10,
+    "modulo": 9,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 58,
+  "fields": {
+    "perfil": 10,
+    "modulo": 10,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 59,
+  "fields": {
+    "perfil": 10,
+    "modulo": 11,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 60,
+  "fields": {
+    "perfil": 10,
+    "modulo": 12,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 61,
+  "fields": {
+    "perfil": 11,
+    "modulo": 1,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 62,
+  "fields": {
+    "perfil": 11,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 63,
+  "fields": {
+    "perfil": 11,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 64,
+  "fields": {
+    "perfil": 11,
+    "modulo": 4,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 65,
+  "fields": {
+    "perfil": 11,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 66,
+  "fields": {
+    "perfil": 11,
+    "modulo": 6,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 67,
+  "fields": {
+    "perfil": 11,
+    "modulo": 7,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 68,
+  "fields": {
+    "perfil": 11,
+    "modulo": 8,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 69,
+  "fields": {
+    "perfil": 11,
+    "modulo": 9,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 70,
+  "fields": {
+    "perfil": 11,
+    "modulo": 10,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 71,
+  "fields": {
+    "perfil": 11,
+    "modulo": 11,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 72,
+  "fields": {
+    "perfil": 11,
+    "modulo": 12,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 73,
+  "fields": {
+    "perfil": 12,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 74,
+  "fields": {
+    "perfil": 12,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 75,
+  "fields": {
+    "perfil": 12,
+    "modulo": 5,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 76,
+  "fields": {
+    "perfil": 12,
+    "modulo": 7,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 77,
+  "fields": {
+    "perfil": 13,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 78,
+  "fields": {
+    "perfil": 13,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 79,
+  "fields": {
+    "perfil": 13,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 80,
+  "fields": {
+    "perfil": 13,
+    "modulo": 8,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 81,
+  "fields": {
+    "perfil": 13,
+    "modulo": 7,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 82,
+  "fields": {
+    "perfil": 14,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 83,
+  "fields": {
+    "perfil": 14,
+    "modulo": 8,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 84,
+  "fields": {
+    "perfil": 14,
+    "modulo": 12,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 85,
+  "fields": {
+    "perfil": 15,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 86,
+  "fields": {
+    "perfil": 15,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 87,
+  "fields": {
+    "perfil": 15,
+    "modulo": 6,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 88,
+  "fields": {
+    "perfil": 15,
+    "modulo": 9,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 89,
+  "fields": {
+    "perfil": 16,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 90,
+  "fields": {
+    "perfil": 16,
+    "modulo": 7,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 91,
+  "fields": {
+    "perfil": 16,
+    "modulo": 11,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 92,
+  "fields": {
+    "perfil": 17,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 93,
+  "fields": {
+    "perfil": 17,
+    "modulo": 9,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 94,
+  "fields": {
+    "perfil": 17,
+    "modulo": 8,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 95,
+  "fields": {
+    "perfil": 18,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 96,
+  "fields": {
+    "perfil": 18,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 97,
+  "fields": {
+    "perfil": 19,
+    "modulo": 1,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 98,
+  "fields": {
+    "perfil": 19,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 99,
+  "fields": {
+    "perfil": 19,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 100,
+  "fields": {
+    "perfil": 19,
+    "modulo": 4,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 101,
+  "fields": {
+    "perfil": 19,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 102,
+  "fields": {
+    "perfil": 19,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 103,
+  "fields": {
+    "perfil": 19,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 104,
+  "fields": {
+    "perfil": 19,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 105,
+  "fields": {
+    "perfil": 19,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 106,
+  "fields": {
+    "perfil": 19,
+    "modulo": 10,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 107,
+  "fields": {
+    "perfil": 19,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 108,
+  "fields": {
+    "perfil": 19,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 109,
+  "fields": {
+    "perfil": 20,
+    "modulo": 1,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 110,
+  "fields": {
+    "perfil": 20,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 111,
+  "fields": {
+    "perfil": 20,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 112,
+  "fields": {
+    "perfil": 20,
+    "modulo": 4,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 113,
+  "fields": {
+    "perfil": 20,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 114,
+  "fields": {
+    "perfil": 20,
+    "modulo": 6,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 115,
+  "fields": {
+    "perfil": 20,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 116,
+  "fields": {
+    "perfil": 20,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 117,
+  "fields": {
+    "perfil": 20,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 118,
+  "fields": {
+    "perfil": 20,
+    "modulo": 10,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 119,
+  "fields": {
+    "perfil": 20,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 120,
+  "fields": {
+    "perfil": 20,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 121,
+  "fields": {
+    "perfil": 21,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 122,
+  "fields": {
+    "perfil": 21,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 123,
+  "fields": {
+    "perfil": 21,
+    "modulo": 5,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 124,
+  "fields": {
+    "perfil": 21,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 125,
+  "fields": {
+    "perfil": 22,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 126,
+  "fields": {
+    "perfil": 22,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 127,
+  "fields": {
+    "perfil": 22,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 128,
+  "fields": {
+    "perfil": 22,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 129,
+  "fields": {
+    "perfil": 22,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 130,
+  "fields": {
+    "perfil": 23,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 131,
+  "fields": {
+    "perfil": 23,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 132,
+  "fields": {
+    "perfil": 23,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 133,
+  "fields": {
+    "perfil": 24,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 134,
+  "fields": {
+    "perfil": 24,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 135,
+  "fields": {
+    "perfil": 24,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 136,
+  "fields": {
+    "perfil": 24,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 137,
+  "fields": {
+    "perfil": 25,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 138,
+  "fields": {
+    "perfil": 25,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 139,
+  "fields": {
+    "perfil": 25,
+    "modulo": 11,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 140,
+  "fields": {
+    "perfil": 26,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 141,
+  "fields": {
+    "perfil": 26,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 142,
+  "fields": {
+    "perfil": 26,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 143,
+  "fields": {
+    "perfil": 27,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 144,
+  "fields": {
+    "perfil": 27,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 145,
+  "fields": {
+    "perfil": 28,
+    "modulo": 1,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 146,
+  "fields": {
+    "perfil": 28,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 147,
+  "fields": {
+    "perfil": 28,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 148,
+  "fields": {
+    "perfil": 28,
+    "modulo": 4,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 149,
+  "fields": {
+    "perfil": 28,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 150,
+  "fields": {
+    "perfil": 28,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 151,
+  "fields": {
+    "perfil": 28,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 152,
+  "fields": {
+    "perfil": 28,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 153,
+  "fields": {
+    "perfil": 28,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 154,
+  "fields": {
+    "perfil": 28,
+    "modulo": 10,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 155,
+  "fields": {
+    "perfil": 28,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 156,
+  "fields": {
+    "perfil": 28,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 157,
+  "fields": {
+    "perfil": 29,
+    "modulo": 1,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 158,
+  "fields": {
+    "perfil": 29,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 159,
+  "fields": {
+    "perfil": 29,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 160,
+  "fields": {
+    "perfil": 29,
+    "modulo": 4,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 161,
+  "fields": {
+    "perfil": 29,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 162,
+  "fields": {
+    "perfil": 29,
+    "modulo": 6,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 163,
+  "fields": {
+    "perfil": 29,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 164,
+  "fields": {
+    "perfil": 29,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 165,
+  "fields": {
+    "perfil": 29,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 166,
+  "fields": {
+    "perfil": 29,
+    "modulo": 10,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 167,
+  "fields": {
+    "perfil": 29,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 168,
+  "fields": {
+    "perfil": 29,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 169,
+  "fields": {
+    "perfil": 30,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 170,
+  "fields": {
+    "perfil": 30,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 171,
+  "fields": {
+    "perfil": 30,
+    "modulo": 5,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 172,
+  "fields": {
+    "perfil": 30,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 173,
+  "fields": {
+    "perfil": 31,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 174,
+  "fields": {
+    "perfil": 31,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 175,
+  "fields": {
+    "perfil": 31,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 176,
+  "fields": {
+    "perfil": 31,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 177,
+  "fields": {
+    "perfil": 31,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 178,
+  "fields": {
+    "perfil": 32,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 179,
+  "fields": {
+    "perfil": 32,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 180,
+  "fields": {
+    "perfil": 32,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 181,
+  "fields": {
+    "perfil": 33,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 182,
+  "fields": {
+    "perfil": 33,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 183,
+  "fields": {
+    "perfil": 33,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 184,
+  "fields": {
+    "perfil": 33,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 185,
+  "fields": {
+    "perfil": 34,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 186,
+  "fields": {
+    "perfil": 34,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 187,
+  "fields": {
+    "perfil": 34,
+    "modulo": 11,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 188,
+  "fields": {
+    "perfil": 35,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 189,
+  "fields": {
+    "perfil": 35,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 190,
+  "fields": {
+    "perfil": 35,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 191,
+  "fields": {
+    "perfil": 36,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 192,
+  "fields": {
+    "perfil": 36,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 193,
+  "fields": {
+    "perfil": 37,
+    "modulo": 1,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 194,
+  "fields": {
+    "perfil": 37,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 195,
+  "fields": {
+    "perfil": 37,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 196,
+  "fields": {
+    "perfil": 37,
+    "modulo": 4,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 197,
+  "fields": {
+    "perfil": 37,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 198,
+  "fields": {
+    "perfil": 37,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 199,
+  "fields": {
+    "perfil": 37,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 200,
+  "fields": {
+    "perfil": 37,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 201,
+  "fields": {
+    "perfil": 37,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 202,
+  "fields": {
+    "perfil": 37,
+    "modulo": 10,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 203,
+  "fields": {
+    "perfil": 37,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 204,
+  "fields": {
+    "perfil": 37,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 205,
+  "fields": {
+    "perfil": 38,
+    "modulo": 1,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 206,
+  "fields": {
+    "perfil": 38,
+    "modulo": 2,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 207,
+  "fields": {
+    "perfil": 38,
+    "modulo": 3,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 208,
+  "fields": {
+    "perfil": 38,
+    "modulo": 4,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 209,
+  "fields": {
+    "perfil": 38,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 210,
+  "fields": {
+    "perfil": 38,
+    "modulo": 6,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 211,
+  "fields": {
+    "perfil": 38,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 212,
+  "fields": {
+    "perfil": 38,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 213,
+  "fields": {
+    "perfil": 38,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 214,
+  "fields": {
+    "perfil": 38,
+    "modulo": 10,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 215,
+  "fields": {
+    "perfil": 38,
+    "modulo": 11,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 216,
+  "fields": {
+    "perfil": 38,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 217,
+  "fields": {
+    "perfil": 39,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 218,
+  "fields": {
+    "perfil": 39,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 219,
+  "fields": {
+    "perfil": 39,
+    "modulo": 5,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 220,
+  "fields": {
+    "perfil": 39,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 221,
+  "fields": {
+    "perfil": 40,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 222,
+  "fields": {
+    "perfil": 40,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 223,
+  "fields": {
+    "perfil": 40,
+    "modulo": 5,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 224,
+  "fields": {
+    "perfil": 40,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 225,
+  "fields": {
+    "perfil": 40,
+    "modulo": 7,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 226,
+  "fields": {
+    "perfil": 41,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 227,
+  "fields": {
+    "perfil": 41,
+    "modulo": 8,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 228,
+  "fields": {
+    "perfil": 41,
+    "modulo": 12,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 229,
+  "fields": {
+    "perfil": 42,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 230,
+  "fields": {
+    "perfil": 42,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 231,
+  "fields": {
+    "perfil": 42,
+    "modulo": 6,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 232,
+  "fields": {
+    "perfil": 42,
+    "modulo": 9,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 233,
+  "fields": {
+    "perfil": 43,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 234,
+  "fields": {
+    "perfil": 43,
+    "modulo": 7,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 235,
+  "fields": {
+    "perfil": 43,
+    "modulo": 11,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 236,
+  "fields": {
+    "perfil": 44,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 237,
+  "fields": {
+    "perfil": 44,
+    "modulo": 9,
+    "acesso": "EDIT",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 238,
+  "fields": {
+    "perfil": 44,
+    "modulo": 8,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 239,
+  "fields": {
+    "perfil": 45,
+    "modulo": 2,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 240,
+  "fields": {
+    "perfil": 45,
+    "modulo": 3,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 293,
+  "fields": {
+    "perfil": 1,
+    "modulo": 13,
+    "acesso": "VIEW",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 294,
+  "fields": {
+    "perfil": 2,
+    "modulo": 13,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 295,
+  "fields": {
+    "perfil": 4,
+    "modulo": 1,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 296,
+  "fields": {
+    "perfil": 4,
+    "modulo": 4,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 297,
+  "fields": {
+    "perfil": 4,
+    "modulo": 13,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 298,
+  "fields": {
+    "perfil": 4,
+    "modulo": 6,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 299,
+  "fields": {
+    "perfil": 4,
+    "modulo": 9,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 300,
+  "fields": {
+    "perfil": 4,
+    "modulo": 10,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+},
+{
+  "model": "accounts.perfilmodulopermissao",
+  "pk": 301,
+  "fields": {
+    "perfil": 4,
+    "modulo": 11,
+    "acesso": "NONE",
+    "pode_excluir": false
+  }
+}
+]

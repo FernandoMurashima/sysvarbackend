@@ -1,0 +1,38 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "BARRA",
+    "tipo_caixa": "LOJA",
+    "codigo": "CX-BARRA",
+    "descricao": "Caixa Loja Barra",
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "conta_contabil": null,
+    "ativo": true,
+    "data_abertura": "2026-01-05"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "TIJUCA",
+    "tipo_caixa": "LOJA",
+    "codigo": "CX-TIJUCA",
+    "descricao": "Caixa Loja Tijuca",
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "conta_contabil": null,
+    "ativo": true,
+    "data_abertura": "2026-01-05"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "loja_codigo": "CENTRO",
+    "tipo_caixa": "LOJA",
+    "codigo": "CX-CENTRO",
+    "descricao": "Caixa Loja Centro",
+    "saldo_inicial": "0.00",
+    "saldo_atual": "0.00",
+    "conta_contabil": null,
+    "ativo": true,
+    "data_abertura": "2026-01-05"
+  }
+]

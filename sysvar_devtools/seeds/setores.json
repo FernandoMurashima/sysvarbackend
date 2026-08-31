@@ -1,0 +1,862 @@
+[
+{
+  "model": "compras.requisicaosetor",
+  "pk": 1,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Administrativo",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.739Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 2,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Financeiro",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.741Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 3,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "TI",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.742Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 4,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Almoxarifado",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.742Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 5,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Estoque",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.743Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 6,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Vendas",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.744Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 7,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Diretoria",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.745Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 8,
+  "fields": {
+    "empresa": 4,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Manutencao",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.746Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 9,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Administrativo",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.746Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 10,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Financeiro",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.747Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 11,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "TI",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.748Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 12,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Almoxarifado",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.748Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 13,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Estoque",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.749Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 14,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Vendas",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.750Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 15,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Diretoria",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.751Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 16,
+  "fields": {
+    "empresa": 5,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Manutencao",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.752Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 17,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Administrativo",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.752Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 18,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Financeiro",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.753Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 19,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "TI",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.754Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 20,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Almoxarifado",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.754Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 21,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Estoque",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.755Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 22,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Vendas",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.756Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 23,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Diretoria",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.757Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 24,
+  "fields": {
+    "empresa": 3,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Manutencao",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.758Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 25,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Administrativo",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.759Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 26,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Financeiro",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.760Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 27,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "TI",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.760Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 28,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Almoxarifado",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.761Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 29,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Estoque",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.762Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 30,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Vendas",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.762Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 31,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Diretoria",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.763Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 32,
+  "fields": {
+    "empresa": 2,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Manutencao",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.764Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 33,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Administrativo",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": false,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.765Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 34,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Financeiro",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": false,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.766Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 35,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "TI",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": true,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.767Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 36,
+  "fields": {
+    "empresa": 1,
+    "loja": 2,
+    "centro_custo": null,
+    "nome": "Almoxarifado",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": true,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.768Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 37,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Estoque",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": false,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": true,
+    "data_cadastro": "2026-08-19T19:15:07.769Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 38,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Vendas",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": false,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.770Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 39,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Diretoria",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": false,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.771Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 40,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Manutencao",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": true,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.772Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 41,
+  "fields": {
+    "empresa": 1,
+    "loja": null,
+    "centro_custo": null,
+    "nome": "Compras",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": true,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-19T19:15:07.954Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 42,
+  "fields": {
+    "empresa": 1,
+    "loja": 1,
+    "centro_custo": null,
+    "nome": "Loja Tijuca",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-25T12:33:00.122Z"
+  }
+},
+{
+  "model": "compras.requisicaosetor",
+  "pk": 43,
+  "fields": {
+    "empresa": 1,
+    "loja": 3,
+    "centro_custo": null,
+    "nome": "Loja Barra",
+    "descricao": "",
+    "ativo": true,
+    "pode_fazer_requisicao": true,
+    "recebe_requisicoes": true,
+    "central_uso_consumo": false,
+    "central_manutencao": false,
+    "central_ti": false,
+    "responsavel_compras": false,
+    "controla_estoque_uso_consumo": false,
+    "data_cadastro": "2026-08-25T12:33:24.000Z"
+  }
+}
+]

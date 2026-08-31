@@ -1,0 +1,587 @@
+[
+{
+  "model": "accounts.perfilacesso",
+  "pk": 1,
+  "fields": {
+    "empresa": 1,
+    "nome": "Administrador delegado",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.423Z",
+    "updated_at": "2026-08-21T19:32:40.295Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 2,
+  "fields": {
+    "empresa": 1,
+    "nome": "Gerente",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.434Z",
+    "updated_at": "2026-08-21T12:07:55.542Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 3,
+  "fields": {
+    "empresa": 1,
+    "nome": "Vendedor",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.444Z",
+    "updated_at": "2026-08-04T14:16:06.444Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 4,
+  "fields": {
+    "empresa": 1,
+    "nome": "Caixa",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.449Z",
+    "updated_at": "2026-08-21T12:08:05.232Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 5,
+  "fields": {
+    "empresa": 1,
+    "nome": "Financeiro",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.455Z",
+    "updated_at": "2026-08-04T14:16:06.455Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 6,
+  "fields": {
+    "empresa": 1,
+    "nome": "Compras",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.460Z",
+    "updated_at": "2026-08-04T14:16:06.460Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 7,
+  "fields": {
+    "empresa": 1,
+    "nome": "Estoque",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.464Z",
+    "updated_at": "2026-08-04T14:16:06.464Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 8,
+  "fields": {
+    "empresa": 1,
+    "nome": "Fiscal",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:16:06.469Z",
+    "updated_at": "2026-08-04T14:16:06.469Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 9,
+  "fields": {
+    "empresa": 1,
+    "nome": "Regular",
+    "descricao": "Perfil criado pela migração inicial.",
+    "ativo": true,
+    "padrao": true,
+    "created_at": "2026-08-04T14:16:06.473Z",
+    "updated_at": "2026-08-04T14:16:06.474Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 10,
+  "fields": {
+    "empresa": 2,
+    "nome": "Administrador delegado",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.420Z",
+    "updated_at": "2026-08-04T14:51:18.420Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 11,
+  "fields": {
+    "empresa": 2,
+    "nome": "Gerente",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.438Z",
+    "updated_at": "2026-08-04T14:51:18.438Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 12,
+  "fields": {
+    "empresa": 2,
+    "nome": "Vendedor",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.452Z",
+    "updated_at": "2026-08-04T14:51:18.452Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 13,
+  "fields": {
+    "empresa": 2,
+    "nome": "Caixa",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.457Z",
+    "updated_at": "2026-08-04T14:51:18.457Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 14,
+  "fields": {
+    "empresa": 2,
+    "nome": "Financeiro",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.461Z",
+    "updated_at": "2026-08-04T14:51:18.461Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 15,
+  "fields": {
+    "empresa": 2,
+    "nome": "Compras",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.466Z",
+    "updated_at": "2026-08-04T14:51:18.466Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 16,
+  "fields": {
+    "empresa": 2,
+    "nome": "Estoque",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.471Z",
+    "updated_at": "2026-08-04T14:51:18.471Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 17,
+  "fields": {
+    "empresa": 2,
+    "nome": "Fiscal",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-04T14:51:18.475Z",
+    "updated_at": "2026-08-04T14:51:18.475Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 18,
+  "fields": {
+    "empresa": 2,
+    "nome": "Regular",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": true,
+    "created_at": "2026-08-04T14:51:18.480Z",
+    "updated_at": "2026-08-04T14:51:18.480Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 19,
+  "fields": {
+    "empresa": 3,
+    "nome": "Administrador delegado",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.629Z",
+    "updated_at": "2026-08-07T11:17:27.629Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 20,
+  "fields": {
+    "empresa": 3,
+    "nome": "Gerente",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.693Z",
+    "updated_at": "2026-08-07T11:17:27.693Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 21,
+  "fields": {
+    "empresa": 3,
+    "nome": "Vendedor",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.754Z",
+    "updated_at": "2026-08-07T11:17:27.754Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 22,
+  "fields": {
+    "empresa": 3,
+    "nome": "Caixa",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.779Z",
+    "updated_at": "2026-08-07T11:17:27.779Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 23,
+  "fields": {
+    "empresa": 3,
+    "nome": "Financeiro",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.806Z",
+    "updated_at": "2026-08-07T11:17:27.806Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 24,
+  "fields": {
+    "empresa": 3,
+    "nome": "Compras",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.824Z",
+    "updated_at": "2026-08-07T11:17:27.824Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 25,
+  "fields": {
+    "empresa": 3,
+    "nome": "Estoque",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.846Z",
+    "updated_at": "2026-08-07T11:17:27.846Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 26,
+  "fields": {
+    "empresa": 3,
+    "nome": "Fiscal",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-07T11:17:27.869Z",
+    "updated_at": "2026-08-07T11:17:27.869Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 27,
+  "fields": {
+    "empresa": 3,
+    "nome": "Regular",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": true,
+    "created_at": "2026-08-07T11:17:27.888Z",
+    "updated_at": "2026-08-07T11:17:27.888Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 28,
+  "fields": {
+    "empresa": 4,
+    "nome": "Administrador delegado",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.118Z",
+    "updated_at": "2026-08-12T23:44:22.118Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 29,
+  "fields": {
+    "empresa": 4,
+    "nome": "Gerente",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.184Z",
+    "updated_at": "2026-08-12T23:44:22.184Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 30,
+  "fields": {
+    "empresa": 4,
+    "nome": "Vendedor",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.271Z",
+    "updated_at": "2026-08-12T23:44:22.271Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 31,
+  "fields": {
+    "empresa": 4,
+    "nome": "Caixa",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.299Z",
+    "updated_at": "2026-08-12T23:44:22.299Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 32,
+  "fields": {
+    "empresa": 4,
+    "nome": "Financeiro",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.330Z",
+    "updated_at": "2026-08-12T23:44:22.330Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 33,
+  "fields": {
+    "empresa": 4,
+    "nome": "Compras",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.351Z",
+    "updated_at": "2026-08-12T23:44:22.351Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 34,
+  "fields": {
+    "empresa": 4,
+    "nome": "Estoque",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.378Z",
+    "updated_at": "2026-08-12T23:44:22.378Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 35,
+  "fields": {
+    "empresa": 4,
+    "nome": "Fiscal",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:22.398Z",
+    "updated_at": "2026-08-12T23:44:22.398Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 36,
+  "fields": {
+    "empresa": 4,
+    "nome": "Regular",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": true,
+    "created_at": "2026-08-12T23:44:22.419Z",
+    "updated_at": "2026-08-12T23:44:22.419Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 37,
+  "fields": {
+    "empresa": 5,
+    "nome": "Administrador delegado",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:58.896Z",
+    "updated_at": "2026-08-12T23:44:58.896Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 38,
+  "fields": {
+    "empresa": 5,
+    "nome": "Gerente",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.006Z",
+    "updated_at": "2026-08-12T23:44:59.006Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 39,
+  "fields": {
+    "empresa": 5,
+    "nome": "Vendedor",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.116Z",
+    "updated_at": "2026-08-12T23:44:59.116Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 40,
+  "fields": {
+    "empresa": 5,
+    "nome": "Caixa",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.142Z",
+    "updated_at": "2026-08-12T23:44:59.142Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 41,
+  "fields": {
+    "empresa": 5,
+    "nome": "Financeiro",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.175Z",
+    "updated_at": "2026-08-12T23:44:59.175Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 42,
+  "fields": {
+    "empresa": 5,
+    "nome": "Compras",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.200Z",
+    "updated_at": "2026-08-12T23:44:59.200Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 43,
+  "fields": {
+    "empresa": 5,
+    "nome": "Estoque",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.228Z",
+    "updated_at": "2026-08-12T23:44:59.228Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 44,
+  "fields": {
+    "empresa": 5,
+    "nome": "Fiscal",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": false,
+    "created_at": "2026-08-12T23:44:59.248Z",
+    "updated_at": "2026-08-12T23:44:59.248Z"
+  }
+},
+{
+  "model": "accounts.perfilacesso",
+  "pk": 45,
+  "fields": {
+    "empresa": 5,
+    "nome": "Regular",
+    "descricao": "Perfil criado automaticamente.",
+    "ativo": true,
+    "padrao": true,
+    "created_at": "2026-08-12T23:44:59.268Z",
+    "updated_at": "2026-08-12T23:44:59.268Z"
+  }
+}
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "codigo": "ALF",
+    "Descricao": "Alfabética",
+    "Status": "ATIVO"
+  },
+  {
+    "codigo": "NUMF",
+    "Descricao": "Numérica Feminina",
+    "Status": "ATIVO"
+  },
+  {
+    "codigo": "CALC",
+    "Descricao": "Calçados",
+    "Status": "ATIVO"
+  }
+]

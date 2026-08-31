@@ -1,0 +1,586 @@
+[
+  {
+    "ncm": "5007.10.00",
+    "descricao": "Tecidos de borras de seda",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "50",
+    "ativo": true
+  },
+  {
+    "ncm": "5007.20.00",
+    "descricao": "Outros tecidos que contenham pelo menos 85%, em peso, de seda ou de desperdícios de seda, exceto borras de seda",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "50",
+    "ativo": true
+  },
+  {
+    "ncm": "5007.90.00",
+    "descricao": "Outros tecidos de seda ou de desperdícios de seda",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "50",
+    "ativo": true
+  },
+  {
+    "ncm": "5111.11.00",
+    "descricao": "Tecidos de lã cardada ou de pelos finos cardados, contendo pelo menos 85%, em peso, de lã ou de pelos finos, de peso não superior a 300 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "51",
+    "ativo": true
+  },
+  {
+    "ncm": "5111.19.00",
+    "descricao": "Outros tecidos de lã cardada ou de pelos finos cardados, contendo pelo menos 85%, em peso, de lã ou de pelos finos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "51",
+    "ativo": true
+  },
+  {
+    "ncm": "5112.11.00",
+    "descricao": "Tecidos de lã penteada ou de pelos finos penteados, contendo pelo menos 85%, em peso, de lã ou de pelos finos, de peso não superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "51",
+    "ativo": true
+  },
+  {
+    "ncm": "5112.19.00",
+    "descricao": "Outros tecidos de lã penteada ou de pelos finos penteados, contendo pelo menos 85%, em peso, de lã ou de pelos finos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "51",
+    "ativo": true
+  },
+  {
+    "ncm": "5208.11.00",
+    "descricao": "Tecidos de algodão, contendo pelo menos 85%, em peso, de algodão, crus, em ponto de tafetá, de peso não superior a 100 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5208.12.00",
+    "descricao": "Tecidos de algodão, contendo pelo menos 85%, em peso, de algodão, crus, em ponto de tafetá, de peso superior a 100 g/m² e não superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5208.31.00",
+    "descricao": "Tecidos de algodão, contendo pelo menos 85%, em peso, de algodão, tintos, em ponto de tafetá, de peso não superior a 100 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5208.32.00",
+    "descricao": "Tecidos de algodão, contendo pelo menos 85%, em peso, de algodão, tintos, em ponto de tafetá, de peso superior a 100 g/m² e não superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5209.31.00",
+    "descricao": "Tecidos de algodão, contendo pelo menos 85%, em peso, de algodão, tintos, em ponto de tafetá, de peso superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5209.42.10",
+    "descricao": "Tecidos de algodão denominados denim (índigo blue), contendo pelo menos 85%, em peso, de algodão, de peso superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5210.31.00",
+    "descricao": "Tecidos de algodão, contendo menos de 85%, em peso, de algodão, combinados principal ou unicamente com fibras sintéticas ou artificiais, tintos, em ponto de tafetá, de peso não superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5211.31.00",
+    "descricao": "Tecidos de algodão, contendo menos de 85%, em peso, de algodão, combinados principal ou unicamente com fibras sintéticas ou artificiais, tintos, em ponto de tafetá, de peso superior a 200 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "52",
+    "ativo": true
+  },
+  {
+    "ncm": "5309.11.00",
+    "descricao": "Tecidos de linho, contendo pelo menos 85%, em peso, de linho, crus ou branqueados",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "53",
+    "ativo": true
+  },
+  {
+    "ncm": "5309.19.00",
+    "descricao": "Outros tecidos de linho, contendo pelo menos 85%, em peso, de linho",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "53",
+    "ativo": true
+  },
+  {
+    "ncm": "5309.21.00",
+    "descricao": "Tecidos de linho, contendo menos de 85%, em peso, de linho, crus ou branqueados",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "53",
+    "ativo": true
+  },
+  {
+    "ncm": "5309.29.00",
+    "descricao": "Outros tecidos de linho, contendo menos de 85%, em peso, de linho",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "53",
+    "ativo": true
+  },
+  {
+    "ncm": "5407.52.10",
+    "descricao": "Tecidos que contenham pelo menos 85%, em peso, de filamentos de poliéster texturizados, tintos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "54",
+    "ativo": true
+  },
+  {
+    "ncm": "5407.61.00",
+    "descricao": "Tecidos que contenham pelo menos 85%, em peso, de filamentos de poliéster não texturizados",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "54",
+    "ativo": true
+  },
+  {
+    "ncm": "5407.69.00",
+    "descricao": "Outros tecidos que contenham pelo menos 85%, em peso, de filamentos de poliéster",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "54",
+    "ativo": true
+  },
+  {
+    "ncm": "5408.22.00",
+    "descricao": "Tecidos que contenham pelo menos 85%, em peso, de filamentos ou lâminas ou formas semelhantes, artificiais, tintos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "54",
+    "ativo": true
+  },
+  {
+    "ncm": "5512.11.00",
+    "descricao": "Tecidos contendo pelo menos 85%, em peso, de fibras descontínuas de poliéster, crus ou branqueados",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "55",
+    "ativo": true
+  },
+  {
+    "ncm": "5512.19.00",
+    "descricao": "Outros tecidos contendo pelo menos 85%, em peso, de fibras descontínuas de poliéster",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "55",
+    "ativo": true
+  },
+  {
+    "ncm": "5513.21.00",
+    "descricao": "Tecidos de fibras descontínuas de poliéster, combinadas principal ou unicamente com algodão, tintos, em ponto de tafetá, de peso não superior a 170 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "55",
+    "ativo": true
+  },
+  {
+    "ncm": "5514.21.00",
+    "descricao": "Tecidos de fibras descontínuas de poliéster, combinadas principal ou unicamente com algodão, tintos, em ponto de tafetá, de peso superior a 170 g/m²",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "55",
+    "ativo": true
+  },
+  {
+    "ncm": "5804.21.00",
+    "descricao": "Rendas de fabricação mecânica, de fibras sintéticas ou artificiais",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "58",
+    "ativo": true
+  },
+  {
+    "ncm": "5806.32.00",
+    "descricao": "Fitas de fibras sintéticas ou artificiais",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "58",
+    "ativo": true
+  },
+  {
+    "ncm": "5810.92.00",
+    "descricao": "Bordados de fibras sintéticas ou artificiais, em peça, em tiras ou em motivos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "58",
+    "ativo": true
+  },
+  {
+    "ncm": "5903.10.00",
+    "descricao": "Tecidos impregnados, revestidos, recobertos ou estratificados, com poli(cloreto de vinila)",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "59",
+    "ativo": true
+  },
+  {
+    "ncm": "5903.20.00",
+    "descricao": "Tecidos impregnados, revestidos, recobertos ou estratificados, com poliuretano",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "59",
+    "ativo": true
+  },
+  {
+    "ncm": "5906.91.00",
+    "descricao": "Tecidos com borracha, de malha",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "59",
+    "ativo": true
+  },
+  {
+    "ncm": "6004.10.00",
+    "descricao": "Tecidos de malha de largura superior a 30 cm, contendo pelo menos 5%, em peso, de fios de elastômeros, mas não contendo fios de borracha",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "60",
+    "ativo": true
+  },
+  {
+    "ncm": "6006.21.00",
+    "descricao": "Outros tecidos de malha, de algodão, crus ou branqueados",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "60",
+    "ativo": true
+  },
+  {
+    "ncm": "6006.22.00",
+    "descricao": "Outros tecidos de malha, de algodão, tintos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "60",
+    "ativo": true
+  },
+  {
+    "ncm": "6006.32.00",
+    "descricao": "Outros tecidos de malha, de fibras sintéticas, tintos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "60",
+    "ativo": true
+  },
+  {
+    "ncm": "6006.42.00",
+    "descricao": "Outros tecidos de malha, de fibras artificiais, tintos",
+    "categoria": "TECIDO",
+    "aliquota": null,
+    "campo1": "60",
+    "ativo": true
+  },
+  {
+    "ncm": "6102.30.00",
+    "descricao": "Mantôs, capas, anoraques, casacos e semelhantes, de uso feminino, de fibras sintéticas ou artificiais, de malha",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.42.00",
+    "descricao": "Vestidos de algodão, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.43.00",
+    "descricao": "Vestidos de fibras sintéticas, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.44.00",
+    "descricao": "Vestidos de fibras artificiais, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.52.00",
+    "descricao": "Saias e saias-calças de algodão, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.53.00",
+    "descricao": "Saias e saias-calças de fibras sintéticas, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.62.00",
+    "descricao": "Calças, jardineiras, bermudas e shorts de algodão, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6104.63.00",
+    "descricao": "Calças, jardineiras, bermudas e shorts de fibras sintéticas, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6106.10.00",
+    "descricao": "Camisas, blusas e blusas-camiseiros, de algodão, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6106.20.00",
+    "descricao": "Camisas, blusas e blusas-camiseiros, de fibras sintéticas ou artificiais, de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6109.10.00",
+    "descricao": "Camisetas e artigos semelhantes, de malha, de algodão",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6109.90.00",
+    "descricao": "Outras camisetas e artigos semelhantes, de malha",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6110.20.00",
+    "descricao": "Suéteres, pulôveres, cardigãs, coletes e artigos semelhantes, de malha, de algodão",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6110.30.00",
+    "descricao": "Suéteres, pulôveres, cardigãs, coletes e artigos semelhantes, de malha, de fibras sintéticas ou artificiais",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6114.20.00",
+    "descricao": "Outros vestuários de malha, de algodão",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6114.30.00",
+    "descricao": "Outros vestuários de malha, de fibras sintéticas ou artificiais",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "61",
+    "ativo": true
+  },
+  {
+    "ncm": "6202.20.00",
+    "descricao": "Mantôs, capas, anoraques, casacos e semelhantes, de uso feminino, de lã ou de pelos finos",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6202.30.00",
+    "descricao": "Mantôs, capas, anoraques, casacos e semelhantes, de uso feminino, de algodão",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6202.40.00",
+    "descricao": "Mantôs, capas, anoraques, casacos e semelhantes, de uso feminino, de fibras sintéticas ou artificiais",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.42.00",
+    "descricao": "Vestidos de algodão, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.43.00",
+    "descricao": "Vestidos de fibras sintéticas, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.44.00",
+    "descricao": "Vestidos de fibras artificiais, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.52.00",
+    "descricao": "Saias e saias-calças de algodão, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.53.00",
+    "descricao": "Saias e saias-calças de fibras sintéticas, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.62.00",
+    "descricao": "Calças, jardineiras, bermudas e shorts de algodão, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6204.63.00",
+    "descricao": "Calças, jardineiras, bermudas e shorts de fibras sintéticas, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6206.30.00",
+    "descricao": "Camisas, blusas e blusas-camiseiros, de algodão, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6206.40.00",
+    "descricao": "Camisas, blusas e blusas-camiseiros, de fibras sintéticas ou artificiais, exceto de malha, de uso feminino",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6214.30.00",
+    "descricao": "Xales, echarpes, lenços de pescoço, cachecóis, mantilhas, véus e semelhantes, de fibras sintéticas",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6214.40.00",
+    "descricao": "Xales, echarpes, lenços de pescoço, cachecóis, mantilhas, véus e semelhantes, de fibras artificiais",
+    "categoria": "VESTUARIO",
+    "aliquota": null,
+    "campo1": "62",
+    "ativo": true
+  },
+  {
+    "ncm": "6402.99.90",
+    "descricao": "Outros calçados com sola exterior e parte superior de borracha ou plástico",
+    "categoria": "CALCADO",
+    "aliquota": null,
+    "campo1": "64",
+    "ativo": true
+  },
+  {
+    "ncm": "6403.99.90",
+    "descricao": "Outros calçados com sola exterior de borracha, plástico, couro natural ou reconstituído e parte superior de couro natural",
+    "categoria": "CALCADO",
+    "aliquota": null,
+    "campo1": "64",
+    "ativo": true
+  },
+  {
+    "ncm": "6404.19.00",
+    "descricao": "Outros calçados com sola exterior de borracha ou plástico e parte superior de matérias têxteis",
+    "categoria": "CALCADO",
+    "aliquota": null,
+    "campo1": "64",
+    "ativo": true
+  },
+  {
+    "ncm": "7117.19.00",
+    "descricao": "Outras bijuterias de metais comuns, mesmo prateados, dourados ou platinados",
+    "categoria": "BIJUTERIA",
+    "aliquota": null,
+    "campo1": "71",
+    "ativo": true
+  },
+  {
+    "ncm": "7117.90.00",
+    "descricao": "Outras bijuterias",
+    "categoria": "BIJUTERIA",
+    "aliquota": null,
+    "campo1": "71",
+    "ativo": true
+  }
+]

@@ -1,0 +1,1088 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Jeans Reta Aurora",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Jeans Mom Safira",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Jeans Wide Leg Serena",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Jeans Skinny Íris",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Jeans Flare Luna",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Alfaiataria Siena",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Alfaiataria Verona",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Alfaiataria Capri",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Pantalona Firenze",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Cenoura Milano",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Legging Active Jade",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Legging Comfort Nina",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Legging Sculpt Maya",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Legging Urban Liz",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Legging Essential Zoe",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Curta Jeans Bella",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Curta Alfaiataria Chloe",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Curta Linho Brisa",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Curta Plissada Flora",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Curta Evasê Mel",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Midi Plissada Olivia",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Midi Cetim Amélie",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Midi Linho Serena",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Midi Jeans Clara",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Midi Reta Elisa",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Longa Viscose Maré",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Longa Linho Solar",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Longa Estampada Jardim",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Longa Fluida Celeste",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Longa Camadas Toscana",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Curta Essencial Alba",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Curta Viscose Lívia",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Curta Gola V Marina",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Curta Canelada Mila",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Curta Cetim Paris",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Longa Serena",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Longa Tricoline Atena",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Longa Gola Alta Jade",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Longa Laço Amora",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Manga Longa Linho Gaia",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Regata Canelada Luna",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Regata Linho Branca",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Regata Viscose Íris",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Regata Cetim Pérola",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Regata Básica Nina",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Curto Viscose Aurora",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Curto Malha Serena",
+    "preco": "329.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Curto Linho Capri",
+    "preco": "349.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Midi Canelado Luna",
+    "preco": "379.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Midi Viscose Jardim",
+    "preco": "399.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Midi Linho Toscana",
+    "preco": "429.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Midi Cetim Pérola",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Longo Viscose Maré",
+    "preco": "329.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Longo Renda Celeste",
+    "preco": "349.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Longo Malha Amora",
+    "preco": "379.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Canelado Luna",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Algodão Nina",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Renda Amora",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Linho Capri",
+    "preco": "229.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Viscose Jade",
+    "preco": "249.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Active Maya",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Manga Curta Liz",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Cropped Decote Reto Alba",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Essential Preto",
+    "preco": "229.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Canelado Brisa",
+    "preco": "249.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Viscose Solar",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Cetim Pérola",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Linho Serena",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Renda Flora",
+    "preco": "229.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Faixa Active Zoe",
+    "preco": "249.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Jaqueta Jeans Aurora",
+    "preco": "359.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Jaqueta Sarja Urban",
+    "preco": "399.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blazer Alfaiataria Milano",
+    "preco": "449.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blazer Linho Firenze",
+    "preco": "499.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Cardigã Tricot Serena",
+    "preco": "549.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Cardigã Algodão Brisa",
+    "preco": "359.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sandália Salto Bloco Siena",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sandália Rasteira Capri",
+    "preco": "289.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sandália Tiras Luna",
+    "preco": "319.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sandália Plataforma Serena",
+    "preco": "349.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Tênis Casual Branco Alba",
+    "preco": "399.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Tênis Casual Nude Maya",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Tênis Slip On Urban",
+    "preco": "289.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sapato Scarpin Milano",
+    "preco": "319.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sapato Mule Firenze",
+    "preco": "349.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Sapato Sapatilha Clara",
+    "preco": "399.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Argola Dourada Luna",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Argola Prateada Íris",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Gota Pérola Aurora",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Geométrico Siena",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Ponto de Luz Celeste",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Folha Gaia",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Coração Amora",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Ear Cuff Maya",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Flor Serena",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Alongado Milano",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Cristal Nina",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Brinco Minimalista Liz",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Corrente Dourada Capri",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Corrente Prateada Alba",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Pingente Lua Serena",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Pingente Coração Flora",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Pérolas Aurora",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Choker Milano",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Camadas Siena",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Medalha Solar",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Cristal Jade",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Riviera Celeste",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Elo Urban",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Colar Ponto de Luz Nina",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Elo Dourado Luna",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Elo Prateado Íris",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Pérolas Serena",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Riviera Aurora",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Coração Amora",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Corrente Capri",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Cristal Maya",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Minimalista Alba",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Medalha Solar",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Pulseira Dupla Firenze",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Solitário Celeste",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Aparador Luna",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Geométrico Milano",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Coração Amora",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Regulável Serena",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Trançado Siena",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Cristal Aurora",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Duplo Maya",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Minimalista Alba",
+    "preco": "79.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Anel Orgânico Gaia",
+    "preco": "89.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Brinco e Colar Luna",
+    "preco": "99.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Pérolas Aurora",
+    "preco": "119.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Riviera Celeste",
+    "preco": "129.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Coração Amora",
+    "preco": "149.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Minimalista Serena",
+    "preco": "59.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Conjunto Cristal Jade",
+    "preco": "69.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Alfaiataria Essenza",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Pantalona Riviera",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Reta Linho Natura",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Cenoura Atelier",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Wide Leg Horizonte",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Jeans Reta Ícone",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Jeans Flare Origem",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Legging Flex",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Legging Move",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Calça Própria Sarja Urbana",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Curta Essenza",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Curta Jeans Origem",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Curta Linho Natura",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Midi Riviera",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Midi Plissada Ícone",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Midi Linho Atelier",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Midi Jeans Urbana",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Longa Horizonte",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Longa Camadas Brisa",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Saia Própria Longa Linho Solar",
+    "preco": "279.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Curta Essenza",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Curta Riviera",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Curta Linho Natura",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Longa Atelier",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Longa Horizonte",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Manga Longa Ícone",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Regata Origem",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Regata Riviera",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Regata Linho Solar",
+    "preco": "239.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Blusa Própria Regata Renda Brisa",
+    "preco": "259.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Próprio Curto Essenza",
+    "preco": "399.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Próprio Midi Riviera",
+    "preco": "429.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Próprio Midi Linho Natura",
+    "preco": "299.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Próprio Longo Horizonte",
+    "preco": "329.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Vestido Próprio Longo Renda Atelier",
+    "preco": "349.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Cropped Essenza",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Cropped Riviera",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Cropped Linho Natura",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Cropped Active Move",
+    "preco": "229.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Cropped Renda Atelier",
+    "preco": "249.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Faixa Horizonte",
+    "preco": "199.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Faixa Riviera",
+    "preco": "209.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Faixa Linho Solar",
+    "preco": "219.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Faixa Canelado Ícone",
+    "preco": "229.9000"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tabela_codigo_seed": "PADRAO",
+    "produto_descricao": "Top Próprio Faixa Active Flex",
+    "preco": "249.9000"
+  }
+]

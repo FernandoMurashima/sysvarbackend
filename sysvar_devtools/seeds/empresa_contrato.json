@@ -1,0 +1,16 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "status": "ATIVO",
+    "data_inicio": "2026-01-05",
+    "data_fim": null,
+    "limite_sessoes_simultaneas": 50,
+    "limite_usuarios": 50,
+    "plano_completo": true,
+    "usuario_master_username": "admin.sysvar",
+    "motivo_suspensao": null,
+    "observacao_suspensao": "",
+    "observacoes": "Contrato da Base de Desenvolvimento Sysvar.",
+    "permissions_version": 1
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "Codigo": "CALCA",
+    "CodigoRef": "01",
+    "Descricao": "Calça",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "SAIA",
+    "CodigoRef": "02",
+    "Descricao": "Saia",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "BLUSA",
+    "CodigoRef": "03",
+    "Descricao": "Blusa",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "VESTIDO",
+    "CodigoRef": "04",
+    "Descricao": "Vestido",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "TOP",
+    "CodigoRef": "05",
+    "Descricao": "Top",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "CASACO",
+    "CodigoRef": "06",
+    "Descricao": "Casaco",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "CALCADO",
+    "CodigoRef": "07",
+    "Descricao": "Calçado",
+    "Margem": "120.00"
+  },
+  {
+    "Codigo": "BIJUTERIA",
+    "CodigoRef": "08",
+    "Descricao": "Bijuteria",
+    "Margem": "120.00"
+  }
+]

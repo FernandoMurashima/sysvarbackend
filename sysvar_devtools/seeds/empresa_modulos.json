@@ -1,0 +1,10 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "origem_modulos": "modulos_sistema.json",
+    "contratar_todos_ativos": true,
+    "contratado": true,
+    "data_inicio": "2026-01-05",
+    "data_fim": null
+  }
+]
