@@ -1,0 +1,10 @@
+{
+  "empresa_codigo": "EMP-DEV",
+  "natureza_juros_pagos_codigo": "3505",
+  "natureza_juros_recebidos_codigo": "4301",
+  "natureza_tarifas_pagas_codigo": "3503",
+  "natureza_multas_pagas_codigo": "3506",
+  "natureza_multas_recebidas_codigo": "4302",
+  "natureza_descontos_concedidos_codigo": "2102",
+  "natureza_descontos_obtidos_codigo": "4303"
+}

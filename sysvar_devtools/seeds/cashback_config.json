@@ -1,0 +1,11 @@
+{
+  "empresa_codigo": "EMP-DEV",
+  "nome": "Cashback Padrão Base Dev",
+  "ativo": true,
+  "percentual": "5.0000",
+  "validade_dias": 180,
+  "valor_minimo_geracao": "100.00",
+  "valor_minimo_uso": "20.00",
+  "limite_uso_percentual": "50.0000",
+  "consumidor_final_participa": false
+}

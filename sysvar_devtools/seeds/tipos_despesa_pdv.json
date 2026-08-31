@@ -1,0 +1,42 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "LIMPEZA",
+    "descricao": "Material de Limpeza",
+    "natureza_codigo": "3207",
+    "ativo": true,
+    "exige_documento": false
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "ESCRITORIO",
+    "descricao": "Material de Escritório",
+    "natureza_codigo": "3208",
+    "ativo": true,
+    "exige_documento": false
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "MANUT_PREDIAL",
+    "descricao": "Manutenção Predial",
+    "natureza_codigo": "3210",
+    "ativo": true,
+    "exige_documento": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "MANUT_EQUIP",
+    "descricao": "Manutenção de Equipamentos",
+    "natureza_codigo": "3211",
+    "ativo": true,
+    "exige_documento": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "FRETES",
+    "descricao": "Fretes e Entregas",
+    "natureza_codigo": "3704",
+    "ativo": true,
+    "exige_documento": true
+  }
+]

@@ -1,0 +1,227 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012001000156",
+    "categoria": "MATERIA_PRIMA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012002000109",
+    "categoria": "MATERIA_PRIMA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012003000145",
+    "categoria": "MATERIA_PRIMA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012004000190",
+    "categoria": "MATERIA_PRIMA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012005000134",
+    "categoria": "MATERIA_PRIMA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012006000189",
+    "categoria": "REVENDA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012007000123",
+    "categoria": "REVENDA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012008000178",
+    "categoria": "REVENDA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012009000112",
+    "categoria": "REVENDA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012010000147",
+    "categoria": "REVENDA"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012011000191",
+    "categoria": "AVIAMENTO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012012000136",
+    "categoria": "AVIAMENTO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012013000180",
+    "categoria": "AVIAMENTO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012014000125",
+    "categoria": "AVIAMENTO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012015000170",
+    "categoria": "AVIAMENTO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012016000114",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012017000169",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012018000103",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012019000158",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012020000182",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012021000127",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012022000171",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012023000116",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012024000160",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012025000105",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012026000150",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012027000102",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012028000149",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012029000193",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012030000118",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012031000162",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012032000107",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012033000151",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012034000104",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012035000140",
+    "categoria": "OUTROS"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012036000195",
+    "categoria": "FACCAO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012037000130",
+    "categoria": "FACCAO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012038000184",
+    "categoria": "FACCAO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012039000129",
+    "categoria": "FACCAO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012040000153",
+    "categoria": "FACCAO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012041000106",
+    "categoria": "PRESTADOR"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012042000142",
+    "categoria": "PRESTADOR"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012043000197",
+    "categoria": "PRESTADOR"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012044000131",
+    "categoria": "PRESTADOR"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "fornecedor_documento": "00012045000186",
+    "categoria": "PRESTADOR"
+  }
+]
