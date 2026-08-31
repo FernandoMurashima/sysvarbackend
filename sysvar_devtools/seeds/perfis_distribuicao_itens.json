@@ -1,0 +1,56 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "EQUILIBRADA",
+    "loja_codigo": "BARRA",
+    "percentual": "34.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 1,
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "EQUILIBRADA",
+    "loja_codigo": "TIJUCA",
+    "percentual": "33.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 2,
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "EQUILIBRADA",
+    "loja_codigo": "CENTRO",
+    "percentual": "33.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 3,
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "DEMANDA",
+    "loja_codigo": "BARRA",
+    "percentual": "40.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 1,
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "DEMANDA",
+    "loja_codigo": "TIJUCA",
+    "percentual": "35.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 2,
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "perfil_codigo": "DEMANDA",
+    "loja_codigo": "CENTRO",
+    "percentual": "25.0000",
+    "quantidade_fixa": "0.000",
+    "prioridade": 3,
+    "ativo": true
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "EQUILIBRADA",
+    "descricao": "Distribuição equilibrada entre lojas",
+    "tipo": "PERCENTUAL",
+    "fator_preco": "0.2000",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "DEMANDA",
+    "descricao": "Distribuição ponderada por potencial de venda",
+    "tipo": "PERCENTUAL",
+    "fator_preco": "0.2000",
+    "ativo": true
+  }
+]
