@@ -1,0 +1,65 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "ICMS",
+    "descricao": "Imposto sobre Circulação de Mercadorias e Serviços",
+    "esfera": "ESTADUAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Tributo estadual sobre circulação de mercadorias."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "IPI",
+    "descricao": "Imposto sobre Produtos Industrializados",
+    "esfera": "FEDERAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Tributo federal aplicável conforme enquadramento do produto e operação."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "PIS",
+    "descricao": "Programa de Integração Social",
+    "esfera": "FEDERAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Tributo mantido na Base Dev durante a transição tributária."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "COFINS",
+    "descricao": "Contribuição para o Financiamento da Seguridade Social",
+    "esfera": "FEDERAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Tributo mantido na Base Dev durante a transição tributária."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "CBS",
+    "descricao": "Contribuição sobre Bens e Serviços",
+    "esfera": "FEDERAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Reforma Tributária do Consumo - transição 2026."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "IBS",
+    "descricao": "Imposto sobre Bens e Serviços",
+    "esfera": "ESTADUAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Reforma Tributária do Consumo - transição 2026."
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "ISS",
+    "descricao": "Imposto sobre Serviços",
+    "esfera": "MUNICIPAL",
+    "atual": true,
+    "ativo": true,
+    "observacoes": "Tributo municipal para operações de serviços quando aplicável."
+  }
+]

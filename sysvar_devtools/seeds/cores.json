@@ -1,0 +1,100 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "PR",
+    "Descricao": "Preto",
+    "Cor": "Preto",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "BR",
+    "Descricao": "Branco",
+    "Cor": "Branco",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "OFF",
+    "Descricao": "Off White",
+    "Cor": "Off White",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "BG",
+    "Descricao": "Bege",
+    "Cor": "Bege",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "MR",
+    "Descricao": "Marrom",
+    "Cor": "Marrom",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "AZ",
+    "Descricao": "Azul",
+    "Cor": "Azul",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "MAR",
+    "Descricao": "Azul Marinho",
+    "Cor": "Azul Marinho",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "JNS",
+    "Descricao": "Jeans",
+    "Cor": "Jeans",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "VD",
+    "Descricao": "Verde",
+    "Cor": "Verde",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "VM",
+    "Descricao": "Vermelho",
+    "Cor": "Vermelho",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "RS",
+    "Descricao": "Rosa",
+    "Cor": "Rosa",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "CZ",
+    "Descricao": "Cinza",
+    "Cor": "Cinza",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "DOU",
+    "Descricao": "Dourado",
+    "Cor": "Dourado",
+    "Status": "ATIVO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "Codigo": "PTA",
+    "Descricao": "Prata",
+    "Cor": "Prata",
+    "Status": "ATIVO"
+  }
+]

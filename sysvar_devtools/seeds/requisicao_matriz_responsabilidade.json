@@ -1,0 +1,23 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tipo_requisicao": "USO_CONSUMO",
+    "setor_atendimento_nome": "Almoxarifado",
+    "setor_aquisicao_nome": "Administrativo",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tipo_requisicao": "MANUTENCAO",
+    "setor_atendimento_nome": "Manutencao",
+    "setor_aquisicao_nome": "Administrativo",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "tipo_requisicao": "TI",
+    "setor_atendimento_nome": "TI",
+    "setor_aquisicao_nome": "Administrativo",
+    "ativo": true
+  }
+]

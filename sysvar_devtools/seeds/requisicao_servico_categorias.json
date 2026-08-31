@@ -1,0 +1,82 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção de ar-condicionado",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Elétrica",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Hidráulica",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Informática / TI",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção de equipamentos",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção predial",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Limpeza",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Segurança",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Transporte / Frete",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Instalações",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Consultoria",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Serviços contábeis",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Serviços jurídicos",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Marketing / Publicidade",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Costura / Facção",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Outros serviços",
+    "ativo": true
+  }
+]

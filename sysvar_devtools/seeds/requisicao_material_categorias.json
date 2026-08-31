@@ -1,0 +1,110 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Material de escritório",
+    "descricao": "Materiais de expediente e apoio administrativo.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Material de limpeza",
+    "descricao": "Produtos e materiais utilizados na limpeza e conservação.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Informática / TI",
+    "descricao": "Periféricos, acessórios e materiais de tecnologia da informação.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Equipamentos",
+    "descricao": "Equipamentos operacionais e de apoio.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Móveis e utensílios",
+    "descricao": "Mobiliário, utensílios e itens de apoio às unidades.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção elétrica",
+    "descricao": "Materiais utilizados em manutenção e instalações elétricas.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção hidráulica",
+    "descricao": "Materiais utilizados em manutenção e instalações hidráulicas.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Manutenção predial",
+    "descricao": "Materiais gerais para conservação e manutenção predial.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Ar-condicionado",
+    "descricao": "Peças, componentes e materiais para climatização.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Embalagens",
+    "descricao": "Sacolas, caixas, etiquetas e demais materiais de embalagem.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Uniformes",
+    "descricao": "Uniformes e peças de vestuário de uso interno.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "EPI",
+    "descricao": "Equipamentos de proteção individual.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Ferramentas",
+    "descricao": "Ferramentas manuais e itens de apoio à manutenção e produção.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Peças e componentes",
+    "descricao": "Peças e componentes de reposição diversos.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Material de produção",
+    "descricao": "Materiais auxiliares utilizados no processo produtivo.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Aviamentos",
+    "descricao": "Botões, zíperes e demais aviamentos utilizados na produção.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Tecidos",
+    "descricao": "Tecidos e matérias-primas têxteis utilizadas na produção.",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Outros materiais",
+    "descricao": "Materiais que não se enquadram nas demais categorias.",
+    "ativo": true
+  }
+]

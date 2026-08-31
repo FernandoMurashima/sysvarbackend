@@ -13,5 +13,10 @@
     "codigo": "CALC",
     "Descricao": "Calçados",
     "Status": "ATIVO"
+  },
+  {
+    "codigo": "UNICO",
+    "Descricao": "Tamanho Único",
+    "Status": "ATIVO"
   }
 ]

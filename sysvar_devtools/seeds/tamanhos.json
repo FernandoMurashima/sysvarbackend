@@ -100,5 +100,11 @@
     "Tamanho": "39",
     "Descricao": "39",
     "Status": "ATIVO"
+  },
+  {
+    "grade_codigo": "UNICO",
+    "Tamanho": "UN",
+    "Descricao": "Único",
+    "Status": "ATIVO"
   }
 ]

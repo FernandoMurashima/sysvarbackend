@@ -1,0 +1,30 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Uso e Consumo",
+    "descricao": "Materiais destinados ao consumo interno da operação.",
+    "ativo": true,
+    "comportamento": "USO_CONSUMO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Estoque / Almoxarifado",
+    "descricao": "Materiais destinados ao estoque interno ou almoxarifado.",
+    "ativo": true,
+    "comportamento": "ALMOXARIFADO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Ativo Imobilizado",
+    "descricao": "Bens destinados ao ativo imobilizado, como computadores, móveis e equipamentos.",
+    "ativo": true,
+    "comportamento": "IMOBILIZADO"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "nome": "Outros",
+    "descricao": "Aquisições que não se enquadram nas demais finalidades.",
+    "ativo": true,
+    "comportamento": "OUTRO"
+  }
+]

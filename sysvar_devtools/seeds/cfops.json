@@ -1,0 +1,200 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "1102",
+    "descricao": "Compra para comercialização",
+    "tipo_operacao": "COMPRA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "2102",
+    "descricao": "Compra para comercialização",
+    "tipo_operacao": "COMPRA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "5102",
+    "descricao": "Venda de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "VENDA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "6102",
+    "descricao": "Venda de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "VENDA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "5101",
+    "descricao": "Venda de produção do estabelecimento",
+    "tipo_operacao": "VENDA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "6101",
+    "descricao": "Venda de produção do estabelecimento",
+    "tipo_operacao": "VENDA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "1202",
+    "descricao": "Devolução de venda de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "DEVOLUCAO",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "2202",
+    "descricao": "Devolução de venda de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "DEVOLUCAO",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "5202",
+    "descricao": "Devolução de compra para comercialização",
+    "tipo_operacao": "DEVOLUCAO",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "6202",
+    "descricao": "Devolução de compra para comercialização",
+    "tipo_operacao": "DEVOLUCAO",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "5152",
+    "descricao": "Transferência de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "TRANSFERENCIA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": false,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "6152",
+    "descricao": "Transferência de mercadoria adquirida ou recebida de terceiros",
+    "tipo_operacao": "TRANSFERENCIA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": false,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "5151",
+    "descricao": "Transferência de produção do estabelecimento",
+    "tipo_operacao": "TRANSFERENCIA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": false,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "6151",
+    "descricao": "Transferência de produção do estabelecimento",
+    "tipo_operacao": "TRANSFERENCIA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": false,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "1556",
+    "descricao": "Compra de material para uso ou consumo",
+    "tipo_operacao": "COMPRA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "2556",
+    "descricao": "Compra de material para uso ou consumo",
+    "tipo_operacao": "COMPRA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": true,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "1551",
+    "descricao": "Compra de bem para o ativo imobilizado",
+    "tipo_operacao": "COMPRA",
+    "destino": "DENTRO_UF",
+    "movimenta_estoque": false,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "2551",
+    "descricao": "Compra de bem para o ativo imobilizado",
+    "tipo_operacao": "COMPRA",
+    "destino": "FORA_UF",
+    "movimenta_estoque": false,
+    "gera_financeiro": true,
+    "ativo": true,
+    "observacoes": "Base Dev"
+  }
+]
