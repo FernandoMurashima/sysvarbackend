@@ -432,6 +432,55 @@ class SaaSAccessControlTests(TestCase):
         for codigo in codigos:
             self.assertTrue(service.has_process_permission(codigo))
 
+    def test_administrador_delegado_tem_acesso_funcional_total_sem_ser_global(self):
+        perfil_admin, _created = PerfilAcesso.objects.get_or_create(
+            empresa=self.empresa,
+            nome="Administrador delegado",
+            defaults={"ativo": True, "padrao": False},
+        )
+        if not perfil_admin.ativo:
+            perfil_admin.ativo = True
+            perfil_admin.save(update_fields=["ativo", "updated_at"])
+        delegado = get_user_model().objects.create_user(
+            username="delegado_total",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=perfil_admin,
+        )
+
+        service = EffectiveAccessService(delegado)
+
+        self.assertTrue(service.is_full_company_administrator())
+        self.assertFalse(service.is_company_master())
+        self.assertFalse(delegado.is_superuser)
+        for modulo in ["cadastros", "produtos", "fiscal", "estoque", "vendas", "compras", "financeiro", "relatorios", "configuracoes"]:
+            self.assertTrue(service.has_module_access(modulo, UserModulePermission.Access.EDIT), modulo)
+            self.assertTrue(service.can_delete_module(modulo), modulo)
+        for codigo, _label in PerfilProcessPermission.Process.choices:
+            self.assertTrue(service.has_process_permission(codigo), codigo)
+
+    def test_administrador_delegado_nao_acessa_loja_de_outra_empresa(self):
+        perfil_admin, _created = PerfilAcesso.objects.get_or_create(
+            empresa=self.empresa,
+            nome="Administrador delegado",
+            defaults={"ativo": True, "padrao": False},
+        )
+        if not perfil_admin.ativo:
+            perfil_admin.ativo = True
+            perfil_admin.save(update_fields=["ativo", "updated_at"])
+        delegado = get_user_model().objects.create_user(
+            username="delegado_tenant",
+            password="12345678",
+            type="Regular",
+            empresa=self.empresa,
+            perfil_principal=perfil_admin,
+        )
+        empresa_b = Empresa.objects.create(nome="Empresa B", documento="66666666000166", plano_completo=True)
+        loja_b = Loja.objects.create(empresa=empresa_b, nome_loja="Loja B", apelido_loja="LB", cnpj="66666666000166")
+
+        self.assertFalse(EffectiveAccessService(delegado).can_access_store(loja_b))
+
     def test_limite_de_sessoes_bloqueia_login_concorrente(self):
         contrato = self.empresa.contrato
         contrato.limite_sessoes_simultaneas = 1

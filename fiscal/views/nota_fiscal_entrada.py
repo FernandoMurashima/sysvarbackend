@@ -766,6 +766,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 raise ValueError("Quantidade recebida inválida para item XML.")
             if item.produto.empresa_id != nota.empresa_id:
                 raise ValueError("Produto conciliado pertence a outra empresa.")
+            if item.produto.tipo_produto == "1":
+                self._codigo_estoque_item_xml(item)
             if not item.conversao_pronta:
                 raise ValueError("Resolva as pendências de conversão dos itens XML da NF-e antes de fechar a nota.")
             if nota.pedido_compra_id:
@@ -831,7 +833,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _movimentar_produto_xml_estoque(self, nota, item, qtd, documento):
         produto = item.produto
-        codigo = self._codigo_estoque_produto(produto)
+        codigo = self._codigo_estoque_item_xml(item)
         custo_movimento = _q4(item.valor_unitario_comercial or produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or 0)
         estoque, _ = Estoque.objects.select_for_update().get_or_create(
             CodigodeBarra=codigo,
@@ -1204,7 +1206,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                     saldo = ProdutoUsoConsumoEstoque.objects.filter(empresa=nota.empresa, loja=nota.loja, produto=produto).values_list("saldo", flat=True).first() or 0
                     alvos.append({"uso_consumo": True, "produto": produto.pk, "codigo": None, "quantidade": qtd, "saldo": saldo})
                 else:
-                    codigo = self._codigo_estoque_produto(produto)
+                    codigo = self._codigo_estoque_item_xml(item, nota=nota, preferir_movimento_original=True)
                     saldo = Estoque.objects.filter(CodigodeBarra=codigo, Idloja=nota.loja).values_list("Estoque", flat=True).first() or 0
                     alvos.append({"uso_consumo": False, "produto": produto.pk, "codigo": codigo, "quantidade": qtd, "saldo": saldo})
         elif nota.pedido_compra_id:
@@ -1308,6 +1310,47 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         if len(referencia_numerica) == 13:
             return referencia_numerica
         return f"29{int(produto.pk) % 100000000000:011d}"
+
+    def _codigo_estoque_item_xml(self, item, nota=None, preferir_movimento_original=False):
+        produto = item.produto
+        if not produto:
+            raise ValueError(f"Item XML {item.numero_item or item.pk}: produto não conciliado.")
+        if produto.tipo_produto != "1":
+            return self._codigo_estoque_produto(produto)
+
+        nota = nota or item.nota
+        if preferir_movimento_original and nota:
+            documento_entrada = self._documento_estoque(nota, "ENTRADA")
+            movimento = (
+                EstoqueMovimentacao.objects
+                .filter(
+                    documento=documento_entrada,
+                    tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                    Idloja=nota.loja,
+                )
+                .filter(Q(origem__contains=f"XML_ITEM:{item.pk}") | Q(observacao__contains=f"ITEM:{item.pk}"))
+                .order_by("data_movimento", "Idmovimento")
+                .first()
+            )
+            if movimento:
+                return movimento.CodigodeBarra
+
+        gtin = only_digits(item.gtin_ean or "")
+        numero = item.numero_item or item.pk
+        produto_label = produto.referencia or produto.descricao or str(produto.pk)
+        if not gtin:
+            raise ValueError(f"Item XML {numero}: produto {produto_label} de revenda sem GTIN/EAN para identificar o SKU.")
+
+        sku = ProdutoDetalhe.objects.filter(produto_id=produto.pk, ean13=gtin, ativo=True).first()
+        if not sku:
+            existe_outro_produto = ProdutoDetalhe.objects.filter(ean13=gtin).exclude(produto_id=produto.pk).exists()
+            if existe_outro_produto:
+                raise ValueError(f"Item XML {numero}: GTIN/EAN {gtin} pertence a outro produto e não pode movimentar {produto_label}.")
+            existe_inativo = ProdutoDetalhe.objects.filter(produto_id=produto.pk, ean13=gtin, ativo=False).exists()
+            if existe_inativo:
+                raise ValueError(f"Item XML {numero}: GTIN/EAN {gtin} corresponde a SKU inativo do produto {produto_label}.")
+            raise ValueError(f"Item XML {numero}: GTIN/EAN {gtin} não corresponde a SKU ativo do produto {produto_label}.")
+        return sku.ean13
 
     def _qtd_recebida_item(self, pedido_item, excluir_nota=None):
         itens = NotaFiscalEntradaItem.objects.filter(
@@ -1493,7 +1536,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _estornar_produto_xml_estoque(self, nota, item, qtd, motivo, documento):
         produto = item.produto
-        codigo = self._codigo_estoque_produto(produto)
+        codigo = self._codigo_estoque_item_xml(item, nota=nota, preferir_movimento_original=True)
         custo_movimento = _q4(item.valor_unitario_comercial or produto.custo_medio or produto.custo_ultima_compra or produto.custo_original or 0)
         estoque, _ = Estoque.objects.select_for_update().get_or_create(
             CodigodeBarra=codigo,

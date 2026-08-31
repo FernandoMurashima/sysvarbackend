@@ -2313,17 +2313,24 @@ class EstoqueViewSet(BaseViewSet):
         produto = getattr(sku, 'produto', None) or (produto_por_ref or {}).get(estoque.referencia or '')
         fisico = Decimal(estoque.Estoque or 0)
         reservado = Decimal(estoque.reserva or 0)
+        colecao = getattr(produto, 'colecao', None)
+        tamanho = getattr(sku, 'idtamanho', None)
         return {
             'referencia': estoque.referencia or getattr(produto, 'referencia', '') or '',
             'produto': getattr(produto, 'descricao_reduzida', None) or getattr(produto, 'descricao', '') or '',
             'loja': estoque.Idloja_id,
             'loja_nome': getattr(estoque.Idloja, 'nome_loja', '') or '',
             'cor': getattr(getattr(sku, 'idcor', None), 'Descricao', '') or '',
-            'tamanho': getattr(getattr(sku, 'idtamanho', None), 'Tamanho', '') or '',
+            'tamanho': getattr(tamanho, 'Tamanho', '') or '',
+            'tamanho_id': getattr(tamanho, 'Idtamanho', None),
             'ean': estoque.CodigodeBarra,
             'fisico': fisico,
             'reservado': reservado,
             'disponivel': fisico - reservado,
+            'tipo_produto': getattr(produto, 'tipo_produto', '') or '',
+            'colecao': getattr(colecao, 'Idcolecao', None),
+            'colecao_codigo': getattr(colecao, 'Codigo', '') or '',
+            'colecao_descricao': getattr(colecao, 'Descricao', '') or '',
         }
 
     def _filtrar_saldo_consulta(self, rows):
@@ -2337,7 +2344,7 @@ class EstoqueViewSet(BaseViewSet):
     def _sku_map(self, eans):
         return {
             sku.ean13: sku
-            for sku in ProdutoDetalhe.objects.select_related('produto', 'idcor', 'idtamanho').filter(ean13__in=eans)
+            for sku in ProdutoDetalhe.objects.select_related('produto__colecao', 'idcor', 'idtamanho').filter(ean13__in=eans)
         }
 
     def _produto_ref_map(self, refs):
@@ -2388,29 +2395,51 @@ class EstoqueViewSet(BaseViewSet):
     def consulta_referencia(self, request):
         termo = (request.query_params.get('referencia') or request.query_params.get('ean') or request.query_params.get('search') or '').strip()
         colecao = request.query_params.get('colecao')
+        tipo_produto = request.query_params.get('tipo_produto')
+        if not termo:
+            return Response([])
         qs = self._estoque_scope_queryset().select_related('Idloja')
-        if colecao:
+        empresa_id = self._empresa_id_usuario()
+        referencia_resolvida = termo
+        if termo.isdigit() and len(termo) >= 8:
+            sku_qs = ProdutoDetalhe.objects.select_related('produto').filter(ean13=termo, produto__tipo_produto__in=('1', '3'))
+            if empresa_id:
+                sku_qs = sku_qs.filter(produto__empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                return Response([])
+            sku = sku_qs.first()
+            if not sku or not sku.produto.referencia:
+                return Response([])
+            referencia_resolvida = sku.produto.referencia
+        if colecao or tipo_produto:
             produto_qs = Produto.objects.filter(tipo_produto__in=('1', '3'))
-            empresa_id = self._empresa_id_usuario()
             if empresa_id:
                 produto_qs = produto_qs.filter(empresa_id=empresa_id)
             elif not request.user.is_superuser:
                 return Response([])
-            produto_qs = produto_qs.filter(Q(colecao_id=colecao) | Q(colecao__Codigo=colecao))
+            produto_qs = produto_qs.filter(referencia=referencia_resolvida)
+            if colecao:
+                produto_qs = produto_qs.filter(Q(colecao_id=colecao) | Q(colecao__Codigo=colecao))
+            if tipo_produto in ('1', '3'):
+                produto_qs = produto_qs.filter(tipo_produto=tipo_produto)
             refs = produto_qs.exclude(referencia__isnull=True).exclude(referencia='').values_list('referencia', flat=True)
             qs = qs.filter(referencia__in=refs)
-        if not termo and not colecao:
-            return Response([])
-        if termo.isdigit() and len(termo) >= 8:
-            qs = qs.filter(CodigodeBarra=termo)
-        elif termo:
-            qs = qs.filter(referencia=termo)
+        else:
+            qs = qs.filter(referencia=referencia_resolvida)
         eans = list(qs.values_list('CodigodeBarra', flat=True))
         refs = list(qs.values_list('referencia', flat=True).distinct())
         sku_por_ean = self._sku_map(eans)
         produto_por_ref = self._produto_ref_map(refs)
         rows = [self._estoque_consulta_row(estoque, sku_por_ean, produto_por_ref) for estoque in qs]
         rows = self._filtrar_saldo_consulta(rows)
+        rows.sort(key=lambda row: (
+            row['referencia'] or '',
+            row['loja_nome'] or '',
+            row['cor'] or '',
+            row['tamanho_id'] or 0,
+            row['tamanho'] or '',
+            row['ean'] or '',
+        ))
         return Response(rows)
 
     @action(detail=False, methods=['get'], url_path='consulta-colecao')
@@ -2485,6 +2514,90 @@ class EstoqueMovimentacaoViewSet(BaseViewSet):
             if fim:
                 qs = qs.filter(data_movimento__lte=timezone.make_aware(datetime.combine(fim, time.max)))
         return qs
+
+    @action(detail=False, methods=['get'], url_path='por-referencia')
+    def por_referencia(self, request):
+        referencia = (request.query_params.get('referencia') or '').strip()
+        if not referencia:
+            return Response([])
+        qs = self.get_queryset().filter(referencia=referencia)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='sugestoes-referencia')
+    def sugestoes_referencia(self, request):
+        termo = (request.query_params.get('search') or request.query_params.get('q') or '').strip()
+        if not termo:
+            return Response([])
+
+        empresa_id = self._empresa_id_usuario()
+        produto_qs = Produto.objects.filter(tipo_produto__in=('1', '3'))
+        sku_qs = ProdutoDetalhe.objects.select_related('produto').filter(produto__tipo_produto__in=('1', '3'))
+        if empresa_id:
+            produto_qs = produto_qs.filter(empresa_id=empresa_id)
+            sku_qs = sku_qs.filter(produto__empresa_id=empresa_id)
+        elif not request.user.is_superuser:
+            return Response([])
+
+        loja = request.query_params.get('loja')
+        movimentos_scope = EstoqueMovimentacao.objects.all()
+        if empresa_id:
+            movimentos_scope = movimentos_scope.filter(Idloja__empresa_id=empresa_id)
+        elif not request.user.is_superuser:
+            return Response([])
+        access = EffectiveAccessService(request.user)
+        allowed = access.allowed_store_ids()
+        if allowed is not None and not (request.user.is_superuser or access.is_company_master()):
+            movimentos_scope = movimentos_scope.filter(Idloja_id__in=allowed)
+        if loja:
+            movimentos_scope = movimentos_scope.filter(Idloja_id=loja)
+        refs_permitidas = set(
+            movimentos_scope
+            .exclude(referencia__isnull=True)
+            .exclude(referencia='')
+            .values_list('referencia', flat=True)
+            .distinct()
+        )
+
+        produto_qs = produto_qs.filter(
+            Q(referencia__icontains=termo)
+            | Q(descricao__icontains=termo)
+            | Q(descricao_reduzida__icontains=termo)
+        ).exclude(referencia__isnull=True).exclude(referencia='')
+        sku_qs = sku_qs.filter(
+            Q(ean13__icontains=termo)
+            | Q(codigo_item_ref__icontains=termo)
+            | Q(produto__referencia__icontains=termo)
+            | Q(produto__descricao__icontains=termo)
+            | Q(produto__descricao_reduzida__icontains=termo)
+        ).exclude(produto__referencia__isnull=True).exclude(produto__referencia='')
+
+        sugestoes = {}
+        for produto in produto_qs.order_by('referencia')[:20]:
+            if refs_permitidas is not None and produto.referencia not in refs_permitidas:
+                continue
+            sugestoes.setdefault(produto.referencia, {
+                'referencia': produto.referencia,
+                'descricao': produto.descricao_reduzida or produto.descricao or '',
+                'ean': '',
+                'label': f"{produto.referencia} - {produto.descricao_reduzida or produto.descricao or ''}".strip(' -'),
+            })
+
+        for sku in sku_qs.order_by('produto__referencia', 'ean13')[:30]:
+            ref = sku.produto.referencia
+            if refs_permitidas is not None and ref not in refs_permitidas:
+                continue
+            descricao = sku.produto.descricao_reduzida or sku.produto.descricao or ''
+            sugestoes[ref] = {
+                'referencia': ref,
+                'descricao': descricao,
+                'ean': sku.ean13 or '',
+                'label': f"{ref} - {descricao} - EAN {sku.ean13}".strip(' -'),
+            }
+            if len(sugestoes) >= 10:
+                break
+
+        return Response(list(sugestoes.values())[:10])
 
     @transaction.atomic
     def perform_create(self, serializer):

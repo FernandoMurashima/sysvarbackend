@@ -17,6 +17,7 @@ VIEW = UserModulePermission.Access.VIEW
 EDIT = UserModulePermission.Access.EDIT
 BASIC_MODULES = {"operacional", "cadastros", "produtos", "configuracoes"}
 COMMERCIAL_MODULES = {"vendas", "compras", "requisicoes", "requisicoes_analise", "requisicoes_atendimento", "requisicoes_todas", "estoque", "financeiro", "fiscal", "producao", "distribuicao", "relatorios"}
+FULL_COMPANY_ADMIN_PROFILE_NAMES = {"administrador delegado"}
 
 
 @dataclass(frozen=True)
@@ -253,6 +254,20 @@ class EffectiveAccessService:
             return False
         return contrato.usuario_master_id == user.id and user.is_active
 
+    def is_full_company_administrator(self) -> bool:
+        user = self.user
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if user.is_superuser:
+            return True
+        if not user.is_active or not getattr(user, "empresa_id", None):
+            return False
+        if self.is_company_master():
+            return True
+        perfil = getattr(user, "perfil_principal", None)
+        nome = str(getattr(perfil, "nome", "") or "").strip().lower()
+        return bool(perfil and perfil.ativo and perfil.empresa_id == user.empresa_id and nome in FULL_COMPANY_ADMIN_PROFILE_NAMES)
+
     def module_access(self, module_key: str | None):
         if not module_key:
             return NONE
@@ -265,7 +280,7 @@ class EffectiveAccessService:
             return NONE
         if module_key not in self.available_modules():
             return NONE
-        if self.is_company_master():
+        if self.is_full_company_administrator():
             return EDIT
         perfil = getattr(user, "perfil_principal", None)
         if not perfil or not perfil.ativo:
@@ -295,7 +310,7 @@ class EffectiveAccessService:
             return True
         if not self.contract_state().active or module_key not in self.available_modules():
             return False
-        if self.is_company_master():
+        if self.is_full_company_administrator():
             return True
         perfil = getattr(user, "perfil_principal", None)
         if not perfil or not perfil.ativo:
@@ -315,7 +330,7 @@ class EffectiveAccessService:
             return True
         if not self.contract_state().active:
             return False
-        if self.is_company_master():
+        if self.is_full_company_administrator():
             return True
         perfil = getattr(user, "perfil_principal", None)
         if not perfil or not perfil.ativo:
@@ -339,7 +354,7 @@ class EffectiveAccessService:
             return True
         if not loja or loja.empresa_id != user.empresa_id:
             return False
-        if self.is_company_master() or getattr(user, "type", "") == "Admin":
+        if self.is_full_company_administrator() or getattr(user, "type", "") == "Admin":
             return True
         allowed = self.allowed_store_ids()
         return allowed is None or loja.id in allowed
@@ -374,6 +389,7 @@ class EffectiveAccessService:
         return {
             "is_platform_superuser": bool(getattr(user, "is_superuser", False)),
             "is_company_master": self.is_company_master(),
+            "is_full_company_administrator": self.is_full_company_administrator(),
             "contrato": contrato,
             "loja_principal": {
                 "id": user.loja_id,
@@ -385,8 +401,8 @@ class EffectiveAccessService:
                 "nome": getattr(user.perfil_principal, "nome", None),
             } if getattr(user, "perfil_principal_id", None) else None,
             "permissoes_administrativas": {
-                "usuarios_gerenciar": self.is_company_master() or self.has_module_access("operacional", EDIT),
-                "perfis_gerenciar": self.is_company_master() or self.has_module_access("configuracoes", EDIT),
+                "usuarios_gerenciar": self.is_full_company_administrator() or self.has_module_access("operacional", EDIT),
+                "perfis_gerenciar": self.is_full_company_administrator() or self.has_module_access("configuracoes", EDIT),
             },
             "modulos_disponiveis_empresa": sorted(self.available_modules()) if getattr(user, "is_authenticated", False) else [],
             "permissoes_efetivas": self.effective_permissions_payload() if getattr(user, "is_authenticated", False) else {},
@@ -396,7 +412,7 @@ class EffectiveAccessService:
         }
 
     def process_permissions_payload(self):
-        if getattr(self.user, "is_superuser", False) or self.is_company_master():
+        if getattr(self.user, "is_superuser", False) or self.is_full_company_administrator():
             data = {code: True for code, _ in PerfilProcessPermission.Process.choices}
             data.update({f"modulo.{key}.excluir": True for key in self.available_modules()})
             return data

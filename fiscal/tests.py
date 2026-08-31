@@ -650,6 +650,220 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         nota.refresh_from_db()
         return nota, item1, item2
 
+    def criar_revenda_com_skus(self, descricao="Revenda XML", cores=("Azul",), tamanhos=("34", "36")):
+        grade = Grade.objects.create(empresa=self.empresa, Descricao=f"Grade {descricao}")
+        grupo = Grupo.objects.create(empresa=self.empresa, Codigo=f"G{Produto.objects.count() + 1}", CodigoRef="10", Descricao=f"Grupo {descricao}", Margem=0)
+        colecao = Colecao.objects.create(empresa=self.empresa, Descricao=f"Colecao {descricao}", Codigo="27", Estacao=f"{Produto.objects.count() % 90 + 1:02d}", Status="AT")
+        produto = Produto.objects.create(
+            empresa=self.empresa,
+            tipo_produto="1",
+            descricao=descricao,
+            unidade=self.unidade,
+            grade=grade,
+            grupo=grupo,
+            colecao=colecao,
+        )
+        ConfigEan.objects.get_or_create(empresa=self.empresa, country_prefix="789", company_prefix="4444", defaults={"ativo": True})
+        skus = {}
+        tamanhos_obj = {
+            tamanho_nome: Tamanho.objects.create(empresa=self.empresa, idgrade=grade, Tamanho=tamanho_nome, Descricao=tamanho_nome)
+            for tamanho_nome in tamanhos
+        }
+        for cor_nome in cores:
+            cor = Cor.objects.create(empresa=self.empresa, Descricao=f"{cor_nome} {descricao}", Codigo=f"{cor_nome[:2].upper()}{Cor.objects.count() + 1}", Cor=cor_nome)
+            for tamanho_nome in tamanhos:
+                tamanho = tamanhos_obj[tamanho_nome]
+                skus[(cor_nome, tamanho_nome)] = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho)
+        return produto, skus
+
+    def criar_nota_xml_manual(self, numero="990001", itens=()):
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            modelo="55",
+            serie="1",
+            numero=numero,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+            status=NotaFiscalEntrada.Status.ABERTA,
+            xml_importado=True,
+            situacao_fiscal=NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA,
+            finalidade_nfe="1",
+            valor_produtos=sum(Decimal(str(item.get("quantidade", "0"))) * Decimal(str(item.get("valor_unitario", "10.00"))) for item in itens),
+            valor_total=sum(Decimal(str(item.get("quantidade", "0"))) * Decimal(str(item.get("valor_unitario", "10.00"))) for item in itens),
+        )
+        for idx, data in enumerate(itens, start=1):
+            produto = data["produto"]
+            vinculo = data.get("vinculo") or self.criar_vinculo(
+                produto=produto,
+                codigo=data.get("codigo", f"REV-{idx:04d}"),
+                unidade=data.get("unidade", "UN"),
+                fator=data.get("fator", "1"),
+                gtin=data.get("gtin", ""),
+            )
+            NotaFiscalEntradaItemXml.objects.create(
+                nota=nota,
+                numero_item=idx,
+                codigo_produto_fornecedor=vinculo.codigo_produto_fornecedor,
+                descricao_produto=produto.descricao,
+                gtin_ean=data.get("gtin", ""),
+                unidade_comercial=data.get("unidade", "UN"),
+                quantidade_comercial=Decimal(str(data.get("quantidade", "1.000"))),
+                quantidade_recebida=Decimal(str(data.get("quantidade_recebida", data.get("quantidade", "1.000")))),
+                valor_unitario_comercial=Decimal(str(data.get("valor_unitario", "10.00"))),
+                valor_produto=Decimal(str(data.get("quantidade", "1.000"))) * Decimal(str(data.get("valor_unitario", "10.00"))),
+                produto=produto,
+                produto_fornecedor=vinculo,
+                origem_conciliacao=NotaFiscalEntradaItemXml.OrigemConciliacao.VINCULO,
+                conciliado_em=timezone.now(),
+            )
+        return nota
+
+    def fechar_xml(self, nota, status_code=200):
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/fechar/", {}, format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def cancelar_xml(self, nota, status_code=200):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/",
+            {"motivo": "Teste cancelamento XML", "confirmar_avisos": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def test_xml_revenda_mesma_referencia_dois_tamanhos_movimenta_skus_distintos(self):
+        produto, skus = self.criar_revenda_com_skus(tamanhos=("34", "36"))
+        sku_34 = skus[("Azul", "34")]
+        sku_36 = skus[("Azul", "36")]
+        nota = self.criar_nota_xml_manual(
+            numero="990101",
+            itens=[
+                {"produto": produto, "codigo": "REV-0003", "gtin": sku_34.ean13, "quantidade": "12"},
+                {"produto": produto, "codigo": "REV-0003", "gtin": sku_36.ean13, "quantidade": "12"},
+            ],
+        )
+
+        self.fechar_xml(nota)
+
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_34.ean13).Estoque, Decimal("12.000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_36.ean13).Estoque, Decimal("12.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", CodigodeBarra__in=[sku_34.ean13, sku_36.ean13]).count(), 2)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", CodigodeBarra__startswith="29").exists())
+
+    def test_xml_revenda_mesma_referencia_duas_cores_movimenta_ean_de_cada_cor(self):
+        produto, skus = self.criar_revenda_com_skus(cores=("Azul", "Preto"), tamanhos=("38",))
+        sku_azul = skus[("Azul", "38")]
+        sku_preto = skus[("Preto", "38")]
+        nota = self.criar_nota_xml_manual(
+            numero="990102",
+            itens=[
+                {"produto": produto, "codigo": "REV-COR", "gtin": sku_azul.ean13, "quantidade": "5"},
+                {"produto": produto, "codigo": "REV-COR", "gtin": sku_preto.ean13, "quantidade": "7"},
+            ],
+        )
+
+        self.fechar_xml(nota)
+
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_azul.ean13).Estoque, Decimal("5.000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_preto.ean13).Estoque, Decimal("7.000"))
+
+    def test_xml_revenda_sem_gtin_bloqueia_sem_movimentar(self):
+        produto, _ = self.criar_revenda_com_skus(tamanhos=("40",))
+        nota = self.criar_nota_xml_manual(numero="990103", itens=[{"produto": produto, "codigo": "SEM-GTIN", "gtin": "", "quantidade": "3"}])
+
+        resp = self.fechar_xml(nota, status_code=400)
+
+        self.assertIn("sem GTIN/EAN", resp.data["detail"])
+        self.assertFalse(Estoque.objects.filter(Idloja=self.loja).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+    def test_xml_revenda_gtin_de_outro_produto_bloqueia_sem_movimentar(self):
+        produto, _ = self.criar_revenda_com_skus(descricao="Revenda XML A", tamanhos=("42",))
+        outro, outro_skus = self.criar_revenda_com_skus(descricao="Revenda XML B", tamanhos=("42",))
+        nota = self.criar_nota_xml_manual(numero="990104", itens=[{"produto": produto, "codigo": "GTIN-OUTRO", "gtin": outro_skus[("Azul", "42")].ean13, "quantidade": "3"}])
+
+        resp = self.fechar_xml(nota, status_code=400)
+
+        self.assertIn("pertence a outro produto", resp.data["detail"])
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertFalse(Estoque.objects.filter(Idloja=self.loja, CodigodeBarra=outro_skus[("Azul", "42")].ean13).exists())
+        self.assertEqual(outro.tipo_produto, "1")
+
+    def test_xml_revenda_gtin_inexistente_bloqueia_sem_movimentar(self):
+        produto, _ = self.criar_revenda_com_skus(tamanhos=("44",))
+        nota = self.criar_nota_xml_manual(numero="990105", itens=[{"produto": produto, "codigo": "GTIN-INEX", "gtin": "7899999999999", "quantidade": "3"}])
+
+        resp = self.fechar_xml(nota, status_code=400)
+
+        self.assertIn("não corresponde a SKU ativo", resp.data["detail"])
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+    def test_xml_revenda_sku_inativo_bloqueia_sem_movimentar(self):
+        produto, skus = self.criar_revenda_com_skus(tamanhos=("46",))
+        sku = skus[("Azul", "46")]
+        sku.ativo = False
+        sku.save(update_fields=["ativo"])
+        nota = self.criar_nota_xml_manual(numero="990106", itens=[{"produto": produto, "codigo": "SKU-INAT", "gtin": sku.ean13, "quantidade": "3"}])
+
+        resp = self.fechar_xml(nota, status_code=400)
+
+        self.assertIn("SKU inativo", resp.data["detail"])
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+    def test_xml_uso_consumo_preserva_fluxo_atual(self):
+        nota = self.criar_nota_xml_manual(numero="990107", itens=[{"produto": self.produto, "codigo": "USO-XML", "gtin": "", "quantidade": "4"}])
+
+        self.fechar_xml(nota)
+
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("4.000"))
+        self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", produto=self.produto).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+    def test_xml_insumo_preserva_fluxo_antigo_por_codigo_produto(self):
+        insumo = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Insumo XML", unidade=self.unidade)
+        nota = self.criar_nota_xml_manual(numero="990108", itens=[{"produto": insumo, "codigo": "INS-XML", "gtin": "", "quantidade": "6"}])
+
+        self.fechar_xml(nota)
+
+        codigo = f"29{int(insumo.pk) % 100000000000:011d}"
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=codigo).Estoque, Decimal("6.000"))
+        self.assertTrue(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA", CodigodeBarra=codigo).exists())
+
+    def test_cancelamento_xml_revenda_estorna_o_mesmo_ean_da_entrada_original(self):
+        produto, skus = self.criar_revenda_com_skus(tamanhos=("48",))
+        sku = skus[("Azul", "48")]
+        nota = self.criar_nota_xml_manual(numero="990109", itens=[{"produto": produto, "codigo": "REV-CANC", "gtin": sku.ean13, "quantidade": "12"}])
+        self.fechar_xml(nota)
+
+        self.cancelar_xml(nota)
+
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku.ean13).Estoque, Decimal("0.000"))
+        self.assertTrue(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", CodigodeBarra=sku.ean13, quantidade=Decimal("12.000")).exists())
+
+    def test_cancelamento_xml_revenda_estorna_cada_sku_da_mesma_referencia(self):
+        produto, skus = self.criar_revenda_com_skus(tamanhos=("50", "52"))
+        sku_50 = skus[("Azul", "50")]
+        sku_52 = skus[("Azul", "52")]
+        nota = self.criar_nota_xml_manual(
+            numero="990110",
+            itens=[
+                {"produto": produto, "codigo": "REV-CANC2", "gtin": sku_50.ean13, "quantidade": "2"},
+                {"produto": produto, "codigo": "REV-CANC2", "gtin": sku_52.ean13, "quantidade": "9"},
+            ],
+        )
+        self.fechar_xml(nota)
+
+        self.cancelar_xml(nota)
+
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_50.ean13).Estoque, Decimal("0.000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=sku_52.ean13).Estoque, Decimal("0.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", CodigodeBarra__in=[sku_50.ean13, sku_52.ean13]).count(), 2)
+
     def test_efetiva_nf_xml_sem_pedido_com_estoque_custo_financeiro_alerta_e_snapshot(self):
         nota, item1, item2 = self.preparar_nf_xml_efetivavel(falta=True, zero_item2=True)
         resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")

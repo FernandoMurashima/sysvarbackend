@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from decimal import Decimal
 import json
 from pathlib import Path
 from django.apps import apps
@@ -23,7 +24,7 @@ from fiscal.models.venda_pdv import *
 from produto.models import *
 SEED_DIR=Path(__file__).resolve().parent/'seeds'
 PRESERVED_SUPERUSER='takeshi'; DEV_PASSWORD='Sysvar@123'; DEV_COMPANY_DOCUMENT='42000001000186'; DEV_COMPANY_NAME='Sysvar Moda Comércio e Confecções Ltda'
-FORBIDDEN_OPERATIONAL_MODELS=[('accounts','SessaoUsuario'),('accounts','SessionToken'),('compras','Requisicao'),('compras','RequisicaoItem'),('compras','RequisicaoHistorico'),('compras','OrdemServico'),('compras','Cotacao'),('compras','PedidoCompra'),('distribuicao','Distribuicao'),('distribuicao','PedidoVendaDistribuicao'),('distribuicao','MercadoriaTransito'),('financeiro','CashbackMovimento'),('financeiro','ValeTroca'),('financeiro','ValeTrocaMovimento'),('financeiro','MovimentacaoFinanceira'),('financeiro','Pagar'),('financeiro','PagarItem'),('financeiro','Receber'),('financeiro','ReceberItem'),('fiscal','NotaFiscalEntrada'),('fiscal','NotaFiscalSaida'),('fiscal','VendaPdv'),('fiscal','VendaDevolucao'),('fiscal','NFCe'),('produto','Estoque'),('produto','EstoqueMovimentacao'),('produto','ProdutoUsoConsumoEstoque'),('produto','ProdutoUsoConsumoMovimentacao'),('produto','InventarioEstoque'),('produto','OrdemProducao')]
+FORBIDDEN_OPERATIONAL_MODELS=[('accounts','SessaoUsuario'),('accounts','SessionToken'),('compras','Requisicao'),('compras','RequisicaoItem'),('compras','RequisicaoHistorico'),('compras','OrdemServico'),('compras','Cotacao'),('compras','PedidoCompra'),('distribuicao','Distribuicao'),('distribuicao','PedidoVendaDistribuicao'),('distribuicao','MercadoriaTransito'),('financeiro','CashbackMovimento'),('financeiro','ValeTroca'),('financeiro','ValeTrocaMovimento'),('financeiro','MovimentacaoFinanceira'),('financeiro','Pagar'),('financeiro','PagarItem'),('financeiro','Receber'),('financeiro','ReceberItem'),('fiscal','NotaFiscalEntrada'),('fiscal','NotaFiscalSaida'),('fiscal','VendaPdv'),('fiscal','VendaDevolucao'),('fiscal','NFCe'),('produto','EstoqueMovimentacao'),('produto','ProdutoUsoConsumoMovimentacao'),('produto','InventarioEstoque'),('produto','OrdemProducao')]
 @dataclass
 class DevBaseReport:
     created:dict[str,int]=field(default_factory=dict); problems:list[str]=field(default_factory=list)
@@ -48,9 +49,13 @@ class SysvarDevBaseService:
         with (SEED_DIR/f).open(encoding='utf-8') as h: return json.load(h)
     def fields(self,m): return {f.name for f in m._meta.fields if not f.primary_key and not getattr(f,'auto_now',False) and not getattr(f,'auto_now_add',False)}
     def clean(self,m,d): return {k:v for k,v in d.items() if k in self.fields(m)}
-    def emp(self,c='EMP-DEV'): return self.i['emp'][c]
+    def emp(self,c='EMP-DEV'):
+        if 'emp' in self.i and c in self.i['emp']: return self.i['emp'][c]
+        if c == 'EMP-DEV':
+            return Empresa.objects.get(documento=DEV_COMPANY_DOCUMENT)
+        raise KeyError(c)
     def load_all(self):
-        self.modulos(); self.empresas(); self.lojas(); self.perfis(); self.usuarios(); self.contrato(); self.cargos(); self.plano(); self.naturezas(); self.centros_setores(); self.funcionarios(); self.fornecedores(); self.clientes(); self.financeiro(); self.prod_base(); self.produtos(); self.prod_deps(); self.fiscal(); self.requisicoes(); self.dist(); self.count()
+        self.modulos(); self.empresas(); self.lojas(); self.perfis(); self.usuarios(); self.contrato(); self.cargos(); self.plano(); self.naturezas(); self.centros_setores(); self.funcionarios(); self.fornecedores(); self.clientes(); self.financeiro(); self.prod_base(); self.produtos(); self.prod_deps(); self.estoque_estrutural(); self.fiscal(); self.requisicoes(); self.dist(); self.count()
     def modulos(self):
         self.i['mod']={}
         for it in self.seed('modulos_sistema.json'):
@@ -188,6 +193,12 @@ class SysvarDevBaseService:
         self.i['pack']={}; self.i['ficha']={}
         for f in self.seed('produto_detalhes.json'):
             p=self.i['prod'][f['produto_descricao']]; ProdutoDetalhe.objects.get_or_create(produto=p,idcor=self.i['cor'][f['cor_codigo']],idtamanho=self.i['tam'][(f['grade_codigo'],str(f['tamanho']))],defaults={'custo_original':p.custo_original,'custo_ultima_compra':p.custo_ultima_compra,'custo_medio':p.custo_medio})
+        for cfg in ConfigEan.objects.all():
+            itemrefs=[int(v) for v in ProdutoDetalhe.objects.filter(config_ean=cfg).exclude(codigo_item_ref='').values_list('codigo_item_ref', flat=True)]
+            next_itemref=(max(itemrefs) + 1) if itemrefs else 1
+            if cfg.next_itemref != next_itemref:
+                cfg.next_itemref = next_itemref
+                cfg.save(update_fields=['next_itemref'])
         for f in self.seed('packs.json'):
             d=dict(f); key=d.pop('codigo_seed'); d['empresa']=self.emp(d.pop('empresa_codigo')); d['grade']=self.i['grade'][d.pop('grade_codigo')]; obj,_=Pack.objects.update_or_create(empresa=d['empresa'],nome=d['nome'],defaults=self.clean(Pack,d)); self.i['pack'][key]=obj
         for f in self.seed('pack_itens.json'):
@@ -201,6 +212,27 @@ class SysvarDevBaseService:
         FichaTecnicaItem.objects.all().delete()
         for f in self.seed('fichas_tecnicas_itens.json'):
             d=dict(f); d.pop('empresa_codigo',None); d['ficha']=self.i['ficha'][(d.pop('ficha_produto_final_descricao'),d.pop('ficha_versao'))]; d['produto']=self.i['prod'].get(d.pop('produto_descricao',None)); d['fornecedor']=self.i['forn'].get(d.pop('fornecedor_documento',None)); d['unidade']=self.i['un'].get(d.pop('unidade_codigo',None)); FichaTecnicaItem.objects.create(**self.clean(FichaTecnicaItem,d))
+    def estoque_estrutural(self):
+        emp=self.emp()
+        lojas=list(Loja.objects.filter(empresa=emp).order_by('id'))
+        skus=list(ProdutoDetalhe.objects.select_related('produto').filter(produto__empresa=emp).order_by('IdprodutoDetalhe'))
+        existentes={(e.CodigodeBarra,e.Idloja_id) for e in Estoque.objects.filter(Idloja__empresa=emp).only('CodigodeBarra','Idloja_id')}
+        novos=[]
+        for sku in skus:
+            for loja in lojas:
+                key=(sku.ean13,loja.id)
+                if key in existentes: continue
+                novos.append(Estoque(CodigodeBarra=sku.ean13, Idloja=loja, referencia=sku.produto.referencia or '', Estoque=Decimal('0'), reserva=Decimal('0')))
+        if novos: Estoque.objects.bulk_create(novos, batch_size=1000, ignore_conflicts=True)
+        uso=list(Produto.objects.filter(empresa=emp,tipo_produto='2').order_by('Idproduto'))
+        existentes_uso={(e.produto_id,e.loja_id) for e in ProdutoUsoConsumoEstoque.objects.filter(empresa=emp).only('produto_id','loja_id')}
+        novos_uso=[]
+        for produto in uso:
+            for loja in lojas:
+                key=(produto.pk,loja.id)
+                if key in existentes_uso: continue
+                novos_uso.append(ProdutoUsoConsumoEstoque(empresa=emp, produto=produto, loja=loja, saldo=Decimal('0')))
+        if novos_uso: ProdutoUsoConsumoEstoque.objects.bulk_create(novos_uso, batch_size=1000, ignore_conflicts=True)
     def fiscal(self):
         emp=self.emp(); self.i['cfop']={}; self.i['trib']={}
         for f in self.seed('cfops.json'):
@@ -224,13 +256,21 @@ class SysvarDevBaseService:
             d=dict(f); d['perfil']=self.i['pd'][d.pop('perfil_codigo')]; d['loja']=self.i['loja'][d.pop('loja_codigo')]; d.pop('empresa_codigo',None); PerfilDistribuicaoItem.objects.update_or_create(perfil=d['perfil'],loja=d['loja'],defaults=self.clean(PerfilDistribuicaoItem,d))
     def validate(self):
         r=DevBaseReport(); self.count(r); e={p.name[:-5]:len(self.seed(p.name)) for p in SEED_DIR.glob('*.json')}
-        checks=[(Empresa.objects.count()==e['empresas'],'Empresas divergem dos JSONs.'),(Loja.objects.count()==e['lojas'],'Lojas divergem dos JSONs.'),(get_user_model().objects.count()==e['usuarios'],'Usuários divergem dos JSONs.'),(Fornecedor.objects.count()==e['fornecedores'],'Fornecedores divergem.'),(FornecedorCategoria.objects.count()==e['fornecedores_categorias'],'Categorias de fornecedores divergem.'),(FornecedorContato.objects.count()==e['fornecedores_contatos'],'Contatos divergem.'),(FornecedorEndereco.objects.count()==e['fornecedores_enderecos'],'Endereços divergem.'),(Produto.objects.count()==e['produtos']+e['produtos_uso_consumo']+e['insumos_producao'],'Produtos divergem.'),(ProdutoDetalhe.objects.count()==e['produto_detalhes'],'SKUs divergem.'),(ProdutoFornecedor.objects.count()==e['produtos_fornecedores'],'ProdutoFornecedor diverge.'),(FichaTecnica.objects.count()==e['fichas_tecnicas'],'Fichas divergem.'),(FichaTecnicaItem.objects.count()==e['fichas_tecnicas_itens'],'Itens de fichas divergem.'),(Promocao.objects.count()==e['promocoes'],'Promoções devem respeitar JSON vazio.'),(ProdutoDetalhe.objects.exclude(ean13='').count()==ProdutoDetalhe.objects.count(),'Há SKU sem EAN.'),(ProdutoDetalhe.objects.values('ean13').annotate(c=Count('ean13')).filter(c__gt=1).count()==0,'Há EAN duplicado.'),(ConfigEan.objects.first() and ConfigEan.objects.first().next_itemref==ProdutoDetalhe.objects.count()+1,'Sequência EAN não avançou corretamente.'),(not self.forbidden(),f"Movimentos operacionais proibidos encontrados: {', '.join(self.forbidden())}.")]
+        emp=self.emp(); lojas_count=Loja.objects.filter(empresa=emp).count(); skus_count=ProdutoDetalhe.objects.filter(produto__empresa=emp).count(); uso_count=Produto.objects.filter(empresa=emp,tipo_produto='2').count()
+        estoque_qs=Estoque.objects.filter(Idloja__empresa=emp); uso_estoque_qs=ProdutoUsoConsumoEstoque.objects.filter(empresa=emp)
+        sku_counts=estoque_qs.values('CodigodeBarra').annotate(c=Count('Idloja', distinct=True)).filter(c=lojas_count).count()
+        estoque_dup=estoque_qs.values('CodigodeBarra','Idloja').annotate(c=Count('Idestoque')).filter(c__gt=1).exists()
+        uso_dup=uso_estoque_qs.values('produto','loja').annotate(c=Count('id')).filter(c__gt=1).exists()
+        sku_refs={sku.ean13:(sku.produto.referencia or '') for sku in ProdutoDetalhe.objects.select_related('produto').filter(produto__empresa=emp)}
+        eans_validos=set(sku_refs)
+        estoque_refs_ok=all((e.referencia or '') == sku_refs.get(e.CodigodeBarra, '') for e in estoque_qs.only('CodigodeBarra','referencia'))
+        checks=[(Empresa.objects.count()==e['empresas'],'Empresas divergem dos JSONs.'),(Loja.objects.count()==e['lojas'],'Lojas divergem dos JSONs.'),(get_user_model().objects.count()==e['usuarios'],'Usuários divergem dos JSONs.'),(Fornecedor.objects.count()==e['fornecedores'],'Fornecedores divergem.'),(FornecedorCategoria.objects.count()==e['fornecedores_categorias'],'Categorias de fornecedores divergem.'),(FornecedorContato.objects.count()==e['fornecedores_contatos'],'Contatos divergem.'),(FornecedorEndereco.objects.count()==e['fornecedores_enderecos'],'Endereços divergem.'),(Produto.objects.count()==e['produtos']+e['produtos_uso_consumo']+e['insumos_producao'],'Produtos divergem.'),(ProdutoDetalhe.objects.count()==e['produto_detalhes'],'SKUs divergem.'),(ProdutoFornecedor.objects.count()==e['produtos_fornecedores'],'ProdutoFornecedor diverge.'),(FichaTecnica.objects.count()==e['fichas_tecnicas'],'Fichas divergem.'),(FichaTecnicaItem.objects.count()==e['fichas_tecnicas_itens'],'Itens de fichas divergem.'),(Promocao.objects.count()==e['promocoes'],'Promoções devem respeitar JSON vazio.'),(ProdutoDetalhe.objects.exclude(ean13='').count()==ProdutoDetalhe.objects.count(),'Há SKU sem EAN.'),(ProdutoDetalhe.objects.values('ean13').annotate(c=Count('ean13')).filter(c__gt=1).count()==0,'Há EAN duplicado.'),(ConfigEan.objects.first() and ConfigEan.objects.first().next_itemref==ProdutoDetalhe.objects.count()+1,'Sequência EAN não avançou corretamente.'),(estoque_qs.count()==skus_count*lojas_count,'Estoque estrutural SKU × loja diverge.'),(sku_counts==skus_count,'Nem todo SKU possui uma linha por loja.'),(not estoque_dup,'Há estoque duplicado por EAN × loja.'),(not estoque_qs.exclude(CodigodeBarra__in=eans_validos).exists(),'Há estoque com EAN inexistente em ProdutoDetalhe.'),(estoque_refs_ok,'Há estoque com referência diferente do produto do SKU.'),(not estoque_qs.exclude(Estoque=0).exists(),'Há estoque estrutural com saldo diferente de zero.'),(not estoque_qs.exclude(reserva=0).exists(),'Há estoque estrutural com reserva diferente de zero.'),(uso_estoque_qs.count()==uso_count*lojas_count,'ProdutoUsoConsumoEstoque produto × loja diverge.'),(not uso_dup,'Há ProdutoUsoConsumoEstoque duplicado por produto × loja.'),(not uso_estoque_qs.exclude(produto__tipo_produto='2').exists(),'ProdutoUsoConsumoEstoque contém produto que não é Uso/Consumo.'),(not uso_estoque_qs.exclude(saldo=0).exists(),'Há ProdutoUsoConsumoEstoque com saldo diferente de zero.'),(not self.forbidden(),f"Movimentos operacionais proibidos encontrados: {', '.join(self.forbidden())}.")]
         for ok,msg in checks:
             if not ok: r.problems.append(msg)
         return r
     def count(self,r=None):
         r=r or self.report
-        m={'seeds processados':len(self.seed_files),'empresas':Empresa.objects.count(),'lojas':Loja.objects.count(),'usuários':get_user_model().objects.count(),'fornecedores':Fornecedor.objects.count(),'clientes':Cliente.objects.count(),'centros de custo':CentroCusto.objects.count(),'setores':RequisicaoSetor.objects.count(),'produtos':Produto.objects.count(),'SKUs':ProdutoDetalhe.objects.count(),'EANs':ProdutoDetalhe.objects.exclude(ean13='').count(),'produtos-fornecedores':ProdutoFornecedor.objects.count(),'fichas técnicas':FichaTecnica.objects.count(),'itens ficha técnica':FichaTecnicaItem.objects.count(),'formas pagamento':FormaPagamento.objects.count(),'parcelas formas':FormaPagamentoParcela.objects.count(),'prazos':PrazoPagamento.objects.count(),'parcelas prazos':PrazoPagamentoParcela.objects.count(),'perfis distribuição':PerfilDistribuicao.objects.count(),'itens perfis distribuição':PerfilDistribuicaoItem.objects.count(),'promoções':Promocao.objects.count(),'tabelas operacionais com dados':len(self.forbidden())}
+        m={'seeds processados':len(self.seed_files),'empresas':Empresa.objects.count(),'lojas':Loja.objects.count(),'usuários':get_user_model().objects.count(),'fornecedores':Fornecedor.objects.count(),'clientes':Cliente.objects.count(),'centros de custo':CentroCusto.objects.count(),'setores':RequisicaoSetor.objects.count(),'produtos':Produto.objects.count(),'SKUs':ProdutoDetalhe.objects.count(),'EANs':ProdutoDetalhe.objects.exclude(ean13='').count(),'estoque estrutural SKU × loja':Estoque.objects.count(),'estoque uso/consumo produto × loja':ProdutoUsoConsumoEstoque.objects.count(),'produtos-fornecedores':ProdutoFornecedor.objects.count(),'fichas técnicas':FichaTecnica.objects.count(),'itens ficha técnica':FichaTecnicaItem.objects.count(),'formas pagamento':FormaPagamento.objects.count(),'parcelas formas':FormaPagamentoParcela.objects.count(),'prazos':PrazoPagamento.objects.count(),'parcelas prazos':PrazoPagamentoParcela.objects.count(),'perfis distribuição':PerfilDistribuicao.objects.count(),'itens perfis distribuição':PerfilDistribuicaoItem.objects.count(),'promoções':Promocao.objects.count(),'tabelas operacionais com dados':len(self.forbidden())}
         for k,v in m.items(): r.set(k,v)
     def forbidden(self):
         labels=[]
