@@ -1,0 +1,452 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Alfaiataria Essenza",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Alfaiataria Essenza",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Pantalona Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Pantalona Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Reta Linho Natura",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Reta Linho Natura",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Cenoura Atelier",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Cenoura Atelier",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Wide Leg Horizonte",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Wide Leg Horizonte",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Jeans Reta Ícone",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Jeans Reta Ícone",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Jeans Flare Origem",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Jeans Flare Origem",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Legging Flex",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Legging Flex",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Legging Move",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Legging Move",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Calça Própria Sarja Urbana",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Calça Própria Sarja Urbana",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Curta Essenza",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Curta Essenza",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Curta Jeans Origem",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Curta Jeans Origem",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Curta Linho Natura",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Curta Linho Natura",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Midi Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Midi Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Midi Plissada Ícone",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Midi Plissada Ícone",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Midi Linho Atelier",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Midi Linho Atelier",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Midi Jeans Urbana",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Midi Jeans Urbana",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Longa Horizonte",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Longa Horizonte",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Longa Camadas Brisa",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Longa Camadas Brisa",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Saia Própria Longa Linho Solar",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Saia Própria Longa Linho Solar",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Curta Essenza",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Curta Essenza",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Curta Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Curta Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Curta Linho Natura",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Curta Linho Natura",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Longa Atelier",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Longa Atelier",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Longa Horizonte",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Longa Horizonte",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Manga Longa Ícone",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Manga Longa Ícone",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Regata Origem",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Regata Origem",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Regata Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Regata Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Regata Linho Solar",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Regata Linho Solar",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Blusa Própria Regata Renda Brisa",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Blusa Própria Regata Renda Brisa",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Vestido Próprio Curto Essenza",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Vestido Próprio Curto Essenza",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Vestido Próprio Midi Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Vestido Próprio Midi Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Vestido Próprio Midi Linho Natura",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Vestido Próprio Midi Linho Natura",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Vestido Próprio Longo Horizonte",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Vestido Próprio Longo Horizonte",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Vestido Próprio Longo Renda Atelier",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Vestido Próprio Longo Renda Atelier",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Cropped Essenza",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Cropped Essenza",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Cropped Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Cropped Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Cropped Linho Natura",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Cropped Linho Natura",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Cropped Active Move",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Cropped Active Move",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Cropped Renda Atelier",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Cropped Renda Atelier",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Faixa Horizonte",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Faixa Horizonte",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Faixa Riviera",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Faixa Riviera",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Faixa Linho Solar",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Faixa Linho Solar",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Faixa Canelado Ícone",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Faixa Canelado Ícone",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "produto_final_descricao": "Top Próprio Faixa Active Flex",
+    "versao": "1",
+    "descricao": "Ficha técnica padrão - Top Próprio Faixa Active Flex",
+    "rendimento": "1.000",
+    "status": "APROVADA",
+    "ativa": true,
+    "observacoes": "Ficha técnica da Base Dev"
+  }
+]
