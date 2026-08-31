@@ -1,0 +1,80 @@
+[
+  {
+    "forma_codigo": "DIN",
+    "ordem": 1,
+    "dias": 0,
+    "percentual": "100.000000"
+  },
+  {
+    "forma_codigo": "DEB",
+    "ordem": 1,
+    "dias": 0,
+    "percentual": "100.000000"
+  },
+  {
+    "forma_codigo": "PIX",
+    "ordem": 1,
+    "dias": 0,
+    "percentual": "100.000000"
+  },
+  {
+    "forma_codigo": "CCR",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "100.000000"
+  },
+  {
+    "forma_codigo": "CC2",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "50.000000"
+  },
+  {
+    "forma_codigo": "CC2",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "50.000000"
+  },
+  {
+    "forma_codigo": "CC3",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "33.333333"
+  },
+  {
+    "forma_codigo": "CC3",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "33.333333"
+  },
+  {
+    "forma_codigo": "CC3",
+    "ordem": 3,
+    "dias": 90,
+    "percentual": "33.333334"
+  },
+  {
+    "forma_codigo": "CC4",
+    "ordem": 1,
+    "dias": 30,
+    "percentual": "25.000000"
+  },
+  {
+    "forma_codigo": "CC4",
+    "ordem": 2,
+    "dias": 60,
+    "percentual": "25.000000"
+  },
+  {
+    "forma_codigo": "CC4",
+    "ordem": 3,
+    "dias": 90,
+    "percentual": "25.000000"
+  },
+  {
+    "forma_codigo": "CC4",
+    "ordem": 4,
+    "dias": 120,
+    "percentual": "25.000000"
+  }
+]

@@ -1,0 +1,86 @@
+[
+  {
+    "codigo": "AV",
+    "descricao": "À vista",
+    "num_parcelas": 1,
+    "intervalo_dias": 0,
+    "ativo": true
+  },
+  {
+    "codigo": "7D",
+    "descricao": "7 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 7,
+    "ativo": true
+  },
+  {
+    "codigo": "14D",
+    "descricao": "14 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 14,
+    "ativo": true
+  },
+  {
+    "codigo": "21D",
+    "descricao": "21 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 21,
+    "ativo": true
+  },
+  {
+    "codigo": "28D",
+    "descricao": "28 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 28,
+    "ativo": true
+  },
+  {
+    "codigo": "30D",
+    "descricao": "30 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 30,
+    "ativo": true
+  },
+  {
+    "codigo": "60D",
+    "descricao": "60 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 60,
+    "ativo": true
+  },
+  {
+    "codigo": "90D",
+    "descricao": "90 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 90,
+    "ativo": true
+  },
+  {
+    "codigo": "120D",
+    "descricao": "120 dias",
+    "num_parcelas": 1,
+    "intervalo_dias": 120,
+    "ativo": true
+  },
+  {
+    "codigo": "30-60",
+    "descricao": "30/60",
+    "num_parcelas": 2,
+    "intervalo_dias": 30,
+    "ativo": true
+  },
+  {
+    "codigo": "30-60-90",
+    "descricao": "30/60/90",
+    "num_parcelas": 3,
+    "intervalo_dias": 30,
+    "ativo": true
+  },
+  {
+    "codigo": "30-60-90-120",
+    "descricao": "30/60/90/120",
+    "num_parcelas": 4,
+    "intervalo_dias": 30,
+    "ativo": true
+  }
+]

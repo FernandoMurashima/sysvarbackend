@@ -1,0 +1,98 @@
+[
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "UN01",
+    "descricao": "Loja Barra",
+    "origem": "UNIDADE",
+    "loja_codigo": "BARRA",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "UN02",
+    "descricao": "Loja Tijuca",
+    "origem": "UNIDADE",
+    "loja_codigo": "TIJUCA",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "UN03",
+    "descricao": "Loja Centro",
+    "origem": "UNIDADE",
+    "loja_codigo": "CENTRO",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "UN04",
+    "descricao": "Fábrica",
+    "origem": "UNIDADE",
+    "loja_codigo": "FABRICA",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET01",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 1,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET02",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 2,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET03",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 3,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET04",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 4,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET05",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 5,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET06",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 6,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET07",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 7,
+    "origem": "SETOR",
+    "ativo": true
+  },
+  {
+    "empresa_codigo": "EMP-DEV",
+    "codigo": "SET08",
+    "descricao_origem": "setores.json",
+    "setor_seed_ordem": 8,
+    "origem": "SETOR",
+    "ativo": true
+  }
+]
