@@ -1,5 +1,6 @@
 from .cfop import CfopSerializer
 from .nota_fiscal_entrada import (
+    ConfiguracaoXmlFornecedorSerializer,
     FormaPagamentoFiscalMapSerializer,
     NotaFiscalEntradaDivergenciaXmlSerializer,
     NotaFiscalEntradaEventoSerializer,
@@ -22,6 +23,7 @@ from .venda_pdv import (
 
 __all__ = [
     "CfopSerializer",
+    "ConfiguracaoXmlFornecedorSerializer",
     "FormaPagamentoFiscalMapSerializer",
     "NFCeSerializer",
     "NFeDevolucaoSerializer",

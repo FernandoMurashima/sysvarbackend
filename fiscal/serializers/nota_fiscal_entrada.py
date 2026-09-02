@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -120,6 +120,42 @@ class XmlFornecedorRecebidoSerializer(serializers.ModelSerializer):
         valor_total = attrs.get("valor_total", getattr(self.instance, "valor_total", 0))
         if Decimal(valor_total or 0) < 0:
             raise serializers.ValidationError({"valor_total": "Informe valor total maior ou igual a zero."})
+        return attrs
+
+
+class ConfiguracaoXmlFornecedorSerializer(serializers.ModelSerializer):
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+
+    class Meta:
+        model = ConfiguracaoXmlFornecedor
+        fields = "__all__"
+        read_only_fields = ("criado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        caminho = attrs.get("caminho_local", getattr(self.instance, "caminho_local", None))
+
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Empresa é obrigatória."})
+        if loja and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+
+        if caminho is not None:
+            caminho = str(caminho).strip()
+            if not caminho:
+                raise serializers.ValidationError({"caminho_local": "Caminho local é obrigatório."})
+            attrs["caminho_local"] = caminho
+
+        duplicado = ConfiguracaoXmlFornecedor.objects.filter(
+            empresa=empresa,
+            loja=loja,
+            caminho_local=attrs.get("caminho_local", caminho),
+        )
+        if self.instance:
+            duplicado = duplicado.exclude(pk=self.instance.pk)
+        if duplicado.exists():
+            raise serializers.ValidationError({"caminho_local": "Já existe configuração para este caminho neste escopo."})
         return attrs
 
 

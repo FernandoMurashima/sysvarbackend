@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -11,7 +12,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -236,6 +237,147 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.client.force_authenticate(self.user_compras)
         resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", self.payload(), format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class ConfiguracaoXmlFornecedorTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Config XML", documento="41222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Config XML B", documento="41222333000262", plano_completo=True)
+        self.user_admin = get_user_model().objects.create_user("cfg-xml-admin", "cfgadmin@sysvar.test", "123", empresa=self.empresa, type="Admin")
+        self.user_diretor = get_user_model().objects.create_user("cfg-xml-diretor", "cfgdiretor@sysvar.test", "123", empresa=self.empresa, type="Diretor")
+        self.user_regular = get_user_model().objects.create_user("cfg-xml-regular", "cfgregular@sysvar.test", "123", empresa=self.empresa, type="Regular")
+        self.user_b = get_user_model().objects.create_user("cfg-xml-admin-b", "cfgadminb@sysvar.test", "123", empresa=self.empresa_b, type="Admin")
+        self.modulo_fiscal = ModuloSistema.objects.update_or_create(
+            chave="fiscal",
+            defaults={"nome": "Fiscal", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        for empresa, user in ((self.empresa, self.user_admin), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(
+                empresa=empresa,
+                defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user},
+            )
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_fiscal, defaults={"contratado": True})
+        for user in (self.user_diretor, self.user_regular):
+            perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome=f"Perfil {user.username}")
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.modulo_fiscal, acesso=UserModulePermission.Access.EDIT)
+            user.perfil_principal = perfil
+            user.save(update_fields=["perfil_principal"])
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Config XML", apelido_loja="CFG", cnpj="41222333000181", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Config XML B", apelido_loja="CFB", cnpj="41222333000262", estado="SP")
+        self.client.force_authenticate(self.user_admin)
+
+    def payload(self, caminho=r"X:\Fiscal\XML\Fornecedores", **extras):
+        data = {
+            "empresa": self.empresa.id,
+            "loja": self.loja.id,
+            "caminho_local": caminho,
+            "ativo": True,
+            "identificador_agente": "agente-local-01",
+        }
+        data.update(extras)
+        return data
+
+    def post_config(self, payload=None, status_code=201):
+        resp = self.client.post("/api/fiscal/configuracoes-xml-fornecedor/", payload or self.payload(), format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def test_admin_com_acesso_cria_configuracao_valida(self):
+        resp = self.post_config()
+        obj = ConfiguracaoXmlFornecedor.objects.get(pk=resp.data["id"])
+        self.assertEqual(obj.empresa, self.empresa)
+        self.assertEqual(obj.loja, self.loja)
+        self.assertTrue(obj.ativo)
+
+    def test_diretor_com_acesso_cria_configuracao_valida(self):
+        self.client.force_authenticate(self.user_diretor)
+        resp = self.post_config()
+        self.assertEqual(resp.data["caminho_local"], r"X:\Fiscal\XML\Fornecedores")
+
+    def test_caminho_windows_e_armazenado_sem_alteracao(self):
+        caminho = r"X:\Fiscal\XML\Fornecedores"
+        resp = self.post_config(self.payload(caminho=f"  {caminho}  "))
+        self.assertEqual(resp.data["caminho_local"], caminho)
+
+    def test_caminho_unc_e_armazenado_sem_alteracao(self):
+        caminho = r"\\SERVIDOR\Fiscal\XML"
+        resp = self.post_config(self.payload(caminho=caminho))
+        self.assertEqual(resp.data["caminho_local"], caminho)
+
+    def test_backend_nao_acessa_fisicamente_o_caminho(self):
+        with patch("os.path.exists", side_effect=AssertionError("Nao deve acessar filesystem")):
+            resp = self.post_config(self.payload(caminho=r"Z:\Pasta\Inexistente"))
+        self.assertEqual(resp.data["caminho_local"], r"Z:\Pasta\Inexistente")
+
+    def test_empresa_obrigatoria(self):
+        payload = self.payload()
+        payload.pop("empresa")
+        self.post_config(payload, status_code=400)
+
+    def test_loja_da_mesma_empresa_e_aceita(self):
+        resp = self.post_config(self.payload(loja=self.loja.id))
+        self.assertEqual(resp.data["loja"], self.loja.id)
+
+    def test_loja_de_outra_empresa_e_recusada(self):
+        self.post_config(self.payload(loja=self.loja_b.id), status_code=400)
+
+    def test_usuario_de_outra_empresa_nao_consulta_configuracao(self):
+        obj = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.get(f"/api/fiscal/configuracoes-xml-fornecedor/{obj.id}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_usuario_de_outra_empresa_nao_altera_configuracao(self):
+        obj = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.patch(f"/api/fiscal/configuracoes-xml-fornecedor/{obj.id}/", {"ativo": False}, format="json")
+        self.assertEqual(resp.status_code, 404)
+        obj.refresh_from_db()
+        self.assertTrue(obj.ativo)
+
+    def test_configuracao_duplicada_no_mesmo_escopo_e_recusada(self):
+        self.post_config()
+        self.post_config(status_code=400)
+
+    def test_caminho_igual_em_empresas_diferentes_e_permitido(self):
+        self.post_config()
+        self.client.force_authenticate(self.user_b)
+        payload = {
+            "empresa": self.empresa_b.id,
+            "loja": self.loja_b.id,
+            "caminho_local": r"X:\Fiscal\XML\Fornecedores",
+            "ativo": True,
+        }
+        resp = self.client.post("/api/fiscal/configuracoes-xml-fornecedor/", payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+    def test_configuracao_com_loja_null_e_permitida(self):
+        resp = self.post_config(self.payload(loja=None))
+        self.assertIsNone(resp.data["loja"])
+
+    def test_configuracao_inativa_permanece_armazenada_e_consultavel(self):
+        resp = self.post_config(self.payload(ativo=False))
+        obj = ConfiguracaoXmlFornecedor.objects.get(pk=resp.data["id"])
+        self.assertFalse(obj.ativo)
+
+        resp = self.client.get(f"/api/fiscal/configuracoes-xml-fornecedor/{obj.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["ativo"])
+
+    def test_criacao_nao_gera_efeitos_operacionais(self):
+        self.post_config()
+        self.assertFalse(XmlFornecedorRecebido.objects.exists())
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+
+    def test_usuario_nao_administrativo_nao_cria_configuracao(self):
+        self.client.force_authenticate(self.user_regular)
+        resp = self.client.post("/api/fiscal/configuracoes-xml-fornecedor/", self.payload(), format="json")
+        self.assertEqual(resp.status_code, 403)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

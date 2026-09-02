@@ -278,6 +278,31 @@ class XmlFornecedorRecebido(models.Model):
         return f"XML fornecedor {self.modelo}/{self.serie}/{self.numero} - {self.chave_acesso}"
 
 
+class ConfiguracaoXmlFornecedor(models.Model):
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", db_index=True)
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", null=True, blank=True, db_index=True)
+    caminho_local = models.CharField(max_length=500)
+    ativo = models.BooleanField(default=True, db_index=True)
+    identificador_agente = models.CharField(max_length=120, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_configuracao_xml_fornecedor"
+        ordering = ["empresa_id", "loja_id", "caminho_local"]
+        constraints = [
+            UniqueConstraint(fields=["empresa", "loja", "caminho_local"], name="uq_config_xml_forn_emp_loja_path"),
+        ]
+        indexes = [
+            Index(fields=["empresa", "loja", "ativo"], name="ix_cfg_xml_forn_emp_loja_atv"),
+            Index(fields=["identificador_agente"], name="ix_cfg_xml_forn_agente"),
+        ]
+
+    def __str__(self) -> str:
+        escopo = self.loja_id or "geral"
+        return f"Config XML fornecedor {self.empresa_id}/{escopo} - {self.caminho_local}"
+
+
 class NotaFiscalEntradaItem(models.Model):
     nota = models.ForeignKey(
         "fiscal.NotaFiscalEntrada",

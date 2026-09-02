@@ -25,11 +25,12 @@ except Exception:
     FIN_OK = False
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
 from fiscal.serializers import (
+    ConfiguracaoXmlFornecedorSerializer,
     FormaPagamentoFiscalMapSerializer,
     NotaFiscalEntradaDivergenciaXmlSerializer,
     NotaFiscalEntradaEventoSerializer,
@@ -38,6 +39,8 @@ from fiscal.serializers import (
     NotaFiscalEntradaSerializer,
     XmlFornecedorRecebidoSerializer,
 )
+
+ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
 
 
 def _q4(valor) -> Decimal:
@@ -2285,6 +2288,60 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
                 | Q(destinatario_documento__icontains=search)
                 | Q(destinatario_nome__icontains=search)
             )
+        return qs
+
+    def _validar_empresa_usuario(self, empresa):
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa and empresa.id != int(user_empresa_id):
+            raise ValidationError({"empresa": "Empresa fora do escopo do usuário."})
+
+    def perform_create(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa"))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa") or serializer.instance.empresa)
+        serializer.save()
+
+
+class ConfiguracaoXmlFornecedorViewSet(BaseViewSet):
+    required_module = "fiscal"
+    read_roles = ["Admin", "Diretor"]
+    write_roles = ["Admin", "Diretor"]
+    queryset = (
+        ConfiguracaoXmlFornecedor.objects
+        .select_related("empresa", "loja")
+        .all()
+        .order_by("empresa_id", "loja_id", "caminho_local")
+    )
+    serializer_class = ConfiguracaoXmlFornecedorSerializer
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        user = request.user
+        if not user.is_superuser and getattr(user, "type", "") not in ADMIN_CONFIG_ROLES:
+            self.permission_denied(request, message="Usuário sem permissão para administrar esta configuração.")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+
+        loja = self.request.query_params.get("loja")
+        ativo = self.request.query_params.get("ativo")
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if ativo is not None:
+            valor = str(ativo).strip().lower()
+            if valor in {"1", "true", "t", "sim", "s"}:
+                qs = qs.filter(ativo=True)
+            elif valor in {"0", "false", "f", "nao", "não", "n"}:
+                qs = qs.filter(ativo=False)
         return qs
 
     def _validar_empresa_usuario(self, empresa):

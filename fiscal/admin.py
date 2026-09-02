@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Cfop,
+    ConfiguracaoXmlFornecedor,
     FormaPagamentoFiscalMap,
     NFCe,
     NFeDevolucao,
@@ -70,6 +71,13 @@ class FormaPagamentoFiscalMapAdmin(admin.ModelAdmin):
     list_display = ("id", "empresa", "codigo_tpag", "descricao_fiscal", "forma_pagamento", "ativo")
     list_filter = ("empresa", "codigo_tpag", "ativo")
     search_fields = ("codigo_tpag", "descricao_fiscal", "forma_pagamento__codigo", "forma_pagamento__descricao")
+
+
+@admin.register(ConfiguracaoXmlFornecedor)
+class ConfiguracaoXmlFornecedorAdmin(admin.ModelAdmin):
+    list_display = ("id", "empresa", "loja", "caminho_local", "ativo", "identificador_agente")
+    list_filter = ("empresa", "loja", "ativo")
+    search_fields = ("caminho_local", "identificador_agente", "empresa__nome", "loja__nome_loja")
 
 
 class VendaPdvItemInline(admin.TabularInline):
