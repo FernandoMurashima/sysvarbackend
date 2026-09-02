@@ -2308,8 +2308,11 @@ class PackItemViewSet(BaseViewSet):
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
-        pack = serializer.validated_data.get('pack') or serializer.instance.pack
-        self._ensure_pack_editavel(pack)
+        pack_original = serializer.instance.pack
+        self._ensure_pack_editavel(pack_original)
+        pack_destino = serializer.validated_data.get('pack')
+        if pack_destino and pack_destino.pk != pack_original.pk:
+            self._ensure_pack_editavel(pack_destino)
         super().perform_update(serializer)
 
     def destroy(self, request, *args, **kwargs):

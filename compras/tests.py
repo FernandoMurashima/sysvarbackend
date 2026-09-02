@@ -1481,6 +1481,46 @@ class PedidoCompraUnificadoTests(TestCase):
         resp = self.client.patch(f"/api/produto/pack/{livre.id}/", {"empresa": self.empresa.id, "nome": "Pack Empresa A Editado"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
 
+    def test_pack_item_de_pack_bloqueado_nao_pode_ser_transferido_para_pack_livre(self):
+        pedido = self.criar_pedido()
+        self.incluir_item(self.payload_revenda(pedido))
+        PedidoCompra.objects.filter(pk=pedido.pk).update(status="AP")
+        pack_livre = Pack.objects.create(empresa=self.empresa, nome="Pack Livre Destino", grade=self.grade)
+        item = self.pack.itens.first()
+
+        resp = self.client.patch(f"/api/produto/pack-item/{item.id}/", {"pack": pack_livre.id}, format="json")
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Pedido de Compra", str(resp.data))
+        item.refresh_from_db()
+        self.assertEqual(item.pack_id, self.pack.id)
+
+    def test_pack_item_de_pack_livre_nao_pode_ser_transferido_para_pack_bloqueado(self):
+        pedido = self.criar_pedido()
+        self.incluir_item(self.payload_revenda(pedido))
+        PedidoCompra.objects.filter(pk=pedido.pk).update(status="AP")
+        tam_g = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="G", Descricao="G")
+        pack_livre = Pack.objects.create(empresa=self.empresa, nome="Pack Livre Origem", grade=self.grade)
+        item_livre = PackItem.objects.create(pack=pack_livre, tamanho=tam_g, qtd=1)
+
+        resp = self.client.patch(f"/api/produto/pack-item/{item_livre.id}/", {"pack": self.pack.id}, format="json")
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Pedido de Compra", str(resp.data))
+        item_livre.refresh_from_db()
+        self.assertEqual(item_livre.pack_id, pack_livre.id)
+
+    def test_pack_item_pode_ser_transferido_entre_packs_livres(self):
+        pack_origem = Pack.objects.create(empresa=self.empresa, nome="Pack Livre Origem", grade=self.grade)
+        pack_destino = Pack.objects.create(empresa=self.empresa, nome="Pack Livre Destino", grade=self.grade)
+        item = PackItem.objects.create(pack=pack_origem, tamanho=self.tam_p, qtd=1)
+
+        resp = self.client.patch(f"/api/produto/pack-item/{item.id}/", {"pack": pack_destino.id}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item.refresh_from_db()
+        self.assertEqual(item.pack_id, pack_destino.id)
+
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
 class RequisicaoCompraTests(PedidoCompraUnificadoTests):
