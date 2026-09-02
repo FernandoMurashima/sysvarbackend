@@ -16,7 +16,7 @@ from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
-from produto.models import Colecao, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+from produto.models import Colecao, ConfigEan, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
 
 
@@ -1266,6 +1266,7 @@ class PedidoCompraUnificadoTests(TestCase):
         self.cor = Cor.objects.create(empresa=self.empresa, Descricao="Azul", Codigo="AZ", Cor="Azul")
         self.grupo = Grupo.objects.create(empresa=self.empresa, Codigo="01", CodigoRef="01", Descricao="Grupo", Margem=0)
         self.colecao = Colecao.objects.create(empresa=self.empresa, Descricao="Colecao", Codigo="26", Estacao="01", Status="AT")
+        self.config_ean = ConfigEan.objects.create(empresa=self.empresa, company_prefix="2701", ativo=True)
         self.prod_revenda = self.criar_produto("1", "Revenda", self.un_int)
         self.prod_uso = self.criar_produto("2", "Uso", self.un_int)
         self.prod_uso_dec = self.criar_produto("2", "Uso Decimal", self.un_dec)
@@ -1365,6 +1366,119 @@ class PedidoCompraUnificadoTests(TestCase):
             {"id_forma": self.forma.Idformapagamento, "id_prazo": self.prazo.Idprazo},
             format="json",
         )
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_item_revenda_serializer_expoe_descricao_reduzida_referencia_e_sku_unico(self):
+        self.prod_revenda.descricao_reduzida = "Revenda Red."
+        self.prod_revenda.save(update_fields=["descricao_reduzida"])
+        pack_unico = Pack.objects.create(empresa=self.empresa, nome="Pack P", grade=self.grade)
+        PackItem.objects.create(pack=pack_unico, tamanho=self.tam_p, qtd=1)
+        sku = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        pedido = self.criar_pedido()
+        item = self.incluir_item(self.payload_revenda(pedido, pack=pack_unico.id))
+
+        resp = self.client.get(f"/api/compras/itens/{item.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["produto_descricao_reduzida"], "Revenda Red.")
+        self.assertEqual(resp.data["produto_referencia"], self.prod_revenda.referencia)
+        self.assertEqual(resp.data["pack_nome"], "Pack P")
+        self.assertEqual(resp.data["sku_ean"], sku.ean13)
+        self.assertEqual(resp.data["sku_count"], 1)
+
+    def test_item_revenda_serializer_nao_escolhe_ean_arbitrario_para_pack_com_multiplos_skus(self):
+        sku_p = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        sku_m = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_m)
+        pedido = self.criar_pedido()
+        item = self.incluir_item(self.payload_revenda(pedido))
+
+        resp = self.client.get(f"/api/compras/itens/{item.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["sku_ean"], "")
+        self.assertEqual(resp.data["sku_count"], 2)
+        self.assertIn(sku_p.ean13, resp.data["sku_tooltip"])
+        self.assertIn(sku_m.ean13, resp.data["sku_tooltip"])
+
+    def test_item_revenda_serializer_lista_codigos_reais_filtrados_e_na_ordem_do_pack(self):
+        cor_outra = Cor.objects.create(empresa=self.empresa, Descricao="Verde", Codigo="VD", Cor="Verde")
+        produto_outro = self.criar_produto("1", "Outra Revenda", self.un_int)
+        pack_invertido = Pack.objects.create(empresa=self.empresa, nome="Pack M P", grade=self.grade)
+        PackItem.objects.create(pack=pack_invertido, tamanho=self.tam_m, qtd=2)
+        PackItem.objects.create(pack=pack_invertido, tamanho=self.tam_p, qtd=1)
+        sku_p = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        sku_m = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_m)
+        ProdutoDetalhe.objects.filter(pk=sku_p.pk).update(ean13="")
+        sku_p.ean13 = ""
+        sku_outra_cor = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=cor_outra, idtamanho=self.tam_m)
+        sku_outro_produto = ProdutoDetalhe.objects.create(produto=produto_outro, idcor=self.cor, idtamanho=self.tam_m)
+        pedido = self.criar_pedido()
+        item = self.incluir_item(self.payload_revenda(pedido, pack=pack_invertido.id))
+
+        resp = self.client.get(f"/api/compras/itens/{item.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        codigos = resp.data["sku_codigos_barras"]
+        self.assertEqual(codigos, [
+            {"tamanho": "M", "ean13": sku_m.ean13},
+            {"tamanho": "P", "ean13": ""},
+        ])
+        self.assertNotIn(sku_outra_cor.ean13, [sku["ean13"] for sku in codigos])
+        self.assertNotIn(sku_outro_produto.ean13, [sku["ean13"] for sku in codigos])
+        self.assertIn("P - Sem EAN", resp.data["sku_tooltip"])
+
+    def test_pack_nunca_utilizado_continua_editavel(self):
+        livre = Pack.objects.create(empresa=self.empresa, nome="Pack Livre", grade=self.grade)
+        item = PackItem.objects.create(pack=livre, tamanho=self.tam_p, qtd=1)
+
+        resp = self.client.patch(f"/api/produto/pack/{livre.id}/", {"empresa": self.empresa.id, "nome": "Pack Livre 2"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.post("/api/produto/pack-item/", {"pack": livre.id, "tamanho": self.tam_m.Idtamanho, "qtd": 2}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        resp = self.client.patch(f"/api/produto/pack-item/{item.id}/", {"qtd": 3}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.delete(f"/api/produto/pack-item/{item.id}/")
+        self.assertEqual(resp.status_code, 204, resp.data if hasattr(resp, "data") else resp.content)
+
+    def test_pack_usado_em_pedido_historico_bloqueia_cabecalho_e_grade(self):
+        pedido = self.criar_pedido()
+        self.incluir_item(self.payload_revenda(pedido))
+        PedidoCompra.objects.filter(pk=pedido.pk).update(status="AP")
+        item = self.pack.itens.first()
+        tam_g = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="G", Descricao="G")
+
+        for method, url, payload in (
+            ("patch", f"/api/produto/pack/{self.pack.id}/", {"empresa": self.empresa.id, "nome": "Alterado"}),
+            ("delete", f"/api/produto/pack/{self.pack.id}/", None),
+            ("post", "/api/produto/pack-item/", {"pack": self.pack.id, "tamanho": tam_g.Idtamanho, "qtd": 4}),
+            ("patch", f"/api/produto/pack-item/{item.id}/", {"qtd": 4}),
+            ("delete", f"/api/produto/pack-item/{item.id}/", None),
+        ):
+            request = getattr(self.client, method)
+            resp = request(url, payload, format="json") if payload is not None else request(url)
+            self.assertEqual(resp.status_code, 400, resp.data)
+            self.assertIn("Pedido de Compra", str(resp.data))
+
+    def test_pack_permanece_bloqueado_em_status_atendido_e_cancelado(self):
+        pedido = self.criar_pedido()
+        self.incluir_item(self.payload_revenda(pedido))
+        for status_pc in ("AT", "CA"):
+            PedidoCompra.objects.filter(pk=pedido.pk).update(status=status_pc)
+            resp = self.client.patch(f"/api/produto/pack/{self.pack.id}/", {"empresa": self.empresa.id, "ativo": False}, format="json")
+            self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_pack_de_outra_empresa_nao_bloqueia_pack_local(self):
+        grade_b = Grade.objects.create(empresa=self.empresa_b, Descricao="Grade B")
+        tam_b = Tamanho.objects.create(empresa=self.empresa_b, idgrade=grade_b, Tamanho="P", Descricao="P")
+        pack_b = Pack.objects.create(empresa=self.empresa_b, nome="Pack B", grade=grade_b)
+        PackItem.objects.create(pack=pack_b, tamanho=tam_b, qtd=1)
+        prod_b = Produto.objects.create(empresa=self.empresa_b, tipo_produto="1", descricao="Revenda B", unidade=self.un_int, grupo=self.grupo, colecao=self.colecao, grade=grade_b)
+        cor_b = Cor.objects.create(empresa=self.empresa_b, Descricao="Azul B", Codigo="AZB", Cor="Azul")
+        pedido_b = PedidoCompra.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, tipo="1", status="AP")
+        PedidoCompraItem.objects.create(pedido=pedido_b, produto=prod_b, cor=cor_b, pack=pack_b, n_packs=1, qtd=1, preco_unit=Decimal("1.00"), total_item=Decimal("1.00"))
+
+        livre = Pack.objects.create(empresa=self.empresa, nome="Pack Empresa A Livre", grade=self.grade)
+        resp = self.client.patch(f"/api/produto/pack/{livre.id}/", {"empresa": self.empresa.id, "nome": "Pack Empresa A Editado"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
 
 

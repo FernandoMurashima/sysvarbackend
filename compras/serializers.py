@@ -6,6 +6,7 @@ from decimal import Decimal
 from accounts.services.effective_access import EffectiveAccessService
 from compras.services_necessidade import indicador_requisicao_item
 from compras.services_requisicao import estoque_disponivel_material_os
+from produto.models import ProdutoDetalhe
 
 from .models import (
     Cotacao,
@@ -43,7 +44,13 @@ TIPOS_COMPRA_PRODUTO = ("1", "2", "4")
 
 class PedidoCompraItemSerializer(serializers.ModelSerializer):
     produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    produto_descricao_reduzida = serializers.CharField(source="produto.descricao_reduzida", read_only=True)
     produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    pack_nome = serializers.CharField(source="pack.nome", read_only=True)
+    sku_ean = serializers.SerializerMethodField()
+    sku_count = serializers.SerializerMethodField()
+    sku_tooltip = serializers.SerializerMethodField()
+    sku_codigos_barras = serializers.SerializerMethodField()
     unidade_descricao = serializers.SerializerMethodField()
 
     class Meta:
@@ -53,6 +60,57 @@ class PedidoCompraItemSerializer(serializers.ModelSerializer):
     def get_unidade_descricao(self, obj):
         unidade = getattr(obj, "unidade", None) or getattr(getattr(obj, "produto", None), "unidade", None)
         return getattr(unidade, "Descricao", "") or ""
+
+    def _skus_da_linha(self, obj):
+        cached = getattr(obj, "_skus_da_linha_cache", None)
+        if cached is not None:
+            return cached
+        if not obj.produto_id or not obj.cor_id:
+            return []
+        tamanhos = [
+            item.tamanho_id
+            for item in getattr(getattr(obj, "pack", None), "itens", []).all()
+        ] if obj.pack_id else []
+        if not tamanhos:
+            return []
+        produto = getattr(obj, "produto", None)
+        skus = list(getattr(produto, "skus").all()) if produto else []
+        if not skus:
+            skus = list(
+                ProdutoDetalhe.objects
+                .select_related("idtamanho")
+                .filter(produto_id=obj.produto_id, idcor_id=obj.cor_id, idtamanho_id__in=tamanhos)
+            )
+        tamanho_set = set(tamanhos)
+        ordem_tamanho = {tamanho_id: index for index, tamanho_id in enumerate(tamanhos)}
+        encontrados = sorted(
+            [sku for sku in skus if sku.idcor_id == obj.cor_id and sku.idtamanho_id in tamanho_set],
+            key=lambda sku: (ordem_tamanho.get(sku.idtamanho_id, 9999), sku.IdprodutoDetalhe),
+        )
+        obj._skus_da_linha_cache = encontrados
+        return encontrados
+
+    def get_sku_ean(self, obj):
+        skus = self._skus_da_linha(obj)
+        return skus[0].ean13 if len(skus) == 1 else ""
+
+    def get_sku_count(self, obj):
+        return len(self._skus_da_linha(obj))
+
+    def get_sku_tooltip(self, obj):
+        skus = self._skus_da_linha(obj)
+        if len(skus) <= 1:
+            return ""
+        return "\n".join(f"{sku.idtamanho.Tamanho} - {sku.ean13 or 'Sem EAN'}" for sku in skus)
+
+    def get_sku_codigos_barras(self, obj):
+        return [
+            {
+                "tamanho": getattr(sku.idtamanho, "Tamanho", "") or "",
+                "ean13": sku.ean13 or "",
+            }
+            for sku in self._skus_da_linha(obj)
+        ]
 
     def validate(self, attrs):
         pedido = attrs.get("pedido") or getattr(self.instance, "pedido", None)

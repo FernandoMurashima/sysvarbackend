@@ -2250,6 +2250,10 @@ class PackViewSet(BaseViewSet):
     queryset = Pack.objects.all().order_by('-data_cadastro')
     serializer_class = PackSerializer
 
+    def _ensure_pack_editavel(self, pack):
+        if pack.bloqueado_por_pedido_compra():
+            raise ValidationError({'detail': Pack.MENSAGEM_BLOQUEIO_ALTERACAO})
+
     def get_queryset(self):
         qs = super().get_queryset()
         grade = self.request.query_params.get('grade')
@@ -2266,10 +2270,23 @@ class PackViewSet(BaseViewSet):
             qs = qs.order_by(ordering)
         return qs
 
+    def perform_update(self, serializer):
+        self._ensure_pack_editavel(serializer.instance)
+        super().perform_update(serializer)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._ensure_pack_editavel(instance)
+        return super().destroy(request, *args, **kwargs)
+
 
 class PackItemViewSet(BaseViewSet):
     queryset = PackItem.objects.all()
     serializer_class = PackItemSerializer
+
+    def _ensure_pack_editavel(self, pack):
+        if pack and pack.bloqueado_por_pedido_compra():
+            raise ValidationError({'detail': Pack.MENSAGEM_BLOQUEIO_ALTERACAO})
 
     def get_queryset(self):
         qs = PackItem.objects.all()
@@ -2285,6 +2302,20 @@ class PackItemViewSet(BaseViewSet):
         if ordering:
             qs = qs.order_by(ordering)
         return qs
+
+    def perform_create(self, serializer):
+        self._ensure_pack_editavel(serializer.validated_data.get('pack'))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        pack = serializer.validated_data.get('pack') or serializer.instance.pack
+        self._ensure_pack_editavel(pack)
+        super().perform_update(serializer)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._ensure_pack_editavel(instance.pack)
+        return super().destroy(request, *args, **kwargs)
 
 
 class EstoqueViewSet(BaseViewSet):

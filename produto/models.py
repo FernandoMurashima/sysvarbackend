@@ -1120,6 +1120,8 @@ class Promocao(models.Model):
 # Packs (compra por grade)
 # ===========================
 class Pack(models.Model):
+    MENSAGEM_BLOQUEIO_ALTERACAO = 'Este pack já foi utilizado em Pedido de Compra e não pode mais ser alterado.'
+
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='packs_produto', db_index=True)
     nome = models.CharField(max_length=80, null=True, blank=True)
     grade = models.ForeignKey(Grade, on_delete=models.PROTECT, related_name='packs')
@@ -1139,6 +1141,16 @@ class Pack(models.Model):
 
     def __str__(self):
         return self.nome or f'Pack #{self.pk}'
+
+    def bloqueado_por_pedido_compra(self):
+        if not self.pk:
+            return False
+        from compras.models import PedidoCompraItem
+
+        qs = PedidoCompraItem.objects.filter(pack_id=self.pk).exclude(pedido__status='AB')
+        if self.empresa_id:
+            qs = qs.filter(pedido__empresa_id=self.empresa_id)
+        return qs.exists()
 
 
 class PackItem(models.Model):

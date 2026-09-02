@@ -272,9 +272,14 @@ class CodigosSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class PackSerializer(serializers.ModelSerializer):
+    bloqueado_alteracao = serializers.SerializerMethodField()
+
     class Meta:
         model = Pack
         fields = '__all__'
+
+    def get_bloqueado_alteracao(self, obj):
+        return obj.bloqueado_por_pedido_compra()
 
     def validate(self, attrs):
         grade = attrs.get('grade') or getattr(self.instance, 'grade', None)

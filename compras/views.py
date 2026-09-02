@@ -4,7 +4,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Avg, Max, Q, Sum
+from django.db.models import Avg, Max, Prefetch, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
@@ -84,7 +84,7 @@ except Exception:
 # Natureza para aprovar
 from cadastros.models import Nat_Lancamento
 from cadastros.models import Loja
-from produto.models import ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
+from produto.models import PackItem, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
 from .services_necessidade import estoque_disponivel_requisicao_item, indicador_requisicao_item, loja_estoque_requisicao_item, sincronizar_requisicao_disponivel_para_atendimento
 
 
@@ -1633,7 +1633,17 @@ class PedidoCompraViewSet(BaseViewSet):
 
 # ----------------- Itens -----------------
 class PedidoCompraItemViewSet(BaseViewSet):
-    queryset = PedidoCompraItem.objects.all().order_by("pedido_id", "id")
+    queryset = (
+        PedidoCompraItem.objects
+        .select_related("pedido", "produto", "cor", "pack", "unidade")
+        .prefetch_related(
+            Prefetch("pack__itens", queryset=PackItem.objects.select_related("tamanho").order_by("id")),
+            "produto__skus",
+            "produto__skus__idtamanho",
+        )
+        .all()
+        .order_by("pedido_id", "id")
+    )
     serializer_class = PedidoCompraItemSerializer
 
     def get_queryset(self):
