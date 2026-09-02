@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -341,6 +342,16 @@ class ConfiguracaoXmlFornecedorTests(TestCase):
         self.post_config()
         self.post_config(status_code=400)
 
+    def test_banco_bloqueia_duplicidade_com_mesma_loja(self):
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+
+    def test_banco_bloqueia_duplicidade_central_com_loja_null(self):
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML")
+
     def test_caminho_igual_em_empresas_diferentes_e_permitido(self):
         self.post_config()
         self.client.force_authenticate(self.user_b)
@@ -352,6 +363,17 @@ class ConfiguracaoXmlFornecedorTests(TestCase):
         }
         resp = self.client.post("/api/fiscal/configuracoes-xml-fornecedor/", payload, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
+
+    def test_banco_permite_mesmo_caminho_central_em_empresas_diferentes(self):
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa_b, loja=None, caminho_local=r"X:\Fiscal\XML")
+        self.assertEqual(ConfiguracaoXmlFornecedor.objects.filter(caminho_local=r"X:\Fiscal\XML").count(), 2)
+
+    def test_banco_permite_mesmo_caminho_em_lojas_diferentes_da_mesma_empresa(self):
+        outra_loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Config XML 2", apelido_loja="CF2", cnpj="41222333000343", estado="SP")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=outra_loja, caminho_local=r"X:\Fiscal\XML")
+        self.assertEqual(ConfiguracaoXmlFornecedor.objects.filter(empresa=self.empresa, caminho_local=r"X:\Fiscal\XML").count(), 2)
 
     def test_configuracao_com_loja_null_e_permitida(self):
         resp = self.post_config(self.payload(loja=None))

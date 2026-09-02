@@ -129,7 +129,7 @@ class ConfiguracaoXmlFornecedorSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConfiguracaoXmlFornecedor
         fields = "__all__"
-        read_only_fields = ("criado_em", "atualizado_em")
+        read_only_fields = ("loja_escopo_unicidade", "criado_em", "atualizado_em")
 
     def validate(self, attrs):
         empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)
