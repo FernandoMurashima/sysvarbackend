@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -84,6 +84,43 @@ class NotaFiscalEntradaItemSerializer(serializers.ModelSerializer):
         instance.save()
         instance.nota.recalcular_totais()
         return instance
+
+
+class XmlFornecedorRecebidoSerializer(serializers.ModelSerializer):
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
+
+    class Meta:
+        model = XmlFornecedorRecebido
+        fields = "__all__"
+        read_only_fields = ("detectado_em", "atualizado_em")
+
+    def validate(self, attrs):
+        empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        fornecedor = attrs.get("fornecedor", getattr(self.instance, "fornecedor", None))
+        chave = attrs.get("chave_acesso")
+
+        if not empresa:
+            raise serializers.ValidationError({"empresa": "Empresa é obrigatória."})
+        if loja and loja.empresa_id != empresa.id:
+            raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+        if fornecedor and fornecedor.empresa_id != empresa.id:
+            raise serializers.ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
+        if chave is not None:
+            try:
+                attrs["chave_acesso"] = normalizar_chave_acesso_nfe(chave)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"chave_acesso": exc.detail})
+
+        for field in ("modelo", "serie", "numero", "emitente_documento", "destinatario_documento"):
+            if field in attrs and attrs[field] is not None:
+                attrs[field] = str(attrs[field]).strip()
+
+        valor_total = attrs.get("valor_total", getattr(self.instance, "valor_total", 0))
+        if Decimal(valor_total or 0) < 0:
+            raise serializers.ValidationError({"valor_total": "Informe valor total maior ou igual a zero."})
+        return attrs
 
 
 class NotaFiscalEntradaSerializer(serializers.ModelSerializer):

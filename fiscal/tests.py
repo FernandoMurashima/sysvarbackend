@@ -11,9 +11,137 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class XmlFornecedorRecebidoTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa XML Detectado", documento="11222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa XML Detectado B", documento="11222333000262", plano_completo=True)
+        self.user = get_user_model().objects.create_user("xml-detectado", "xmldetectado@sysvar.test", "123", empresa=self.empresa, type="Gerente")
+        self.user_b = get_user_model().objects.create_user("xml-detectado-b", "xmldetectadob@sysvar.test", "123", empresa=self.empresa_b, type="Gerente")
+        self.modulo = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        for empresa, user in ((self.empresa, self.user), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(
+                empresa=empresa,
+                defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user},
+            )
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo, defaults={"contratado": True})
+            UserModulePermission.objects.create(user=user, modulo=UserModulePermission.Module.COMPRAS, acesso=UserModulePermission.Access.EDIT)
+        self.client.force_authenticate(self.user)
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja XML Detectado", apelido_loja="XMLD", cnpj="11222333000181", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja XML Detectado B", apelido_loja="XMLB", cnpj="11222333000262", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="21222333000181",
+            cnpj="21222333000181",
+            nome_fornecedor="Fornecedor XML Detectado",
+            categoria="OUTROS",
+        )
+        self.fornecedor_b = Fornecedor.objects.create(
+            empresa=self.empresa_b,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="31222333000181",
+            cnpj="31222333000181",
+            nome_fornecedor="Fornecedor XML Detectado B",
+            categoria="OUTROS",
+        )
+
+    def payload(self, chave="35260822345678000195550010000001234567890121", **extras):
+        data = {
+            "empresa": self.empresa.id,
+            "loja": self.loja.id,
+            "fornecedor": self.fornecedor.id,
+            "chave_acesso": chave,
+            "modelo": "55",
+            "serie": "1",
+            "numero": "123",
+            "dh_emissao": "2026-09-02T10:00:00-03:00",
+            "emitente_documento": "21222333000181",
+            "emitente_nome": "Fornecedor XML Detectado",
+            "destinatario_documento": "11222333000181",
+            "destinatario_nome": "Empresa XML Detectado",
+            "valor_total": "150.25",
+            "situacao_fiscal": XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+            "status_operacional": XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            "caminho_origem_local": r"X:\Fiscal\XML\Fornecedores\35260822345678000195550010000001234567890121.xml",
+            "identificador_agente": "agente-local-01",
+        }
+        data.update(extras)
+        return data
+
+    def post_xml(self, payload=None, status_code=201):
+        resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", payload or self.payload(), format="json")
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        return resp
+
+    def test_cria_registro_valido(self):
+        resp = self.post_xml()
+        obj = XmlFornecedorRecebido.objects.get(pk=resp.data["id"])
+        self.assertEqual(obj.empresa, self.empresa)
+        self.assertEqual(obj.loja, self.loja)
+        self.assertEqual(obj.fornecedor, self.fornecedor)
+        self.assertEqual(obj.chave_acesso, "35260822345678000195550010000001234567890121")
+        self.assertEqual(obj.situacao_fiscal, XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA)
+        self.assertEqual(obj.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+
+    def test_chave_acesso_duplicada_e_recusada(self):
+        self.post_xml()
+        self.post_xml(status_code=400)
+
+    def test_empresa_obrigatoria(self):
+        payload = self.payload()
+        payload.pop("empresa")
+        self.post_xml(payload, status_code=400)
+
+    def test_loja_de_outra_empresa_e_recusada(self):
+        self.post_xml(self.payload(loja=self.loja_b.id), status_code=400)
+
+    def test_fornecedor_de_outra_empresa_e_recusado(self):
+        self.post_xml(self.payload(fornecedor=self.fornecedor_b.id), status_code=400)
+
+    def test_registro_nao_gera_efeitos_operacionais(self):
+        self.post_xml()
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+
+    def test_consulta_api_respeita_isolamento_por_empresa(self):
+        own = XmlFornecedorRecebido.objects.create(**{
+            "empresa": self.empresa,
+            "loja": self.loja,
+            "fornecedor": self.fornecedor,
+            "chave_acesso": "35260822345678000195550010000001234567890121",
+            "modelo": "55",
+            "serie": "1",
+            "numero": "123",
+        })
+        other = XmlFornecedorRecebido.objects.create(**{
+            "empresa": self.empresa_b,
+            "loja": self.loja_b,
+            "fornecedor": self.fornecedor_b,
+            "chave_acesso": "35260822345678000195550010000001234567890130",
+            "modelo": "55",
+            "serie": "1",
+            "numero": "124",
+        })
+
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertIn(own.id, [row["id"] for row in rows])
+        self.assertNotIn(other.id, [row["id"] for row in rows])
+
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.get(f"/api/fiscal/xmls-fornecedor-recebidos/{own.id}/")
+        self.assertEqual(resp.status_code, 404)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

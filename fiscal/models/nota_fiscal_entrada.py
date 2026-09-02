@@ -228,6 +228,56 @@ class NotaFiscalEntrada(models.Model):
         }
 
 
+class XmlFornecedorRecebido(models.Model):
+    class StatusOperacional(models.TextChoices):
+        DETECTADO = "DETECTADO", "Detectado"
+        AGUARDANDO_RECEBIMENTO = "AGUARDANDO_RECEBIMENTO", "Aguardando recebimento"
+        EM_RECEBIMENTO = "EM_RECEBIMENTO", "Em recebimento"
+        RECEBIDO = "RECEBIDO", "Recebido"
+        PROCESSADO = "PROCESSADO", "Processado"
+        IGNORADO = "IGNORADO", "Ignorado"
+
+    class SituacaoFiscal(models.TextChoices):
+        DESCONHECIDA = "DESCONHECIDA", "Desconhecida"
+        AUTORIZADA = "AUTORIZADA", "Autorizada"
+        CANCELADA = "CANCELADA", "Cancelada"
+        DENEGADA = "DENEGADA", "Denegada"
+
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", db_index=True)
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", null=True, blank=True, db_index=True)
+    fornecedor = models.ForeignKey("cadastros.Fornecedor", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", null=True, blank=True, db_index=True)
+    chave_acesso = models.CharField(max_length=44, unique=True, db_index=True)
+    modelo = models.CharField(max_length=2, default="55")
+    serie = models.CharField(max_length=10, blank=True, default="")
+    numero = models.CharField(max_length=20, blank=True, default="")
+    dh_emissao = models.DateTimeField(null=True, blank=True)
+    emitente_documento = models.CharField(max_length=14, blank=True, default="")
+    emitente_nome = models.CharField(max_length=120, blank=True, default="")
+    destinatario_documento = models.CharField(max_length=14, blank=True, default="")
+    destinatario_nome = models.CharField(max_length=120, blank=True, default="")
+    valor_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    situacao_fiscal = models.CharField(max_length=20, choices=SituacaoFiscal.choices, default=SituacaoFiscal.DESCONHECIDA, db_index=True)
+    status_operacional = models.CharField(max_length=24, choices=StatusOperacional.choices, default=StatusOperacional.DETECTADO, db_index=True)
+    caminho_origem_local = models.CharField(max_length=500, blank=True, default="")
+    identificador_agente = models.CharField(max_length=120, blank=True, default="")
+    detectado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    erro_processamento = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "fiscal_xml_fornecedor_recebido"
+        ordering = ["-detectado_em", "-id"]
+        indexes = [
+            Index(fields=["empresa", "status_operacional"], name="ix_xml_forn_emp_status"),
+            Index(fields=["empresa", "situacao_fiscal"], name="ix_xml_forn_emp_sitfis"),
+            Index(fields=["emitente_documento"], name="ix_xml_forn_emit_doc"),
+            Index(fields=["destinatario_documento"], name="ix_xml_forn_dest_doc"),
+        ]
+
+    def __str__(self) -> str:
+        return f"XML fornecedor {self.modelo}/{self.serie}/{self.numero} - {self.chave_acesso}"
+
+
 class NotaFiscalEntradaItem(models.Model):
     nota = models.ForeignKey(
         "fiscal.NotaFiscalEntrada",

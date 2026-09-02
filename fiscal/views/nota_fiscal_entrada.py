@@ -25,7 +25,7 @@ except Exception:
     FIN_OK = False
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml
+from fiscal.models import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -36,6 +36,7 @@ from fiscal.serializers import (
     NotaFiscalEntradaItemSerializer,
     NotaFiscalEntradaItemXmlSerializer,
     NotaFiscalEntradaSerializer,
+    XmlFornecedorRecebidoSerializer,
 )
 
 
@@ -2237,6 +2238,67 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 restante = _money(restante - valor)
             parcela.valor_parcela = valor
             parcela.save(update_fields=["valor_parcela"])
+
+
+class XmlFornecedorRecebidoViewSet(BaseViewSet):
+    queryset = (
+        XmlFornecedorRecebido.objects
+        .select_related("empresa", "loja", "fornecedor")
+        .all()
+        .order_by("-detectado_em", "-id")
+    )
+    serializer_class = XmlFornecedorRecebidoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+
+        loja = self.request.query_params.get("loja")
+        fornecedor = self.request.query_params.get("fornecedor")
+        status_operacional = self.request.query_params.get("status_operacional")
+        situacao_fiscal = self.request.query_params.get("situacao_fiscal")
+        chave = self.request.query_params.get("chave_acesso")
+        search = self.request.query_params.get("search")
+
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if fornecedor:
+            qs = qs.filter(fornecedor_id=fornecedor)
+        if status_operacional:
+            qs = qs.filter(status_operacional=status_operacional)
+        if situacao_fiscal:
+            qs = qs.filter(situacao_fiscal=situacao_fiscal)
+        if chave:
+            qs = qs.filter(chave_acesso__icontains=chave)
+        if search:
+            qs = qs.filter(
+                Q(chave_acesso__icontains=search)
+                | Q(numero__icontains=search)
+                | Q(emitente_documento__icontains=search)
+                | Q(emitente_nome__icontains=search)
+                | Q(destinatario_documento__icontains=search)
+                | Q(destinatario_nome__icontains=search)
+            )
+        return qs
+
+    def _validar_empresa_usuario(self, empresa):
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa and empresa.id != int(user_empresa_id):
+            raise ValidationError({"empresa": "Empresa fora do escopo do usuário."})
+
+    def perform_create(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa"))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa") or serializer.instance.empresa)
+        serializer.save()
 
 
 class NotaFiscalEntradaItemViewSet(BaseViewSet):
