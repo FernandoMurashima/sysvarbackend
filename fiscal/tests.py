@@ -24,17 +24,36 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.empresa_b = Empresa.objects.create(nome="Empresa XML Detectado B", documento="11222333000262", plano_completo=True)
         self.user = get_user_model().objects.create_user("xml-detectado", "xmldetectado@sysvar.test", "123", empresa=self.empresa, type="Gerente")
         self.user_b = get_user_model().objects.create_user("xml-detectado-b", "xmldetectadob@sysvar.test", "123", empresa=self.empresa_b, type="Gerente")
-        self.modulo = ModuloSistema.objects.update_or_create(
+        self.user_fiscal = get_user_model().objects.create_user("xml-fiscal", "xmlfiscal@sysvar.test", "123", empresa=self.empresa, type="Regular")
+        self.user_compras = get_user_model().objects.create_user("xml-compras", "xmlcompras@sysvar.test", "123", empresa=self.empresa, type="Regular")
+        self.user_sem_modulo = get_user_model().objects.create_user("xml-sem-modulo", "xmlsem@sysvar.test", "123", empresa=self.empresa, type="Regular")
+        self.user_fiscal_view = get_user_model().objects.create_user("xml-fiscal-view", "xmlfiscalview@sysvar.test", "123", empresa=self.empresa, type="Regular")
+        self.modulo_compras = ModuloSistema.objects.update_or_create(
             chave="compras",
             defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
         )[0]
+        self.modulo_fiscal = ModuloSistema.objects.update_or_create(
+            chave="fiscal",
+            defaults={"nome": "Fiscal", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        self.modulo = self.modulo_compras
         for empresa, user in ((self.empresa, self.user), (self.empresa_b, self.user_b)):
             EmpresaContrato.objects.update_or_create(
                 empresa=empresa,
                 defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user},
             )
-            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo, defaults={"contratado": True})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_compras, defaults={"contratado": True})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_fiscal, defaults={"contratado": True})
             UserModulePermission.objects.create(user=user, modulo=UserModulePermission.Module.COMPRAS, acesso=UserModulePermission.Access.EDIT)
+        for user, modulo, acesso in (
+            (self.user_fiscal, self.modulo_fiscal, UserModulePermission.Access.EDIT),
+            (self.user_compras, self.modulo_compras, UserModulePermission.Access.EDIT),
+            (self.user_fiscal_view, self.modulo_fiscal, UserModulePermission.Access.VIEW),
+        ):
+            perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome=f"Perfil {user.username}")
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=modulo, acesso=acesso)
+            user.perfil_principal = perfil
+            user.save(update_fields=["perfil_principal"])
         self.client.force_authenticate(self.user)
         self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja XML Detectado", apelido_loja="XMLD", cnpj="11222333000181", estado="SP")
         self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja XML Detectado B", apelido_loja="XMLB", cnpj="11222333000262", estado="SP")
@@ -142,6 +161,81 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.client.force_authenticate(self.user_b)
         resp = self.client.get(f"/api/fiscal/xmls-fornecedor-recebidos/{own.id}/")
         self.assertEqual(resp.status_code, 404)
+
+    def test_usuario_somente_fiscal_consegue_consultar(self):
+        obj = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        self.client.force_authenticate(self.user_fiscal)
+
+        resp = self.client.get(f"/api/fiscal/xmls-fornecedor-recebidos/{obj.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_usuario_somente_compras_consegue_consultar(self):
+        obj = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        self.client.force_authenticate(self.user_compras)
+
+        resp = self.client.get(f"/api/fiscal/xmls-fornecedor-recebidos/{obj.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_usuario_sem_fiscal_e_sem_compras_recebe_acesso_negado(self):
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        self.client.force_authenticate(self.user_sem_modulo)
+
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+
+        self.assertEqual(resp.status_code, 403)
+
+    def test_nao_exige_fiscal_e_compras_simultaneamente_para_editar(self):
+        obj = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        self.client.force_authenticate(self.user_fiscal)
+
+        resp = self.client.patch(f"/api/fiscal/xmls-fornecedor-recebidos/{obj.id}/", {"numero": "124"}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        obj.refresh_from_db()
+        self.assertEqual(obj.numero, "124")
+
+    def test_criacao_exige_acesso_de_edicao_em_fiscal_ou_compras(self):
+        self.client.force_authenticate(self.user_fiscal_view)
+        resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", self.payload(), format="json")
+        self.assertEqual(resp.status_code, 403)
+
+        self.client.force_authenticate(self.user_compras)
+        resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", self.payload(), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

@@ -2241,6 +2241,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
 
 class XmlFornecedorRecebidoViewSet(BaseViewSet):
+    required_modules = ["fiscal", "compras"]
+    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "destroy"}
     queryset = (
         XmlFornecedorRecebido.objects
         .select_related("empresa", "loja", "fornecedor")
