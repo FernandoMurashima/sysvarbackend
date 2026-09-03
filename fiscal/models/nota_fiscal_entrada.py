@@ -1,10 +1,13 @@
 import hashlib
+import hmac
 import secrets
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db import models
 from django.db.models import Q, UniqueConstraint, Index
+from django.utils import timezone
 
 
 def _money(value):
@@ -60,6 +63,63 @@ class AgenteLocalSysvar(models.Model):
         self.token_prefixo = token[:12]
         self.save(update_fields=["token_hash", "token_prefixo", "atualizado_em"])
         return token
+
+
+class AtivacaoAgenteLocalSysvar(models.Model):
+    TEMPO_EXPIRACAO = timedelta(minutes=15)
+    ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="ativacoes_agente_local_sysvar", db_index=True)
+    codigo_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    codigo_prefixo = models.CharField(max_length=4, db_index=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="ativacoes_agente_local_sysvar")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    expira_em = models.DateTimeField(db_index=True)
+    usado_em = models.DateTimeField(null=True, blank=True)
+    agente = models.ForeignKey(AgenteLocalSysvar, on_delete=models.SET_NULL, null=True, blank=True, related_name="ativacoes")
+    revogado_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "fiscal_ativacao_agente_local_sysvar"
+        ordering = ["-criado_em"]
+        indexes = [
+            Index(fields=["empresa", "codigo_prefixo"], name="ix_ativ_ag_local_emp_pref"),
+            Index(fields=["expira_em", "usado_em"], name="ix_ativ_ag_local_exp_uso"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.empresa_id} - {self.codigo_prefixo}"
+
+    @staticmethod
+    def normalizar_codigo(codigo: str) -> str:
+        return str(codigo or "").strip().upper()
+
+    @staticmethod
+    def hash_codigo(codigo: str) -> str:
+        segredo = str(settings.SECRET_KEY).encode("utf-8")
+        normalizado = AtivacaoAgenteLocalSysvar.normalizar_codigo(codigo).encode("utf-8")
+        return hmac.new(segredo, normalizado, hashlib.sha256).hexdigest()
+
+    @classmethod
+    def gerar_codigo(cls) -> str:
+        bruto = "".join(secrets.choice(cls.ALFABETO_CODIGO) for _ in range(12))
+        return "-".join(bruto[i : i + 4] for i in range(0, 12, 4))
+
+    @classmethod
+    def criar(cls, *, empresa, criado_por):
+        codigo = cls.gerar_codigo()
+        ativacao = cls.objects.create(
+            empresa=empresa,
+            codigo_hash=cls.hash_codigo(codigo),
+            codigo_prefixo=codigo[:4],
+            criado_por=criado_por,
+            expira_em=timezone.now() + cls.TEMPO_EXPIRACAO,
+        )
+        return ativacao, codigo
+
+    def esta_utilizavel(self, agora=None) -> bool:
+        agora = agora or timezone.now()
+        return self.usado_em is None and self.revogado_em is None and self.expira_em > agora
 
 
 class NotaFiscalEntrada(models.Model):

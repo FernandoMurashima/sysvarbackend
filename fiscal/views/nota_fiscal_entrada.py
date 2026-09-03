@@ -8,6 +8,8 @@ from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
+from accounts.authentication import CompanyTokenAuthentication
 from accounts.permissions import HasModuleRole
 from cadastros.models import Fornecedor, Loja, Nat_Lancamento
 from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
@@ -26,7 +28,7 @@ except Exception:
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.authentication import AgentTokenAuthentication
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -50,6 +52,43 @@ ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
 class IsAgentAuthenticated(permissions.BasePermission):
     def has_permission(self, request, view):
         return bool(getattr(request, "agente_local_sysvar", None))
+
+
+def _resolver_empresa_ativacao_usuario(request):
+    user = request.user
+    if not user.is_superuser and getattr(user, "type", "") not in ADMIN_CONFIG_ROLES:
+        raise ValidationError({"detail": "Usuário sem permissão para administrar agentes locais."})
+    empresa_id = getattr(user, "empresa_id", None)
+    if not empresa_id:
+        if not user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        empresa_id = request.data.get("empresa")
+    if not empresa_id:
+        raise ValidationError({"empresa": "Empresa é obrigatória."})
+    if not user.is_superuser and int(empresa_id) != int(getattr(user, "empresa_id", 0) or 0):
+        raise ValidationError({"empresa": "Empresa fora do escopo do usuário."})
+    from cadastros.models import Empresa
+
+    empresa = Empresa.objects.filter(pk=empresa_id).first()
+    if not empresa:
+        raise ValidationError({"empresa": "Empresa inválida."})
+    return empresa
+
+
+def _criar_resposta_ativacao_admin(request):
+    empresa = _resolver_empresa_ativacao_usuario(request)
+    ativacao, codigo = AtivacaoAgenteLocalSysvar.criar(empresa=empresa, criado_por=request.user)
+    _audit(
+        "ativacao_agente_local_sysvar",
+        str(ativacao.pk),
+        {"empresa": empresa.pk, "codigo_prefixo": ativacao.codigo_prefixo},
+        request,
+        action="agent_activation_code_created",
+    )
+    return Response(
+        {"codigo": codigo, "expira_em": ativacao.expira_em, "empresa": empresa.pk},
+        status=status.HTTP_201_CREATED,
+    )
 
 
 def _q4(valor) -> Decimal:
@@ -2412,13 +2451,89 @@ class AgenteLocalSysvarViewSet(BaseViewSet):
         token = agente.gerar_token()
         return Response({"token": token, "prefixo": agente.token_prefixo, "agente": agente.pk}, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["post"], url_path="ativacoes")
+    def criar_ativacao(self, request):
+        return _criar_resposta_ativacao_admin(request)
+
 
 class AgenteLocalApiViewSet(viewsets.ViewSet):
     authentication_classes = [AgentTokenAuthentication]
     permission_classes = [IsAgentAuthenticated]
+    throttle_scope = "agente_local_ativacao"
 
     def _agente(self):
         return self.request.agente_local_sysvar
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="ativacoes",
+        authentication_classes=[CompanyTokenAuthentication],
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def criar_ativacao(self, request):
+        return _criar_resposta_ativacao_admin(request)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="ativar",
+        authentication_classes=[],
+        permission_classes=[permissions.AllowAny],
+        throttle_classes=[ScopedRateThrottle],
+    )
+    @transaction.atomic
+    def ativar(self, request):
+        codigo = AtivacaoAgenteLocalSysvar.normalizar_codigo(request.data.get("codigo"))
+        identificador = str(request.data.get("identificador") or "").strip()[:120]
+        nome = str(request.data.get("nome") or identificador or "Agente Local Sysvar").strip()[:120]
+        hostname = str(request.data.get("hostname") or "").strip()[:120]
+        versao = str(request.data.get("versao") or "").strip()[:40]
+        if not codigo or not identificador:
+            raise ValidationError({"codigo": "Código inválido."})
+
+        codigo_hash = AtivacaoAgenteLocalSysvar.hash_codigo(codigo)
+        ativacao = AtivacaoAgenteLocalSysvar.objects.select_for_update().select_related("empresa").filter(codigo_hash=codigo_hash).first()
+        if not ativacao or not ativacao.esta_utilizavel():
+            raise ValidationError({"codigo": "Código inválido."})
+
+        agente = AgenteLocalSysvar.objects.select_for_update().filter(empresa=ativacao.empresa, identificador=identificador).first()
+        if not agente:
+            agente = AgenteLocalSysvar.objects.create(
+                empresa=ativacao.empresa,
+                identificador=identificador,
+                nome=nome,
+                hostname=hostname,
+                versao=versao,
+                ativo=True,
+            )
+        else:
+            agente.nome = nome
+            agente.hostname = hostname
+            agente.versao = versao
+            agente.ativo = True
+            agente.save(update_fields=["nome", "hostname", "versao", "ativo", "atualizado_em"])
+
+        token = agente.gerar_token()
+        agora = timezone.now()
+        ativacao.usado_em = agora
+        ativacao.agente = agente
+        ativacao.save(update_fields=["usado_em", "agente"])
+        _audit(
+            "ativacao_agente_local_sysvar",
+            str(ativacao.pk),
+            {
+                "empresa": ativacao.empresa_id,
+                "codigo_prefixo": ativacao.codigo_prefixo,
+                "agente": agente.pk,
+                "identificador": identificador,
+                "hostname": hostname,
+                "versao": versao,
+            },
+            request,
+            action="agent_activated",
+        )
+        return Response({"token": token, "prefixo": agente.token_prefixo, "agente": agente.pk, "empresa": ativacao.empresa_id}, status=status.HTTP_200_OK)
 
     def _configuracoes_qs(self):
         agente = self._agente()

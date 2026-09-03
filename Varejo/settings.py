@@ -167,6 +167,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'Varejo.pagination.DefaultPageNumberPagination',
     'DEFAULT_AUTHENTICATION_CLASSES': ['accounts.authentication.CompanyTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_THROTTLE_RATES': {
+        'agente_local_ativacao': '20/min',
+    },
     'PAGE_SIZE': 25,
 }
 

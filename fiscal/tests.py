@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -13,7 +13,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -88,6 +88,92 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertTrue(AgenteLocalSysvar._meta.get_field("token_hash").unique)
         self.client.force_authenticate(self.user_b)
         self.assertEqual(self.client.get(f"/api/fiscal/agentes-locais/{agente.id}/").status_code, 404)
+
+    def test_ativacao_admin_gera_codigo_temporario_sem_armazenar_plaintext(self):
+        self._admin()
+        resp = self.client.post("/api/fiscal/agente-local/ativacoes/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        codigo = resp.data["codigo"]
+        ativacao = AtivacaoAgenteLocalSysvar.objects.get()
+        self.assertEqual(resp.data["empresa"], self.empresa.id)
+        self.assertEqual(ativacao.empresa_id, self.empresa.id)
+        self.assertEqual(ativacao.codigo_prefixo, codigo[:4])
+        self.assertNotEqual(ativacao.codigo_hash, codigo)
+        self.assertEqual(ativacao.codigo_hash, AtivacaoAgenteLocalSysvar.hash_codigo(codigo))
+        self.assertGreater(ativacao.expira_em, timezone.now())
+
+    def test_ativacao_exige_usuario_autenticado_e_respeita_empresa(self):
+        resp = self.client.post("/api/fiscal/agente-local/ativacoes/", {}, format="json")
+        self.assertIn(resp.status_code, (401, 403))
+        self._admin()
+        resp = self.client.post("/api/fiscal/agente-local/ativacoes/", {"empresa": self.empresa_b.id}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["empresa"], self.empresa.id)
+
+    def test_codigo_valido_ativa_agente_retorna_token_e_marca_uso_unico(self):
+        ativacao, codigo = AtivacaoAgenteLocalSysvar.criar(empresa=self.empresa, criado_por=self.user_admin)
+        self.client.force_authenticate(user=None)
+        resp = self.client.post(
+            "/api/fiscal/agente-local/ativar/",
+            {"codigo": codigo, "identificador": "AG-ATIVACAO", "nome": "Servidor Fiscal", "hostname": "SRV-FISCAL", "versao": "0.2.0"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        agente = AgenteLocalSysvar.objects.get(empresa=self.empresa, identificador="AG-ATIVACAO")
+        self.assertEqual(agente.nome, "Servidor Fiscal")
+        self.assertEqual(agente.hostname, "SRV-FISCAL")
+        self.assertEqual(agente.versao, "0.2.0")
+        self.assertTrue(agente.ativo)
+        self.assertEqual(agente.token_hash, AgenteLocalSysvar.hash_token(resp.data["token"]))
+        self.assertNotEqual(agente.token_hash, resp.data["token"])
+        ativacao.refresh_from_db()
+        self.assertEqual(ativacao.agente_id, agente.id)
+        self.assertIsNotNone(ativacao.usado_em)
+        self.assertEqual(self.client.post("/api/fiscal/agente-local/ativar/", {"codigo": codigo, "identificador": "AG-ATIVACAO"}, format="json").status_code, 400)
+
+    def test_codigo_expirado_revogado_inexistente_e_payload_incompleto_sao_rejeitados(self):
+        expirado, codigo_expirado = AtivacaoAgenteLocalSysvar.criar(empresa=self.empresa, criado_por=self.user_admin)
+        expirado.expira_em = timezone.now() - timedelta(minutes=1)
+        expirado.save(update_fields=["expira_em"])
+        revogado, codigo_revogado = AtivacaoAgenteLocalSysvar.criar(empresa=self.empresa, criado_por=self.user_admin)
+        revogado.revogado_em = timezone.now()
+        revogado.save(update_fields=["revogado_em"])
+        self.client.force_authenticate(user=None)
+        for payload in (
+            {"codigo": codigo_expirado, "identificador": "AG-EXP"},
+            {"codigo": codigo_revogado, "identificador": "AG-REV"},
+            {"codigo": "AAAA-BBBB-CCCC", "identificador": "AG-INV"},
+            {"codigo": codigo_revogado},
+        ):
+            resp = self.client.post("/api/fiscal/agente-local/ativar/", payload, format="json")
+            self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_ativacao_renova_agente_existente_da_mesma_empresa_e_reativa_inativo(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Antigo", ativo=False)
+        token_antigo = agente.gerar_token()
+        ativacao, codigo = AtivacaoAgenteLocalSysvar.criar(empresa=self.empresa, criado_por=self.user_admin)
+        self.client.force_authenticate(user=None)
+        resp = self.client.post(
+            "/api/fiscal/agente-local/ativar/",
+            {"codigo": codigo, "identificador": "AG-1", "nome": "Novo", "hostname": "HOST-NOVO", "versao": "0.2.0"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        agente.refresh_from_db()
+        self.assertTrue(agente.ativo)
+        self.assertEqual(agente.nome, "Novo")
+        self.assertEqual(agente.hostname, "HOST-NOVO")
+        self.assertNotEqual(AgenteLocalSysvar.hash_token(token_antigo), agente.token_hash)
+        self.assertEqual(AgenteLocalSysvar.objects.filter(identificador="AG-1").count(), 1)
+
+    def test_mesmo_identificador_em_outra_empresa_nao_migra_empresa(self):
+        AgenteLocalSysvar.objects.create(empresa=self.empresa_b, identificador="AG-COMPARTILHADO", nome="Outra")
+        ativacao, codigo = AtivacaoAgenteLocalSysvar.criar(empresa=self.empresa, criado_por=self.user_admin)
+        self.client.force_authenticate(user=None)
+        resp = self.client.post("/api/fiscal/agente-local/ativar/", {"codigo": codigo, "identificador": "AG-COMPARTILHADO"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(AgenteLocalSysvar.objects.filter(empresa=self.empresa, identificador="AG-COMPARTILHADO").exists())
+        self.assertTrue(AgenteLocalSysvar.objects.filter(empresa=self.empresa_b, identificador="AG-COMPARTILHADO").exists())
 
     def test_autenticacao_token_valido_invalido_inativo_e_rotacao(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
