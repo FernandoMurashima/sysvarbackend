@@ -105,7 +105,7 @@ begin
     Log('Sysvar Local Agent uninstall/install: service exists; stopping if possible.');
     if FileExists(AgentExe()) then begin
       Log('Sysvar Local Agent uninstall/install: AgentExe exists at ' + AgentExe());
-      ExecAgentAdmin('stop --wait 30');
+      ExecAgentAdmin('--wait 30 stop');
     end else begin
       Log('Sysvar Local Agent uninstall/install: AgentExe missing; using sc.exe stop.');
       ExecHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName());

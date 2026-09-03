@@ -581,7 +581,8 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertIn("InstallOrUpdateService", content)
         self.assertIn("RemoveServiceRobust", content)
         self.assertIn("RemoveOk := ExecAgentAdmin('remove')", content)
-        self.assertIn("ExecAgentAdmin('stop --wait 30')", content)
+        self.assertIn("ExecAgentAdmin('--wait 30 stop')", content)
+        self.assertNotIn("stop --wait 30", content)
         self.assertNotIn("sc create", content.lower())
 
     def test_installer_uninstall_chama_remove_no_initialize_uninstall(self):
