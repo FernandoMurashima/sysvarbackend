@@ -92,6 +92,8 @@ Abra o PowerShell como Administrador e execute:
 
 O nome técnico é `SysvarLocalAgent` e o nome exibido é `Sysvar Local Agent`. A instalação configura inicialização automática. Após instalar, o serviço pode ser visto em `services.msc` como `Sysvar Local Agent`.
 
+Durante `install` e `update`, o agente prepara automaticamente o host do pywin32 para que `pythonservice.exe` encontre as DLLs necessárias do Python e do pywin32 dentro do ambiente do agente. Não copie `python312.dll` manualmente, não altere `System32` e não dependa do `PATH` do usuário.
+
 Se preferir um `config.json` fora da pasta do agente, defina `SYSVAR_AGENT_CONFIG` no ambiente do serviço apontando para o caminho absoluto do arquivo. Não coloque token em argumentos de linha de comando.
 
 Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.

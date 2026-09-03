@@ -374,7 +374,7 @@ class ScannerRunnerTests(unittest.TestCase):
 
         fake_util = Mock()
         argv = ["windows_service.py", "install"]
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service.sys, "argv", argv):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "auto", "install"])
         fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
@@ -384,10 +384,106 @@ class ScannerRunnerTests(unittest.TestCase):
 
         fake_util = Mock()
         argv = ["windows_service.py", "--startup", "delayed", "install"]
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service.sys, "argv", argv):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "delayed", "install"])
         fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+
+    def test_windows_service_localiza_pythonservice_e_dll_runtime(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root / "pythonservice.exe"
+            dll = root / "PythonBase" / f"python{service.sys.version_info.major}{service.sys.version_info.minor}.dll"
+            host.write_text("host", encoding="utf-8")
+            dll.parent.mkdir()
+            dll.write_text("dll", encoding="utf-8")
+            with patch.object(service.sys, "prefix", str(root)), patch.object(service.sys, "base_prefix", str(dll.parent)), patch.object(service.shutil, "which", return_value=None):
+                self.assertEqual(service.locate_pythonservice_exe(), host)
+                self.assertEqual(service.locate_python_runtime_dll(), dll)
+
+    def test_windows_service_prepara_runtime_copiando_dlls_necessarias(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root / "venv" / "pythonservice.exe"
+            host.parent.mkdir()
+            host.write_text("host", encoding="utf-8")
+            dll = root / "PythonBase" / f"python{service.sys.version_info.major}{service.sys.version_info.minor}.dll"
+            py3 = root / "PythonBase" / f"python{service.sys.version_info.major}.dll"
+            pywin = root / "site-packages" / f"pywintypes{service.sys.version_info.major}{service.sys.version_info.minor}.dll"
+            pycom = root / "site-packages" / f"pythoncom{service.sys.version_info.major}{service.sys.version_info.minor}.dll"
+            for file_path in (dll, py3, pywin, pycom):
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(file_path.name, encoding="utf-8")
+            fake_pywintypes = Mock(__file__=str(pywin))
+            fake_pythoncom = Mock(__file__=str(pycom))
+            with patch.object(service.sys, "prefix", str(host.parent)), patch.object(service.sys, "base_prefix", str(dll.parent)), patch.object(service.sys, "executable", str(host.parent / "Scripts" / "python.exe")), patch.object(service, "pywintypes", fake_pywintypes), patch.object(service, "pythoncom", fake_pythoncom), patch.object(service.shutil, "which", return_value=None):
+                prepared = service.prepare_windows_service_runtime()
+            self.assertEqual(prepared["host"], host)
+            self.assertTrue((host.parent / dll.name).exists())
+            self.assertTrue((host.parent / py3.name).exists())
+            self.assertTrue((host.parent / pywin.name).exists())
+            self.assertTrue((host.parent / pycom.name).exists())
+
+    def test_windows_service_preparo_nao_copia_quando_ja_esta_correto(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root / "pythonservice.exe"
+            dll = root / f"python{service.sys.version_info.major}{service.sys.version_info.minor}.dll"
+            host.write_text("host", encoding="utf-8")
+            dll.write_text("dll", encoding="utf-8")
+            with patch.object(service, "locate_pythonservice_exe", return_value=host), patch.object(service, "locate_python_runtime_dll", return_value=dll), patch.object(service, "locate_python_support_dlls", return_value=[]), patch.object(service, "locate_pywin32_runtime_dlls", return_value=[]), patch.object(service.shutil, "copy2") as copy_mock:
+                service.prepare_windows_service_runtime()
+            copy_mock.assert_not_called()
+
+    def test_windows_service_erro_claro_quando_runtime_nao_e_localizado(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(service.sys, "prefix", str(root)), patch.object(service.sys, "base_prefix", str(root)), patch.object(service.sys, "executable", str(root / "python.exe")), patch.object(service.shutil, "which", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "pythonservice.exe"):
+                    service.locate_pythonservice_exe()
+                host = root / "pythonservice.exe"
+                host.write_text("host", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "DLL principal"):
+                    service.locate_python_runtime_dll()
+
+    def test_windows_service_install_e_update_preparam_antes_do_handle(self):
+        import sysvar_agent.windows_service as service
+
+        calls = []
+        fake_util = Mock()
+        fake_util.HandleCommandLine.side_effect = lambda *_: calls.append("handle")
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service.sys, "argv", ["windows_service.py", "install"]):
+            service.main()
+        self.assertEqual(calls, ["prepare", "handle"])
+        calls.clear()
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service.sys, "argv", ["windows_service.py", "update"]):
+            service.main()
+        self.assertEqual(calls, ["prepare", "handle"])
+
+    def test_windows_service_start_stop_restart_debug_nao_preparam_runtime(self):
+        import sysvar_agent.windows_service as service
+
+        for command in ("start", "stop", "restart", "debug"):
+            fake_util = Mock()
+            with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime") as prepare_mock, patch.object(service.sys, "argv", ["windows_service.py", command]):
+                service.main()
+            prepare_mock.assert_not_called()
+
+    def test_windows_service_preparo_nao_registra_token(self):
+        import sysvar_agent.windows_service as service
+
+        with patch.object(service, "locate_pythonservice_exe", side_effect=RuntimeError("pythonservice.exe não encontrado")):
+            with self.assertRaises(RuntimeError) as exc:
+                service.prepare_windows_service_runtime()
+        self.assertNotIn("TOKEN_SUPER_SECRETO", str(exc.exception))
 
 
 if __name__ == "__main__":
