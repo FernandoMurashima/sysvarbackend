@@ -369,6 +369,26 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertTrue(hasattr(service, "run_agent"))
         self.assertFalse(hasattr(service.SysvarLocalAgentService, "scanner"))
 
+    def test_windows_service_install_insere_startup_auto_antes_do_comando(self):
+        import sysvar_agent.windows_service as service
+
+        fake_util = Mock()
+        argv = ["windows_service.py", "install"]
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service.sys, "argv", argv):
+            service.main()
+        self.assertEqual(argv, ["windows_service.py", "--startup", "auto", "install"])
+        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+
+    def test_windows_service_startup_explicito_nao_e_modificado(self):
+        import sysvar_agent.windows_service as service
+
+        fake_util = Mock()
+        argv = ["windows_service.py", "--startup", "delayed", "install"]
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service.sys, "argv", argv):
+            service.main()
+        self.assertEqual(argv, ["windows_service.py", "--startup", "delayed", "install"])
+        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,9 +66,18 @@ else:
 def main():
     if win32serviceutil is None:
         raise RuntimeError("pywin32 não está instalado. Instale as dependências do local_agent antes de registrar o serviço.")
-    if len(sys.argv) >= 2 and sys.argv[1].lower() == "install" and "--startup" not in sys.argv:
-        sys.argv.extend(["--startup", "auto"])
+    _ensure_default_startup_auto(sys.argv)
     win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
+
+
+def _ensure_default_startup_auto(argv):
+    if "--startup" in argv:
+        return argv
+    install_index = next((idx for idx, arg in enumerate(argv[1:], start=1) if arg.lower() == "install"), None)
+    if install_index is None:
+        return argv
+    argv[install_index:install_index] = ["--startup", "auto"]
+    return argv
 
 
 if __name__ == "__main__":
