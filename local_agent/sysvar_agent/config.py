@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 DEFAULT_CONFIG = "config.json"
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConfigError(ValueError):
@@ -36,10 +37,13 @@ class AgentConfig:
 
 def load_config(path=DEFAULT_CONFIG) -> AgentConfig:
     config_path = Path(path)
+    if not config_path.is_absolute():
+        config_path = (Path.cwd() / config_path).resolve()
     data = {}
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
+    if not config_path.exists():
+        raise ConfigError(f"Arquivo de configuração não encontrado: {config_path}")
+    with config_path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
 
     token = os.environ.get("SYSVAR_AGENT_TOKEN") or data.get("token")
     cfg = AgentConfig(
@@ -49,8 +53,8 @@ def load_config(path=DEFAULT_CONFIG) -> AgentConfig:
         heartbeat_interval_seconds=int(data.get("heartbeat_interval_seconds", 60)),
         request_timeout_seconds=int(data.get("request_timeout_seconds", 15)),
         min_file_age_seconds=int(data.get("min_file_age_seconds", 3)),
-        database_path=str(data.get("database_path") or "data/agent.db"),
-        log_file=str(data.get("log_file") or "logs/sysvar-agent.log"),
+        database_path=str(_resolve_local_path(data.get("database_path") or "data/agent.db", config_path)),
+        log_file=str(_resolve_local_path(data.get("log_file") or "logs/sysvar-agent.log", config_path)),
     )
     validate_config(cfg)
     return cfg
@@ -64,3 +68,14 @@ def validate_config(config: AgentConfig):
     for field in ("poll_interval_seconds", "heartbeat_interval_seconds", "request_timeout_seconds", "min_file_age_seconds"):
         if int(getattr(config, field)) <= 0:
             raise ConfigError(f"{field} deve ser positivo.")
+
+
+def default_config_path():
+    return PACKAGE_ROOT / DEFAULT_CONFIG
+
+
+def _resolve_local_path(value, config_path):
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (config_path.parent / path).resolve()

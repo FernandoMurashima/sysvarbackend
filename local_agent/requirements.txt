@@ -1,1 +1,2 @@
 requests>=2.31,<3
+pywin32>=306; platform_system=="Windows"

@@ -36,7 +36,7 @@ Também é possível informar o token por variável de ambiente. Quando existir,
 $env:SYSVAR_AGENT_TOKEN="TOKEN_GERADO"
 ```
 
-## Execução
+## Execução de Desenvolvimento
 
 Executar um ciclo e encerrar:
 
@@ -65,3 +65,39 @@ O agente autentica com `Authorization: Agent <TOKEN>`, busca configurações em 
 Quando encontra uma NF-e, extrai metadados com `xml.etree.ElementTree` e envia para `/api/fiscal/agente-local/xml-detectado/`. Respostas `created=true` e `created=false` significam sucesso e marcam a chave como enviada na fila local.
 
 Falhas transitórias de internet/backend preservam a fila e usam backoff simples. Erros 400 são registrados como erro sem retry infinito.
+
+## Windows Service
+
+O serviço usa o mesmo núcleo do agente de desenvolvimento: configuração, cliente HTTP, fila SQLite, scanner e runner. Não depende de Django e não abre console.
+
+Instale as dependências no venv do agente:
+
+```powershell
+cd local_agent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Crie `config.json` em `local_agent\config.json`. Caminhos relativos como `data/agent.db` e `logs/sysvar-agent.log` são resolvidos a partir da pasta do `config.json`, não do diretório corrente do processo.
+
+Abra o PowerShell como Administrador e execute:
+
+```powershell
+.\.venv\Scripts\python.exe -m sysvar_agent.windows_service install
+.\.venv\Scripts\python.exe -m sysvar_agent.windows_service start
+.\.venv\Scripts\python.exe -m sysvar_agent.windows_service stop
+.\.venv\Scripts\python.exe -m sysvar_agent.windows_service restart
+.\.venv\Scripts\python.exe -m sysvar_agent.windows_service remove
+```
+
+O nome técnico é `SysvarLocalAgent` e o nome exibido é `Sysvar Local Agent`. A instalação configura inicialização automática. Após instalar, o serviço pode ser visto em `services.msc` como `Sysvar Local Agent`.
+
+Se preferir um `config.json` fora da pasta do agente, defina `SYSVAR_AGENT_CONFIG` no ambiente do serviço apontando para o caminho absoluto do arquivo. Não coloque token em argumentos de linha de comando.
+
+Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.
+
+Ao receber parada do Windows, o serviço sinaliza encerramento limpo, deixa o loop terminar, fecha a conexão SQLite e preserva `data/agent.db`, logs e configuração.
+
+### Diretórios de Rede
+
+Serviços Windows executados como LocalSystem normalmente não enxergam letras de unidade mapeadas do usuário, como `X:\XML`. Pastas locais como `C:\Sysvar\XML\Fornecedores` devem funcionar. Para rede, uma etapa futura deve usar caminhos UNC, como `\\servidor\compartilhamento\XML`, e conta de serviço com permissão apropriada.

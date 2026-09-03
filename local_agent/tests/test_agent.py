@@ -1,6 +1,8 @@
 import json
 import os
+import runpy
 import tempfile
+import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -11,6 +13,7 @@ import requests
 
 from sysvar_agent.api_client import AuthApiError, NonRetryableApiError, SysvarApiClient, TransientApiError
 from sysvar_agent.config import ConfigError, load_config
+from sysvar_agent.host import run_agent
 from sysvar_agent.nfe_parser import NFeParseError, parse_nfe_file
 from sysvar_agent.queue import AgentQueue
 from sysvar_agent.runner import AgentRunner
@@ -68,6 +71,25 @@ class ConfigTests(unittest.TestCase):
             path.write_text(json.dumps({"api_base_url": "http://localhost:8000"}), encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(path)
+
+    def test_config_ausente_gera_erro_controlado_e_caminhos_relativos_usam_pasta_do_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "agent"
+            config_dir.mkdir()
+            path = config_dir / "config.json"
+            path.write_text(json.dumps({"api_base_url": "http://localhost:8000", "token": "segredo"}), encoding="utf-8")
+            other_cwd = Path(tmp) / "cwd"
+            other_cwd.mkdir()
+            current = Path.cwd()
+            try:
+                os.chdir(other_cwd)
+                cfg = load_config(path)
+            finally:
+                os.chdir(current)
+            self.assertEqual(Path(cfg.database_path), config_dir / "data" / "agent.db")
+            self.assertEqual(Path(cfg.log_file), config_dir / "logs" / "sysvar-agent.log")
+            with self.assertRaises(ConfigError):
+                load_config(config_dir / "missing.json")
 
 
 class ParserTests(unittest.TestCase):
@@ -293,6 +315,35 @@ class ScannerRunnerTests(unittest.TestCase):
             self.assertEqual(q.get_by_chave("55260822345678000195550010000001234567890123")["status"], "ERRO")
             q.close()
 
+    def test_runner_stop_event_interrompe_sem_esperar_poll_interval(self):
+        q = Mock()
+        config = Mock(min_file_age_seconds=1, heartbeat_interval_seconds=60, poll_interval_seconds=30)
+        api = Mock()
+        runner = AgentRunner(config, api, q)
+        runner.run_once = Mock(side_effect=lambda: stop_event.set())
+        stop_event = threading.Event()
+        started = time.time()
+        runner.run_forever(stop_event=stop_event)
+        self.assertLess(time.time() - started, 2)
+        runner.run_once.assert_called_once()
+
+    def test_host_fecha_fila_no_encerramento(self):
+        fake_queue = Mock()
+        fake_runner = Mock()
+        with patch("sysvar_agent.host.load_config") as load_config_mock, patch("sysvar_agent.host.configure_logging"), patch("sysvar_agent.host.AgentQueue", return_value=fake_queue), patch("sysvar_agent.host.SysvarApiClient"), patch("sysvar_agent.host.AgentRunner", return_value=fake_runner):
+            load_config_mock.return_value = Mock(api_base_url="http://sysvar", token="token", request_timeout_seconds=1, database_path="agent.db", log_file="agent.log")
+            run_agent(config_path="config.json", once=True)
+        fake_runner.run_once.assert_called_once()
+        fake_queue.close.assert_called_once()
+
+    def test_main_once_e_continuo_usam_host_sem_quebrar_cli(self):
+        with patch("sysvar_agent.host.run_agent") as run_mock, patch("sys.argv", ["sysvar_agent", "--config", "cfg.json", "--once"]):
+            runpy.run_module("sysvar_agent.__main__", run_name="__main__")
+        run_mock.assert_called_once_with(config_path="cfg.json", once=True)
+        with patch("sysvar_agent.host.run_agent") as run_mock, patch("sys.argv", ["sysvar_agent", "--config", "cfg.json"]):
+            runpy.run_module("sysvar_agent.__main__", run_name="__main__")
+        run_mock.assert_called_once_with(config_path="cfg.json", once=False)
+
     def test_runner_401_403_preserva_fila_com_backoff(self):
         with tempfile.TemporaryDirectory() as tmp:
             q = AgentQueue(Path(tmp) / "agent.db")
@@ -309,6 +360,14 @@ class ScannerRunnerTests(unittest.TestCase):
             self.assertIsNotNone(row["proxima_tentativa"])
             self.assertEqual(q.due_items(), [])
             q.close()
+
+    def test_windows_service_importavel_e_reaproveita_host(self):
+        import sysvar_agent.windows_service as service
+
+        self.assertEqual(service.SERVICE_NAME, "SysvarLocalAgent")
+        self.assertEqual(service.SERVICE_DISPLAY_NAME, "Sysvar Local Agent")
+        self.assertTrue(hasattr(service, "run_agent"))
+        self.assertFalse(hasattr(service.SysvarLocalAgentService, "scanner"))
 
 
 if __name__ == "__main__":

@@ -28,10 +28,13 @@ class AgentRunner:
         self.scanner.scan(self.configuracoes)
         self.flush_queue()
 
-    def run_forever(self):
-        while True:
+    def run_forever(self, stop_event=None):
+        while not _should_stop(stop_event):
             self.run_once()
-            time.sleep(self.config.poll_interval_seconds)
+            if stop_event is not None:
+                stop_event.wait(self.config.poll_interval_seconds)
+            else:
+                time.sleep(self.config.poll_interval_seconds)
 
     def refresh_configuracoes(self):
         now = time.time()
@@ -80,3 +83,7 @@ class AgentRunner:
 def _mask(chave):
     chave = str(chave or "")
     return f"{chave[:6]}...{chave[-4:]}" if len(chave) > 10 else "***"
+
+
+def _should_stop(stop_event):
+    return bool(stop_event is not None and stop_event.is_set())
