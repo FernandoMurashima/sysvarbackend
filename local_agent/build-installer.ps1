@@ -15,17 +15,22 @@ $Candidates = @(
     "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 5\ISCC.exe"
 ) | Where-Object { $_ -and (Test-Path $_) }
+$Candidates = @($Candidates)
 
 $Command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 if ($Command) {
-    $Candidates = @($Command.Source) + $Candidates
+    $Candidates = @($Command.Source) + @($Candidates)
 }
+$Candidates = @($Candidates)
 
 if (-not $Candidates) {
     throw "Inno Setup Compiler (ISCC.exe) não encontrado. Instale o Inno Setup para gerar o Setup.exe."
 }
 
 $Iscc = $Candidates[0]
+if (-not $Iscc -or -not (Test-Path $Iscc)) {
+    throw "Caminho inválido para Inno Setup Compiler (ISCC.exe): $Iscc"
+}
 & $Iscc $Iss
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
