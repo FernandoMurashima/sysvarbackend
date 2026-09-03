@@ -579,9 +579,27 @@ class ScannerRunnerTests(unittest.TestCase):
 
         self.assertIn("SysvarLocalAgent.exe", content)
         self.assertIn("InstallOrUpdateService", content)
-        self.assertIn("ExecAgentWithConfig('remove')", content)
+        self.assertIn("RemoveServiceRobust", content)
+        self.assertIn("RemoveOk := ExecAgentWithConfig('remove')", content)
         self.assertIn("ExecAgentWithConfig('stop --wait 30')", content)
         self.assertNotIn("sc create", content.lower())
+
+    def test_installer_uninstall_tem_fallback_sc_delete(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("DeleteServiceWithSc", content)
+        self.assertIn("'delete ' + ServiceName()", content)
+        self.assertIn("(not RemoveOk) or ServiceExists()", content)
+        self.assertIn("RaiseException('Falha ao remover o serviço Sysvar Local Agent", content)
+
+    def test_installer_uninstall_aguarda_servico_sumir(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("function WaitServiceMissing()", content)
+        self.assertIn("for I := 1 to 30 do", content)
+        self.assertIn("Sleep(1000)", content)
 
     def test_installer_output_ignorado_pelo_git(self):
         ignore = Path(__file__).resolve().parents[1] / ".gitignore"

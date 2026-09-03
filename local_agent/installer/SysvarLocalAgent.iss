@@ -51,11 +51,16 @@ begin
   Result := ExpandConstant('{commonappdata}\Sysvar\LocalAgent\config.json');
 end;
 
+function ExecHiddenCode(FileName: String; Params: String; var ResultCode: Integer): Boolean;
+begin
+  Result := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
 function ExecHidden(FileName: String; Params: String): Boolean;
 var
   ResultCode: Integer;
 begin
-  Result := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  Result := ExecHiddenCode(FileName, Params, ResultCode);
 end;
 
 function ExecAgentWithConfig(Command: String): Boolean;
@@ -88,6 +93,49 @@ begin
       ExecAgentWithConfig('stop --wait 30');
     end else begin
       ExecHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName());
+    end;
+  end;
+end;
+
+function WaitServiceMissing(): Boolean;
+var
+  I: Integer;
+begin
+  for I := 1 to 30 do begin
+    if not ServiceExists() then begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(1000);
+  end;
+  Result := not ServiceExists();
+end;
+
+function DeleteServiceWithSc(): Boolean;
+begin
+  ExecHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName());
+  Result := WaitServiceMissing();
+end;
+
+procedure RemoveServiceRobust();
+var
+  RemoveOk: Boolean;
+begin
+  if not ServiceExists() then begin
+    Exit;
+  end;
+
+  StopServiceIfPossible();
+  RemoveOk := False;
+
+  if FileExists(AgentExe()) then begin
+    RemoveOk := ExecAgentWithConfig('remove');
+  end;
+
+  if (not RemoveOk) or ServiceExists() then begin
+    Log('SysvarLocalAgent.exe remove failed or service still exists; trying sc.exe delete.');
+    if not DeleteServiceWithSc() then begin
+      RaiseException('Falha ao remover o serviço Sysvar Local Agent. Feche services.msc/processos relacionados e tente novamente.');
     end;
   end;
 end;
@@ -126,12 +174,6 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
-    if FileExists(AgentExe()) then begin
-      ExecAgentWithConfig('stop --wait 30');
-      ExecAgentWithConfig('remove');
-    end else begin
-      ExecHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName());
-      ExecHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName());
-    end;
+    RemoveServiceRobust();
   end;
 end;
