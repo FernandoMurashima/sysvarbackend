@@ -38,6 +38,31 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 
+def is_frozen():
+    return bool(getattr(sys, "frozen", False))
+
+
+def configure_service_host():
+    if is_frozen():
+        SysvarLocalAgentService._exe_name_ = sys.executable
+        SysvarLocalAgentService._exe_args_ = ""
+        return {"host": Path(sys.executable).resolve(), "mode": "frozen"}
+    SysvarLocalAgentService._exe_name_ = None
+    SysvarLocalAgentService._exe_args_ = None
+    runtime = prepare_windows_service_runtime()
+    configure_pythonservice_path(runtime["host"])
+    validate_service_host_imports()
+    return {"host": runtime["host"], "mode": "python"}
+
+
+def run_frozen_service():
+    if servicemanager is None:
+        raise RuntimeError("pywin32 não está disponível no executável do serviço.")
+    servicemanager.Initialize()
+    servicemanager.PrepareToHostSingle(SysvarLocalAgentService)
+    servicemanager.StartServiceCtrlDispatcher()
+
+
 def service_config_path():
     persisted = persisted_service_config_path()
     if persisted:
@@ -83,15 +108,16 @@ sys.modules.setdefault(PYTHON_MODULE, sys.modules[__name__])
 def main():
     if win32serviceutil is None:
         raise RuntimeError("pywin32 não está instalado. Instale as dependências do local_agent antes de registrar o serviço.")
+    if is_frozen() and len(sys.argv) == 1:
+        run_frozen_service()
+        return
     command = service_command(sys.argv)
     _ensure_default_startup_auto(sys.argv)
     config_path = None
     if command in {"install", "update"}:
         config_path = install_config_path(command)
     if _command_requires_runtime_prepare(sys.argv):
-        runtime = prepare_windows_service_runtime()
-        configure_pythonservice_path(runtime["host"])
-        validate_service_host_imports()
+        configure_service_host()
     win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
     if config_path:
         persist_service_config_path(config_path)

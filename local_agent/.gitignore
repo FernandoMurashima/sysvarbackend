@@ -1,5 +1,7 @@
 config.json
 data/
 logs/
+build/
+dist/
 __pycache__/
 .pytest_cache/

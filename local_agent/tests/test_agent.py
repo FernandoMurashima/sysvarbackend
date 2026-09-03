@@ -393,6 +393,82 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertEqual(argv, ["windows_service.py", "--startup", "delayed", "install"])
         fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
 
+    def test_windows_service_detecta_modo_frozen(self):
+        import sysvar_agent.windows_service as service
+
+        with patch.object(service.sys, "frozen", True, create=True):
+            self.assertTrue(service.is_frozen())
+        with patch.object(service.sys, "frozen", False, create=True):
+            self.assertFalse(service.is_frozen())
+
+    def test_windows_service_frozen_nao_prepara_runtime_python(self):
+        import sysvar_agent.windows_service as service
+
+        fake_exe = str(Path("dist") / "SysvarLocalAgent" / "SysvarLocalAgent.exe")
+        with patch.object(service.sys, "frozen", True, create=True), patch.object(service.sys, "executable", fake_exe), patch.object(service, "prepare_windows_service_runtime") as prepare_mock, patch.object(service, "configure_pythonservice_path") as pth_mock, patch.object(service, "validate_service_host_imports") as validate_mock:
+            configured = service.configure_service_host()
+        self.assertEqual(configured["mode"], "frozen")
+        self.assertEqual(service.SysvarLocalAgentService._exe_name_, fake_exe)
+        self.assertEqual(service.SysvarLocalAgentService._exe_args_, "")
+        prepare_mock.assert_not_called()
+        pth_mock.assert_not_called()
+        validate_mock.assert_not_called()
+
+    def test_windows_service_frozen_install_nao_depende_de_prefix_site_packages(self):
+        import sysvar_agent.windows_service as service
+
+        fake_util = Mock()
+        argv = ["SysvarLocalAgent.exe", "install"]
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "dist" / "SysvarLocalAgent" / "SysvarLocalAgent.exe"
+            exe.parent.mkdir(parents=True)
+            exe.write_text("exe", encoding="utf-8")
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text("{}", encoding="utf-8")
+            with patch.object(service, "win32serviceutil", fake_util), patch.object(service.sys, "frozen", True, create=True), patch.object(service.sys, "executable", str(exe)), patch.object(service.sys, "prefix", str(Path(tmp) / "venv")), patch.object(service, "development_config_path", return_value=config_path), patch.object(service, "prepare_windows_service_runtime") as prepare_mock, patch.object(service, "configure_pythonservice_path") as pth_mock, patch.object(service, "validate_service_host_imports"), patch.object(service.sys, "argv", argv), patch.dict(os.environ, {}, clear=True):
+                service.main()
+        self.assertEqual(argv, ["SysvarLocalAgent.exe", "--startup", "auto", "install"])
+        self.assertEqual(service.SysvarLocalAgentService._exe_name_, str(exe))
+        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+        fake_util.SetServiceCustomOption.assert_called_once_with(service.SERVICE_NAME, service.CONFIG_OPTION, str(config_path.resolve()))
+        prepare_mock.assert_not_called()
+        pth_mock.assert_not_called()
+
+    def test_windows_service_frozen_sem_args_inicia_dispatcher(self):
+        import sysvar_agent.windows_service as service
+
+        fake_manager = Mock()
+        with patch.object(service.sys, "frozen", True, create=True), patch.object(service.sys, "argv", ["SysvarLocalAgent.exe"]), patch.object(service, "servicemanager", fake_manager), patch.object(service, "win32serviceutil", Mock()):
+            service.main()
+        fake_manager.Initialize.assert_called_once_with()
+        fake_manager.PrepareToHostSingle.assert_called_once_with(service.SysvarLocalAgentService)
+        fake_manager.StartServiceCtrlDispatcher.assert_called_once_with()
+
+    def test_windows_service_comandos_suportados_reconhecidos(self):
+        import sysvar_agent.windows_service as service
+
+        for command in ("install", "update", "start", "stop", "restart", "remove", "debug"):
+            self.assertEqual(service.service_command(["SysvarLocalAgent.exe", command]), command)
+
+    def test_windows_service_build_spec_nao_empacota_dados_locais(self):
+        spec = Path(__file__).resolve().parents[1] / "SysvarLocalAgent.spec"
+        content = spec.read_text(encoding="utf-8")
+
+        self.assertIn("servicemanager", content)
+        self.assertIn("win32serviceutil", content)
+        self.assertIn("pywintypes", content)
+        self.assertIn("pythoncom", content)
+        self.assertIn("datas=[]", content)
+        self.assertNotIn("config.json", content)
+        self.assertNotIn("agent.db", content)
+        self.assertNotIn("sysvar-agent.log", content)
+        self.assertNotIn("TOKEN_SUPER_SECRETO", content)
+
+    def test_service_entry_chama_windows_service_main(self):
+        import sysvar_agent.service_entry as entry
+
+        self.assertTrue(callable(entry.main))
+
     def test_windows_service_service_config_path_prioriza_registro(self):
         import sysvar_agent.windows_service as service
 

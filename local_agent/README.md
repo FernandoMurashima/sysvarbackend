@@ -2,7 +2,7 @@
 
 Agente local para detectar XML de NF-e em pastas do cliente e registrar somente metadados no Sysvar via API HTTP. O XML original é lido apenas localmente e nunca é enviado ao backend.
 
-## Requisitos
+## Requisitos de Desenvolvimento
 
 - Python 3.10+
 - Acesso ao backend Sysvar
@@ -71,6 +71,8 @@ Falhas transitórias de internet/backend preservam a fila e usam backoff simples
 
 O serviço usa o mesmo núcleo do agente de desenvolvimento: configuração, cliente HTTP, fila SQLite, scanner e runner. Não depende de Django e não abre console.
 
+### Desenvolvimento com Python
+
 Instale as dependências no venv do agente:
 
 ```powershell
@@ -99,6 +101,28 @@ Durante `install` e `update`, o agente valida `local_agent\config.json` e grava 
 Durante `install` e `update`, o agente prepara automaticamente o host do pywin32 para que `pythonservice.exe` encontre as DLLs necessárias do Python e do pywin32 dentro do ambiente do agente. Ele também gera `pythonservice._pth` ao lado do host com os caminhos do venv necessários para `site-packages`, `win32`, `win32\lib` e `pythonwin`. Não copie `python312.dll` manualmente, não edite o Registry manualmente, não altere `System32` e não dependa do diretório corrente, do `PATH` ou do `PYTHONPATH` do usuário.
 
 Se preferir um `config.json` fora da pasta do agente, defina `SYSVAR_AGENT_CONFIG` antes de executar `install` ou `update`; o caminho absoluto será validado e persistido no serviço. Não coloque token em argumentos de linha de comando.
+
+### Distribuição Standalone
+
+A distribuição de homologação é gerada com PyInstaller em modo `onedir`:
+
+```powershell
+cd local_agent
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\build.ps1
+```
+
+O executável final fica em `local_agent\dist\SysvarLocalAgent\SysvarLocalAgent.exe`. Ele deve ser chamado por caminho absoluto ou a partir da pasta `dist\SysvarLocalAgent`:
+
+```powershell
+.\dist\SysvarLocalAgent\SysvarLocalAgent.exe install
+.\dist\SysvarLocalAgent\SysvarLocalAgent.exe start
+.\dist\SysvarLocalAgent\SysvarLocalAgent.exe stop
+.\dist\SysvarLocalAgent\SysvarLocalAgent.exe restart
+.\dist\SysvarLocalAgent\SysvarLocalAgent.exe remove
+```
+
+No modo standalone, o serviço usa o próprio `SysvarLocalAgent.exe` como host. Ele não chama `python.exe`, `pip`, `.venv`, `pythonservice.exe` externo nem `pythonservice._pth`. `config.json`, token, `data\agent.db`, logs e XMLs continuam externos ao executável.
 
 Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.
 
