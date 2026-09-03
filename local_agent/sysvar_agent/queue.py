@@ -34,6 +34,7 @@ class AgentQueue:
                 mtime REAL NOT NULL,
                 payload_json TEXT NOT NULL,
                 status TEXT NOT NULL,
+                retryable INTEGER NOT NULL DEFAULT 1,
                 tentativas INTEGER NOT NULL DEFAULT 0,
                 ultimo_erro TEXT NOT NULL DEFAULT '',
                 proxima_tentativa TEXT,
@@ -42,6 +43,9 @@ class AgentQueue:
             )
             """
         )
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(fila_envio)").fetchall()}
+        if "retryable" not in columns:
+            self.conn.execute("ALTER TABLE fila_envio ADD COLUMN retryable INTEGER NOT NULL DEFAULT 1")
         self.conn.commit()
 
     def enqueue(self, configuracao_id, caminho_local, chave_acesso, tamanho, mtime, payload):
@@ -50,11 +54,12 @@ class AgentQueue:
         if existing and existing["status"] == "ENVIADO":
             return False
         if existing:
+            if int(existing["tamanho"]) == int(tamanho) and float(existing["mtime"]) == float(mtime):
+                return False
             self.conn.execute(
                 """
                 UPDATE fila_envio
-                   SET configuracao_id=?, caminho_local=?, tamanho=?, mtime=?, payload_json=?, status='PENDENTE',
-                       ultimo_erro='', proxima_tentativa=NULL, atualizado_em=?
+                   SET configuracao_id=?, caminho_local=?, tamanho=?, mtime=?, payload_json=?, atualizado_em=?
                  WHERE chave_acesso=?
                 """,
                 (configuracao_id, caminho_local, tamanho, mtime, json.dumps(payload), now, chave_acesso),
@@ -63,8 +68,8 @@ class AgentQueue:
             self.conn.execute(
                 """
                 INSERT INTO fila_envio
-                (configuracao_id, caminho_local, chave_acesso, tamanho, mtime, payload_json, status, criado_em, atualizado_em)
-                VALUES (?, ?, ?, ?, ?, ?, 'PENDENTE', ?, ?)
+                (configuracao_id, caminho_local, chave_acesso, tamanho, mtime, payload_json, status, retryable, criado_em, atualizado_em)
+                VALUES (?, ?, ?, ?, ?, ?, 'PENDENTE', 1, ?, ?)
                 """,
                 (configuracao_id, caminho_local, chave_acesso, tamanho, mtime, json.dumps(payload), now, now),
             )
@@ -81,13 +86,18 @@ class AgentQueue:
     def due_items(self):
         now = utcnow().isoformat()
         return self.conn.execute(
-            "SELECT * FROM fila_envio WHERE status IN ('PENDENTE', 'ERRO') AND (proxima_tentativa IS NULL OR proxima_tentativa <= ?) ORDER BY id",
+            """
+            SELECT * FROM fila_envio
+             WHERE status = 'PENDENTE'
+                OR (status = 'ERRO' AND retryable = 1 AND proxima_tentativa IS NOT NULL AND proxima_tentativa <= ?)
+             ORDER BY id
+            """,
             (now,),
         ).fetchall()
 
     def mark_sent(self, item_id):
         self.conn.execute(
-            "UPDATE fila_envio SET status='ENVIADO', ultimo_erro='', atualizado_em=? WHERE id=?",
+            "UPDATE fila_envio SET status='ENVIADO', retryable=0, ultimo_erro='', atualizado_em=? WHERE id=?",
             (utcnow().isoformat(), item_id),
         )
         self.conn.commit()
@@ -99,10 +109,10 @@ class AgentQueue:
         if retry:
             proxima = (utcnow() + timedelta(seconds=delay)).isoformat()
         else:
-            proxima = "9999-12-31T23:59:59+00:00"
+            proxima = None
         self.conn.execute(
-            "UPDATE fila_envio SET status='ERRO', tentativas=?, ultimo_erro=?, proxima_tentativa=?, atualizado_em=? WHERE id=?",
-            (tentativas, str(message)[:500], proxima, utcnow().isoformat(), item_id),
+            "UPDATE fila_envio SET status='ERRO', retryable=?, tentativas=?, ultimo_erro=?, proxima_tentativa=?, atualizado_em=? WHERE id=?",
+            (1 if retry else 0, tentativas, str(message)[:500], proxima, utcnow().isoformat(), item_id),
         )
         self.conn.commit()
         return proxima

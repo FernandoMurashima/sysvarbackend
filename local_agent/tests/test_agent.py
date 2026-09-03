@@ -3,12 +3,13 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import requests
 
-from sysvar_agent.api_client import NonRetryableApiError, SysvarApiClient, TransientApiError
+from sysvar_agent.api_client import AuthApiError, NonRetryableApiError, SysvarApiClient, TransientApiError
 from sysvar_agent.config import ConfigError, load_config
 from sysvar_agent.nfe_parser import NFeParseError, parse_nfe_file
 from sysvar_agent.queue import AgentQueue
@@ -149,6 +150,77 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(q.get_by_chave(CHAVE)["status"], "ENVIADO")
             q.close()
 
+    def test_reenfileirar_pendente_nao_duplica(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = AgentQueue(Path(tmp) / "agent.db")
+            payload = {"chave_acesso": CHAVE}
+            self.assertTrue(q.enqueue(1, "a.xml", CHAVE, 10, 1.0, payload))
+            self.assertFalse(q.enqueue(1, "a.xml", CHAVE, 10, 1.0, payload))
+            self.assertEqual(q.conn.execute("SELECT COUNT(*) FROM fila_envio").fetchone()[0], 1)
+            self.assertEqual(q.get_by_chave(CHAVE)["status"], "PENDENTE")
+            q.close()
+
+    def test_backoff_transitorio_due_items_e_persistencia(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "agent.db"
+            q = AgentQueue(db)
+            q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE})
+            item = q.get_by_chave(CHAVE)
+            first_due = q.mark_error(item["id"], "offline", retry=True)
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["tentativas"], 1)
+            self.assertEqual(row["proxima_tentativa"], first_due)
+            self.assertEqual(q.due_items(), [])
+            self.assertFalse(q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE}))
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["tentativas"], 1)
+            self.assertEqual(row["proxima_tentativa"], first_due)
+            past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            q.conn.execute("UPDATE fila_envio SET proxima_tentativa=? WHERE chave_acesso=?", (past, CHAVE))
+            q.conn.commit()
+            self.assertEqual(len(q.due_items()), 1)
+            q.mark_error(row["id"], "offline de novo", retry=True)
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["tentativas"], 2)
+            self.assertGreater(datetime.fromisoformat(row["proxima_tentativa"]), datetime.now(timezone.utc) + timedelta(seconds=100))
+            q.close()
+            q = AgentQueue(db)
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["tentativas"], 2)
+            self.assertIsNotNone(row["proxima_tentativa"])
+            q.close()
+
+    def test_erro_definitivo_nao_volta_para_pendente_ao_reenfileirar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = AgentQueue(Path(tmp) / "agent.db")
+            q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE})
+            item = q.get_by_chave(CHAVE)
+            q.mark_error(item["id"], "HTTP 400", retry=False)
+            self.assertEqual(q.due_items(), [])
+            self.assertFalse(q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE}))
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["retryable"], 0)
+            self.assertIsNone(row["proxima_tentativa"])
+            q.close()
+
+    def test_arquivo_alterado_atualiza_payload_sem_apagar_politica_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = AgentQueue(Path(tmp) / "agent.db")
+            q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE, "numero": "1"})
+            item = q.get_by_chave(CHAVE)
+            proxima = q.mark_error(item["id"], "offline", retry=True)
+            self.assertTrue(q.enqueue(1, "a.xml", CHAVE, 11, 2.0, {"chave_acesso": CHAVE, "numero": "2"}))
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["tentativas"], 1)
+            self.assertEqual(row["proxima_tentativa"], proxima)
+            self.assertEqual(json.loads(row["payload_json"])["numero"], "2")
+            self.assertNotIn("<NFe", row["payload_json"])
+            q.close()
+
 
 class ScannerRunnerTests(unittest.TestCase):
     def test_pasta_inexistente_nao_derruba(self):
@@ -174,6 +246,32 @@ class ScannerRunnerTests(unittest.TestCase):
             self.assertEqual(scanner.scan([{"id": 1, "caminho_local": str(folder)}]), 0)
             q.close()
 
+    def test_scanner_preserva_backoff_e_erro_definitivo_ao_reencontrar_xml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "xmls"
+            folder.mkdir()
+            xml = folder / "nfe.xml"
+            xml.write_text(nfe_xml(), encoding="utf-8")
+            old = time.time() - 10
+            os.utime(xml, (old, old))
+            q = AgentQueue(Path(tmp) / "agent.db")
+            scanner = DirectoryScanner(q, min_file_age_seconds=1)
+            scanner.scan([{"id": 1, "caminho_local": str(folder)}])
+            item = q.get_by_chave(CHAVE)
+            proxima = q.mark_error(item["id"], "offline", retry=True)
+            scanner.scan([{"id": 1, "caminho_local": str(folder)}])
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["tentativas"], 1)
+            self.assertEqual(row["proxima_tentativa"], proxima)
+            q.mark_error(row["id"], "HTTP 400", retry=False)
+            scanner.scan([{"id": 1, "caminho_local": str(folder)}])
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["retryable"], 0)
+            self.assertEqual(q.due_items(), [])
+            q.close()
+
     def test_runner_created_true_false_marcam_enviado_e_falha_transitoria_preserva_fila(self):
         with tempfile.TemporaryDirectory() as tmp:
             q = AgentQueue(Path(tmp) / "agent.db")
@@ -193,6 +291,23 @@ class ScannerRunnerTests(unittest.TestCase):
             api.enviar_xml_detectado.side_effect = TransientApiError("offline")
             runner.flush_queue()
             self.assertEqual(q.get_by_chave("55260822345678000195550010000001234567890123")["status"], "ERRO")
+            q.close()
+
+    def test_runner_401_403_preserva_fila_com_backoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = AgentQueue(Path(tmp) / "agent.db")
+            q.enqueue(1, "a.xml", CHAVE, 10, 1.0, {"chave_acesso": CHAVE})
+            config = Mock(min_file_age_seconds=1, heartbeat_interval_seconds=60, poll_interval_seconds=1)
+            api = Mock()
+            api.enviar_xml_detectado.side_effect = AuthApiError("Autenticação recusada")
+            runner = AgentRunner(config, api, q)
+            runner.flush_queue()
+            row = q.get_by_chave(CHAVE)
+            self.assertEqual(row["status"], "ERRO")
+            self.assertEqual(row["retryable"], 1)
+            self.assertEqual(row["tentativas"], 1)
+            self.assertIsNotNone(row["proxima_tentativa"])
+            self.assertEqual(q.due_items(), [])
             q.close()
 
 
