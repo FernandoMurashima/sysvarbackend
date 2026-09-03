@@ -51,6 +51,14 @@ begin
   Result := ExpandConstant('{commonappdata}\Sysvar\LocalAgent\config.json');
 end;
 
+function BoolText(Value: Boolean): String;
+begin
+  if Value then
+    Result := 'true'
+  else
+    Result := 'false';
+end;
+
 function ExecHiddenCode(FileName: String; Params: String; var ResultCode: Integer): Boolean;
 begin
   Result := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
@@ -71,6 +79,11 @@ begin
   );
 end;
 
+function ExecAgentAdmin(Command: String): Boolean;
+begin
+  Result := ExecHidden(AgentExe(), Command);
+end;
+
 function ServiceExists(): Boolean;
 begin
   Result := ExecHidden(ExpandConstant('{sys}\sc.exe'), 'query ' + ServiceName());
@@ -89,9 +102,12 @@ begin
   if ServiceExists() then begin
     HadService := True;
     WasServiceRunning := ServiceRunning();
+    Log('Sysvar Local Agent uninstall/install: service exists; stopping if possible.');
     if FileExists(AgentExe()) then begin
-      ExecAgentWithConfig('stop --wait 30');
+      Log('Sysvar Local Agent uninstall/install: AgentExe exists at ' + AgentExe());
+      ExecAgentAdmin('stop --wait 30');
     end else begin
+      Log('Sysvar Local Agent uninstall/install: AgentExe missing; using sc.exe stop.');
       ExecHidden(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName());
     end;
   end;
@@ -113,6 +129,7 @@ end;
 
 function DeleteServiceWithSc(): Boolean;
 begin
+  Log('Sysvar Local Agent uninstall: using fallback sc.exe delete.');
   ExecHidden(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName());
   Result := WaitServiceMissing();
 end;
@@ -122,14 +139,21 @@ var
   RemoveOk: Boolean;
 begin
   if not ServiceExists() then begin
+    Log('Sysvar Local Agent uninstall: service already absent.');
     Exit;
   end;
 
+  Log('Sysvar Local Agent uninstall: starting service removal.');
+  Log('Sysvar Local Agent uninstall: AgentExe=' + AgentExe());
+  Log('Sysvar Local Agent uninstall: FileExists(AgentExe)=' + BoolText(FileExists(AgentExe())));
   StopServiceIfPossible();
   RemoveOk := False;
 
   if FileExists(AgentExe()) then begin
-    RemoveOk := ExecAgentWithConfig('remove');
+    RemoveOk := ExecAgentAdmin('remove');
+    Log('Sysvar Local Agent uninstall: SysvarLocalAgent.exe remove result=' + BoolText(RemoveOk));
+  end else begin
+    Log('Sysvar Local Agent uninstall: AgentExe missing before remove command.');
   end;
 
   if (not RemoveOk) or ServiceExists() then begin
@@ -138,6 +162,7 @@ begin
       RaiseException('Falha ao remover o serviço Sysvar Local Agent. Feche services.msc/processos relacionados e tente novamente.');
     end;
   end;
+  Log('Sysvar Local Agent uninstall: service removal confirmed.');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -171,9 +196,17 @@ begin
   end;
 end;
 
+function InitializeUninstall(): Boolean;
+begin
+  Log('Sysvar Local Agent uninstall: InitializeUninstall started.');
+  RemoveServiceRobust();
+  Result := True;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then begin
+    Log('Sysvar Local Agent uninstall: usUninstall verification started.');
     RemoveServiceRobust();
   end;
 end;

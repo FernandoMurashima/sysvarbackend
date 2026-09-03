@@ -580,9 +580,17 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertIn("SysvarLocalAgent.exe", content)
         self.assertIn("InstallOrUpdateService", content)
         self.assertIn("RemoveServiceRobust", content)
-        self.assertIn("RemoveOk := ExecAgentWithConfig('remove')", content)
-        self.assertIn("ExecAgentWithConfig('stop --wait 30')", content)
+        self.assertIn("RemoveOk := ExecAgentAdmin('remove')", content)
+        self.assertIn("ExecAgentAdmin('stop --wait 30')", content)
         self.assertNotIn("sc create", content.lower())
+
+    def test_installer_uninstall_chama_remove_no_initialize_uninstall(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("function InitializeUninstall(): Boolean", content)
+        self.assertIn("RemoveServiceRobust();", content)
+        self.assertIn("Result := True;", content)
 
     def test_installer_uninstall_tem_fallback_sc_delete(self):
         installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
@@ -600,6 +608,16 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertIn("function WaitServiceMissing()", content)
         self.assertIn("for I := 1 to 30 do", content)
         self.assertIn("Sleep(1000)", content)
+
+    def test_installer_uninstall_tem_logs_de_homologacao(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("InitializeUninstall started", content)
+        self.assertIn("AgentExe=", content)
+        self.assertIn("FileExists(AgentExe)=", content)
+        self.assertIn("SysvarLocalAgent.exe remove result=", content)
+        self.assertIn("service removal confirmed", content)
 
     def test_installer_output_ignorado_pelo_git(self):
         ignore = Path(__file__).resolve().parents[1] / ".gitignore"
