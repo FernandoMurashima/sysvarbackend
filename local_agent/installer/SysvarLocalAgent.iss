@@ -37,6 +37,7 @@ var
   WasServiceRunning: Boolean;
   ActivationPage: TInputQueryWizardPage;
   ConfigValidBeforeInstall: Boolean;
+  ConfigValidBeforeInstallChecked: Boolean;
 
 function SetEnvironmentVariable(lpName: String; lpValue: String): Boolean;
 external 'SetEnvironmentVariableW@kernel32.dll stdcall';
@@ -224,9 +225,19 @@ begin
   Result := FileExists(AgentExe()) and FileExists(AgentConfig()) and ConfigAllowsStart();
 end;
 
+function ConfigValidBeforeInstallValue(): Boolean;
+begin
+  if not ConfigValidBeforeInstallChecked then begin
+    ConfigValidBeforeInstall := ExistingConfigAllowsStart();
+    ConfigValidBeforeInstallChecked := True;
+  end;
+  Result := ConfigValidBeforeInstall;
+end;
+
 procedure InitializeWizard();
 begin
-  ConfigValidBeforeInstall := ExistingConfigAllowsStart();
+  ConfigValidBeforeInstall := False;
+  ConfigValidBeforeInstallChecked := False;
   ActivationPage := CreateInputQueryPage(
     wpSelectDir,
     'Ativação do Sysvar Local Agent',
@@ -238,7 +249,7 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (ActivationPage <> nil) and (PageID = ActivationPage.ID) and ConfigValidBeforeInstall;
+  Result := (ActivationPage <> nil) and (PageID = ActivationPage.ID) and ConfigValidBeforeInstallValue();
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

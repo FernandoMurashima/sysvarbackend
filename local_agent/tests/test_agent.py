@@ -706,11 +706,15 @@ class ScannerRunnerTests(unittest.TestCase):
     def test_installer_pula_ativacao_com_config_existente_valido(self):
         installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
         content = installer.read_text(encoding="utf-8")
+        initialize_wizard = content[content.index("procedure InitializeWizard") : content.index("function ShouldSkipPage")]
 
+        self.assertNotIn("ConfigValidBeforeInstall := ExistingConfigAllowsStart();", initialize_wizard)
+        self.assertNotIn("AgentExe()", initialize_wizard)
+        self.assertIn("function ConfigValidBeforeInstallValue", content)
         self.assertIn("ConfigValidBeforeInstall := ExistingConfigAllowsStart();", content)
         self.assertIn("function ShouldSkipPage", content)
         self.assertIn("PageID = ActivationPage.ID", content)
-        self.assertIn("ConfigValidBeforeInstall", content)
+        self.assertIn("ConfigValidBeforeInstallValue()", content)
         self.assertIn("FileExists(AgentExe()) and FileExists(AgentConfig()) and ConfigAllowsStart()", content)
 
     def test_installer_ativacao_usa_env_sem_command_line_e_limpa_codigo(self):
