@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import threading
 import tempfile
 from pathlib import Path
@@ -80,8 +81,9 @@ def main():
         raise RuntimeError("pywin32 não está instalado. Instale as dependências do local_agent antes de registrar o serviço.")
     _ensure_default_startup_auto(sys.argv)
     if _command_requires_runtime_prepare(sys.argv):
-        prepare_windows_service_runtime()
-        ensure_package_importable_for_service_host()
+        runtime = prepare_windows_service_runtime()
+        configure_pythonservice_path(runtime["host"])
+        validate_service_host_imports()
     win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
 
 
@@ -113,15 +115,64 @@ def prepare_windows_service_runtime():
 
 
 def ensure_package_importable_for_service_host():
+    return validate_service_host_imports()
+
+
+def configure_pythonservice_path(host=None):
+    host = host or locate_pythonservice_exe()
+    paths = service_python_paths()
+    write_pythonservice_pth(host, paths)
+    return paths
+
+
+def service_python_paths():
+    site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+    stdlib = Path(sysconfig.get_path("stdlib") or Path(sys.base_prefix) / "Lib")
+    dlls = Path(sys.base_prefix) / "DLLs"
+    paths = [
+        stdlib,
+        dlls,
+        site_packages,
+        site_packages / "win32",
+        site_packages / "win32" / "lib",
+        site_packages / "pythonwin",
+    ]
+    return [path.resolve() for path in paths if path.exists()]
+
+
+def write_pythonservice_pth(host, paths):
+    pth = host.with_name("pythonservice._pth")
+    lines = [str(path) for path in paths]
+    lines.append("import site")
+    content = "\n".join(lines) + "\n"
+    if not pth.exists() or pth.read_text(encoding="utf-8") != content:
+        pth.write_text(content, encoding="utf-8")
+    return pth
+
+
+def validate_service_host_imports():
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    paths_literal = repr([str(path) for path in service_python_paths()])
+    modules = [
+        "servicemanager",
+        "win32service",
+        "win32serviceutil",
+        "win32event",
+        "pywintypes",
+        "pythoncom",
+        PYTHON_MODULE,
+    ]
+    modules_literal = repr(modules)
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(
             [
                 sys.executable,
                 "-c",
                 (
-                    "import importlib; "
+                    "import importlib, sys; "
+                    f"sys.path[:] = {paths_literal}; "
+                    f"[importlib.import_module(name) for name in {modules_literal}]; "
                     f"mod = importlib.import_module('{PYTHON_MODULE}'); "
                     f"assert getattr(mod, 'PYTHON_CLASS') == '{PYTHON_CLASS}'; "
                     f"assert '\\\\' not in '{PYTHON_CLASS}'"
@@ -136,7 +187,7 @@ def ensure_package_importable_for_service_host():
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()[:500]
         raise RuntimeError(
-            "Pacote sysvar_agent não está importável pelo Python do serviço. "
+            "Ambiente Python do serviço não consegue importar sysvar_agent/pywin32. "
             "Execute no diretório local_agent: python -m pip install . "
             f"Detalhe: {detail}"
         )
