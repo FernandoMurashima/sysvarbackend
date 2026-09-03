@@ -380,7 +380,7 @@ class ScannerRunnerTests(unittest.TestCase):
         with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "install_config_path", return_value=str(Path("config.json").resolve())), patch.object(service, "persist_service_config_path"), patch.object(service, "prepare_windows_service_runtime", return_value={"host": Path("pythonservice.exe")}), patch.object(service, "configure_pythonservice_path"), patch.object(service, "validate_service_host_imports"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "auto", "install"])
-        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+        self.assertEqual(fake_util.HandleCommandLine.call_args.args[0], service.SysvarLocalAgentService)
         self.assertEqual(service.SysvarLocalAgentService.__module__, "sysvar_agent.windows_service")
 
     def test_windows_service_startup_explicito_nao_e_modificado(self):
@@ -391,7 +391,7 @@ class ScannerRunnerTests(unittest.TestCase):
         with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "install_config_path", return_value=str(Path("config.json").resolve())), patch.object(service, "persist_service_config_path"), patch.object(service, "prepare_windows_service_runtime", return_value={"host": Path("pythonservice.exe")}), patch.object(service, "configure_pythonservice_path"), patch.object(service, "validate_service_host_imports"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "delayed", "install"])
-        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+        self.assertEqual(fake_util.HandleCommandLine.call_args.args[0], service.SysvarLocalAgentService)
 
     def test_windows_service_detecta_modo_frozen(self):
         import sysvar_agent.windows_service as service
@@ -418,6 +418,7 @@ class ScannerRunnerTests(unittest.TestCase):
         import sysvar_agent.windows_service as service
 
         fake_util = Mock()
+        fake_util.HandleCommandLine.side_effect = lambda *args, **kwargs: kwargs["customOptionHandler"]([])
         argv = ["SysvarLocalAgent.exe", "install"]
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "dist" / "SysvarLocalAgent" / "SysvarLocalAgent.exe"
@@ -429,7 +430,7 @@ class ScannerRunnerTests(unittest.TestCase):
                 service.main()
         self.assertEqual(argv, ["SysvarLocalAgent.exe", "--startup", "auto", "install"])
         self.assertEqual(service.SysvarLocalAgentService._exe_name_, str(exe))
-        fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+        self.assertEqual(fake_util.HandleCommandLine.call_args.args[0], service.SysvarLocalAgentService)
         fake_util.SetServiceCustomOption.assert_called_once_with(service.SERVICE_NAME, service.CONFIG_OPTION, str(config_path.resolve()))
         prepare_mock.assert_not_called()
         pth_mock.assert_not_called()
@@ -447,7 +448,7 @@ class ScannerRunnerTests(unittest.TestCase):
     def test_windows_service_comandos_suportados_reconhecidos(self):
         import sysvar_agent.windows_service as service
 
-        for command in ("install", "update", "start", "stop", "restart", "remove", "debug"):
+        for command in ("install", "update", "start", "stop", "restart", "remove", "debug", "config-ok"):
             self.assertEqual(service.service_command(["SysvarLocalAgent.exe", command]), command)
 
     def test_windows_service_build_spec_nao_empacota_dados_locais(self):
@@ -468,6 +469,90 @@ class ScannerRunnerTests(unittest.TestCase):
         import sysvar_agent.service_entry as entry
 
         self.assertTrue(callable(entry.main))
+
+    def test_windows_service_config_ok_rejeita_placeholder(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "COLOQUE_O_TOKEN_AQUI"}), encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertFalse(service.config_allows_service_start(config_path))
+            config_path.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "TOKEN_VALIDO"}), encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertTrue(service.config_allows_service_start(config_path))
+
+    def test_windows_service_persiste_config_dentro_do_handle(self):
+        import sysvar_agent.windows_service as service
+
+        fake_util = Mock()
+        fake_util.HandleCommandLine.side_effect = lambda *args, **kwargs: kwargs["customOptionHandler"]([])
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text("{}", encoding="utf-8")
+            with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", return_value={"host": Path("pythonservice.exe")}), patch.object(service, "configure_pythonservice_path"), patch.object(service, "validate_service_host_imports"), patch.object(service, "development_config_path", return_value=config_path), patch.object(service.sys, "argv", ["windows_service.py", "install"]), patch.dict(os.environ, {}, clear=True):
+                service.main()
+        handler = fake_util.HandleCommandLine.call_args.kwargs["customOptionHandler"]
+        self.assertTrue(callable(handler))
+        fake_util.SetServiceCustomOption.assert_called_once()
+
+    def test_installer_define_program_files_programdata_e_configpath(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("DefaultDirName={autopf}\\Sysvar\\LocalAgent", content)
+        self.assertIn("{commonappdata}\\Sysvar\\LocalAgent", content)
+        self.assertIn("SYSVAR_AGENT_CONFIG=", content)
+        self.assertIn("ExecAgentWithConfig('install')", content)
+
+    def test_installer_preserva_config_fila_logs_e_programdata(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("onlyifdoesntexist uninsneveruninstall", content)
+        self.assertIn("data\"; Permissions: system-full admins-full; Flags: uninsneveruninstall", content)
+        self.assertIn("logs\"; Permissions: system-full admins-full; Flags: uninsneveruninstall", content)
+        self.assertNotIn("agent.db", content)
+        self.assertNotIn("sysvar-agent.log", content)
+
+    def test_installer_nao_inclui_token_real_e_sem_atalhos(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertNotIn("TOKEN_SUPER_SECRETO", content)
+        self.assertNotIn("[Icons]", content)
+        self.assertNotIn("Desktop", content)
+
+    def test_installer_appid_versao_output_e_x64(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("AppId={{F9E9B7A5-7B45-4C1C-8F2F-6E8310E0200A}}", content)
+        self.assertIn('#define MyAppVersion "0.2.0"', content)
+        self.assertIn("ArchitecturesAllowed=x64compatible", content)
+        self.assertIn("OutputBaseFilename=SysvarLocalAgent-Setup-{#MyAppVersion}", content)
+
+    def test_installer_servico_usa_exe_e_uninstall_remove_servico(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("SysvarLocalAgent.exe", content)
+        self.assertIn("InstallOrUpdateService", content)
+        self.assertIn("ExecAgentWithConfig('remove')", content)
+        self.assertIn("ExecAgentWithConfig('stop --wait 30')", content)
+        self.assertNotIn("sc create", content.lower())
+
+    def test_installer_output_ignorado_pelo_git(self):
+        ignore = Path(__file__).resolve().parents[1] / ".gitignore"
+        self.assertIn("installer/output/", ignore.read_text(encoding="utf-8"))
+
+    def test_build_installer_valida_dist_e_localiza_iscc(self):
+        script = Path(__file__).resolve().parents[1] / "build-installer.ps1"
+        content = script.read_text(encoding="utf-8")
+
+        self.assertIn("dist\\SysvarLocalAgent\\SysvarLocalAgent.exe", content)
+        self.assertIn("ISCC.exe", content)
+        self.assertIn("SysvarLocalAgent-Setup-0.2.0.exe", content)
 
     def test_windows_service_service_config_path_prioriza_registro(self):
         import sysvar_agent.windows_service as service
@@ -497,6 +582,7 @@ class ScannerRunnerTests(unittest.TestCase):
         import sysvar_agent.windows_service as service
 
         fake_util = Mock()
+        fake_util.HandleCommandLine.side_effect = lambda *args, **kwargs: kwargs["customOptionHandler"]([])
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"
             config_path.write_text("{}", encoding="utf-8")
@@ -629,7 +715,7 @@ class ScannerRunnerTests(unittest.TestCase):
 
         calls = []
         fake_util = Mock()
-        fake_util.HandleCommandLine.side_effect = lambda *_: calls.append("handle")
+        fake_util.HandleCommandLine.side_effect = lambda *args, **kwargs: calls.append("handle") or kwargs["customOptionHandler"]([])
         with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "install_config_path", side_effect=lambda *_: calls.append("config") or str(Path("config.json").resolve())), patch.object(service, "persist_service_config_path", side_effect=lambda *_: calls.append("persist")), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare") or {"host": Path("pythonservice.exe")}), patch.object(service, "configure_pythonservice_path", side_effect=lambda *_: calls.append("paths")), patch.object(service, "validate_service_host_imports", side_effect=lambda: calls.append("imports")), patch.object(service.sys, "argv", ["windows_service.py", "install"]):
             service.main()
         self.assertEqual(calls, ["config", "prepare", "paths", "imports", "handle", "persist"])
@@ -688,6 +774,7 @@ class ScannerRunnerTests(unittest.TestCase):
         import sysvar_agent.windows_service as service
 
         fake_util = Mock()
+        fake_util.HandleCommandLine.side_effect = lambda *args, **kwargs: kwargs["customOptionHandler"]([])
         calls = []
         with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "install_config_path", side_effect=lambda *_: calls.append("config") or str(Path("config.json").resolve())), patch.object(service, "persist_service_config_path", side_effect=lambda *_: calls.append("persist")), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("runtime") or {"host": Path("pythonservice.exe")}), patch.object(service, "configure_pythonservice_path", side_effect=lambda *_: calls.append("paths")), patch.object(service, "validate_service_host_imports", side_effect=lambda: calls.append("imports")), patch.object(service.sys, "argv", ["windows_service.py", "install"]):
             service.main()

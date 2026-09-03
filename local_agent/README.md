@@ -124,6 +124,20 @@ O executável final fica em `local_agent\dist\SysvarLocalAgent\SysvarLocalAgent.
 
 No modo standalone, o serviço usa o próprio `SysvarLocalAgent.exe` como host. Ele não chama `python.exe`, `pip`, `.venv`, `pythonservice.exe` externo nem `pythonservice._pth`. `config.json`, token, `data\agent.db`, logs e XMLs continuam externos ao executável.
 
+### Instalador Windows
+
+O instalador é gerado com Inno Setup a partir da distribuição `onedir` já criada:
+
+```powershell
+cd local_agent
+.\build.ps1
+.\build-installer.ps1
+```
+
+O Setup instala os binários em `C:\Program Files\Sysvar\LocalAgent` e cria dados persistentes em `C:\ProgramData\Sysvar\LocalAgent`. Na primeira instalação, `config.example.json` é copiado para `C:\ProgramData\Sysvar\LocalAgent\config.json` somente se o arquivo ainda não existir. Em upgrade, reinstalação e desinstalação padrão, `config.json`, `data\agent.db` e `logs\` são preservados.
+
+Durante a instalação, o Setup executa `SysvarLocalAgent.exe install` com `SYSVAR_AGENT_CONFIG` apontando para `C:\ProgramData\Sysvar\LocalAgent\config.json`, deixando o `ConfigPath` persistido no serviço. Se o arquivo ainda estiver com token placeholder, o serviço é registrado, mas não é iniciado automaticamente. Se a configuração já estiver válida, o serviço pode ser iniciado após instalação ou upgrade.
+
 Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.
 
 Ao receber parada do Windows, o serviço sinaliza encerramento limpo, deixa o loop terminar, fecha a conexão SQLite e preserva `data/agent.db`, logs e configuração.

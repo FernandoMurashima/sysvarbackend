@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from .config import DEFAULT_CONFIG, ConfigError, default_config_path
+from .config import load_config
 from .host import run_agent
 
 
@@ -18,6 +19,7 @@ SERVICE_DESCRIPTION = "Serviço local de integração do Sysvar para detecção 
 PYTHON_MODULE = "sysvar_agent.windows_service"
 PYTHON_CLASS = f"{PYTHON_MODULE}.SysvarLocalAgentService"
 CONFIG_OPTION = "ConfigPath"
+PLACEHOLDER_TOKEN = "COLOQUE_O_TOKEN_AQUI"
 
 try:
     import servicemanager
@@ -112,15 +114,16 @@ def main():
         run_frozen_service()
         return
     command = service_command(sys.argv)
+    if command == "config-ok":
+        raise SystemExit(0 if config_allows_service_start() else 1)
     _ensure_default_startup_auto(sys.argv)
     config_path = None
     if command in {"install", "update"}:
         config_path = install_config_path(command)
     if _command_requires_runtime_prepare(sys.argv):
         configure_service_host()
-    win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
-    if config_path:
-        persist_service_config_path(config_path)
+    handler = config_option_handler(config_path) if config_path else None
+    win32serviceutil.HandleCommandLine(SysvarLocalAgentService, customOptionHandler=handler)
 
 
 def _ensure_default_startup_auto(argv):
@@ -138,8 +141,23 @@ def _command_requires_runtime_prepare(argv):
 
 
 def service_command(argv):
-    commands = {"install", "update", "start", "stop", "restart", "remove", "debug"}
+    commands = {"install", "update", "start", "stop", "restart", "remove", "debug", "config-ok"}
     return next((arg.lower() for arg in argv[1:] if arg.lower() in commands), None)
+
+
+def config_option_handler(path):
+    def handler(_opts):
+        persist_service_config_path(path)
+
+    return handler
+
+
+def config_allows_service_start(path=None):
+    try:
+        cfg = load_config(path or service_config_path())
+    except Exception:
+        return False
+    return bool(cfg.api_base_url and cfg.token and cfg.token != PLACEHOLDER_TOKEN)
 
 
 def persisted_service_config_path():

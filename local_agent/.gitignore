@@ -3,5 +3,6 @@ data/
 logs/
 build/
 dist/
+installer/output/
 __pycache__/
 .pytest_cache/
