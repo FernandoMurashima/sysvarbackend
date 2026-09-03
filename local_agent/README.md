@@ -37,6 +37,23 @@ Também é possível informar o token por variável de ambiente. Quando existir,
 $env:SYSVAR_AGENT_TOKEN="TOKEN_GERADO"
 ```
 
+## Ativação por Código
+
+Com `api_base_url` configurado, o executável pode trocar um código temporário por um token definitivo sem edição manual do JSON:
+
+```powershell
+.\SysvarLocalAgent.exe activate
+```
+
+O comando usa o mesmo `config.json` do serviço, solicita o código de ativação no console e grava automaticamente o token retornado pelo Sysvar. O código temporário não é salvo e o token não é exibido. Se `identificador` ainda não existir no config, ele é criado uma única vez e preservado para reativações futuras.
+
+Para automação controlada, também é possível fornecer o código por variável de ambiente:
+
+```powershell
+$env:SYSVAR_AGENT_ACTIVATION_CODE="XXXX-XXXX-XXXX"
+.\SysvarLocalAgent.exe activate
+```
+
 ## Execução de Desenvolvimento
 
 Executar um ciclo e encerrar:

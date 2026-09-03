@@ -1,6 +1,7 @@
 {
   "api_base_url": "http://127.0.0.1:8000",
   "token": "COLOQUE_O_TOKEN_AQUI",
+  "identificador": "",
   "poll_interval_seconds": 15,
   "heartbeat_interval_seconds": 60,
   "request_timeout_seconds": 15,

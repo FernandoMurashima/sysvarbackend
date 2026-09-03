@@ -8,8 +8,10 @@ import threading
 import tempfile
 from pathlib import Path
 
+from .activation import activate_agent
 from .config import DEFAULT_CONFIG, ConfigError, default_config_path
 from .config import load_config
+from .config import PLACEHOLDER_TOKEN
 from .host import run_agent
 
 
@@ -19,7 +21,6 @@ SERVICE_DESCRIPTION = "Serviço local de integração do Sysvar para detecção 
 PYTHON_MODULE = "sysvar_agent.windows_service"
 PYTHON_CLASS = f"{PYTHON_MODULE}.SysvarLocalAgentService"
 CONFIG_OPTION = "ConfigPath"
-PLACEHOLDER_TOKEN = "COLOQUE_O_TOKEN_AQUI"
 
 try:
     import servicemanager
@@ -108,12 +109,19 @@ sys.modules.setdefault(PYTHON_MODULE, sys.modules[__name__])
 
 
 def main():
+    command = service_command(sys.argv)
+    if command == "activate":
+        try:
+            activate_agent(service_config_path())
+        except Exception as exc:
+            print(f"Falha na ativação do Local Agent: {safe_config_error(exc)}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        return
     if win32serviceutil is None:
         raise RuntimeError("pywin32 não está instalado. Instale as dependências do local_agent antes de registrar o serviço.")
     if is_frozen() and len(sys.argv) == 1:
         run_frozen_service()
         return
-    command = service_command(sys.argv)
     if command == "config-ok":
         ok, _reason = config_start_status(diagnostics=True)
         raise SystemExit(0 if ok else 1)
@@ -142,7 +150,7 @@ def _command_requires_runtime_prepare(argv):
 
 
 def service_command(argv):
-    commands = {"install", "update", "start", "stop", "restart", "remove", "debug", "config-ok"}
+    commands = {"install", "update", "start", "stop", "restart", "remove", "debug", "config-ok", "activate"}
     return next((arg.lower() for arg in argv[1:] if arg.lower() in commands), None)
 
 

@@ -1,6 +1,7 @@
 import json
 import os
 import runpy
+import io
 import tempfile
 import threading
 import time
@@ -11,8 +12,8 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from sysvar_agent.api_client import AuthApiError, NonRetryableApiError, SysvarApiClient, TransientApiError
-from sysvar_agent.config import ConfigError, load_config
+from sysvar_agent.api_client import AuthApiError, NonRetryableApiError, SysvarActivationClient, SysvarApiClient, TransientApiError
+from sysvar_agent.config import ConfigError, load_activation_config, load_config
 from sysvar_agent.host import run_agent
 from sysvar_agent.nfe_parser import NFeParseError, parse_nfe_file
 from sysvar_agent.queue import AgentQueue
@@ -91,6 +92,19 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(config_dir / "missing.json")
 
+    def test_activate_le_config_com_placeholder_e_rejeita_api_base_url_ausente(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps({"api_base_url": "http://localhost:8000", "token": "COLOQUE_O_TOKEN_AQUI", "request_timeout_seconds": 9}), encoding="utf-8")
+            resolved, data, api_base_url, timeout = load_activation_config(path)
+            self.assertEqual(resolved, path)
+            self.assertEqual(data["token"], "COLOQUE_O_TOKEN_AQUI")
+            self.assertEqual(api_base_url, "http://localhost:8000")
+            self.assertEqual(timeout, 9)
+            path.write_text(json.dumps({"token": "COLOQUE_O_TOKEN_AQUI"}), encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_activation_config(path)
+
 
 class ParserTests(unittest.TestCase):
     def _write(self, text):
@@ -147,6 +161,33 @@ class ApiTests(unittest.TestCase):
         session.get.return_value = Response(status_code=400, data={"campo": "erro"})
         with self.assertRaises(NonRetryableApiError):
             client.get_configuracoes()
+
+    def test_activation_client_usa_endpoint_publico_sem_authorization_agent(self):
+        session = Mock()
+        session.headers = {}
+        session.post.return_value = Response(data={"token": "token-definitivo", "agente": 1})
+        client = SysvarActivationClient("http://sysvar/", 7, session=session)
+        self.assertEqual(client.activate({"codigo": "ABCD-EFGH-IJKL"})["token"], "token-definitivo")
+        self.assertNotIn("Authorization", session.headers)
+        session.post.assert_called_once_with("http://sysvar/api/fiscal/agente-local/ativar/", json={"codigo": "ABCD-EFGH-IJKL"}, timeout=7)
+
+    def test_activation_client_classifica_429_timeout_json_invalido_e_resposta_sem_token(self):
+        session = Mock()
+        session.headers = {}
+        client = SysvarActivationClient("http://sysvar", session=session)
+        session.post.return_value = Response(status_code=429)
+        with self.assertRaises(NonRetryableApiError):
+            client.activate({"codigo": "x"})
+        session.post.side_effect = requests.Timeout()
+        with self.assertRaises(TransientApiError):
+            client.activate({"codigo": "x"})
+        session.post.side_effect = None
+        session.post.return_value = Response(invalid_json=True)
+        with self.assertRaises(TransientApiError):
+            client.activate({"codigo": "x"})
+        session.post.return_value = Response(data={"agente": 1})
+        with self.assertRaises(NonRetryableApiError):
+            client.activate({"codigo": "x"})
 
 
 class QueueTests(unittest.TestCase):
@@ -448,8 +489,88 @@ class ScannerRunnerTests(unittest.TestCase):
     def test_windows_service_comandos_suportados_reconhecidos(self):
         import sysvar_agent.windows_service as service
 
-        for command in ("install", "update", "start", "stop", "restart", "remove", "debug", "config-ok"):
+        for command in ("install", "update", "start", "stop", "restart", "remove", "debug", "config-ok", "activate"):
             self.assertEqual(service.service_command(["SysvarLocalAgent.exe", command]), command)
+
+    def test_windows_service_activate_intercepta_antes_do_pywin32(self):
+        import sysvar_agent.windows_service as service
+
+        fake_util = Mock()
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "activate_agent") as activate_mock, patch.object(service, "service_config_path", return_value="config.json"), patch.object(service.sys, "argv", ["SysvarLocalAgent.exe", "activate"]):
+            service.main()
+        activate_mock.assert_called_once_with("config.json")
+        fake_util.HandleCommandLine.assert_not_called()
+
+    def test_activate_grava_token_identificador_e_preserva_campos_sem_expor_segredos(self):
+        import sysvar_agent.activation as activation
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SYSVAR_AGENT_ACTIVATION_CODE": "ABCD-EFGH-IJKL"}, clear=True):
+            path = Path(tmp) / "config.json"
+            original = {
+                "api_base_url": "http://sysvar",
+                "token": "COLOQUE_O_TOKEN_AQUI",
+                "poll_interval_seconds": 15,
+                "heartbeat_interval_seconds": 60,
+                "request_timeout_seconds": 7,
+                "min_file_age_seconds": 3,
+                "database_path": "data/agent.db",
+                "log_file": "logs/sysvar-agent.log",
+                "campo_futuro": {"preservar": True},
+            }
+            path.write_text(json.dumps(original), encoding="utf-8")
+            session = Mock()
+            session.headers = {}
+            session.post.return_value = Response(data={"token": "TOKEN-DEFINITIVO", "agente": 10})
+            out = io.StringIO()
+            with patch.object(activation.socket, "gethostname", return_value="HOST-ATIVACAO"):
+                activation.activate_agent(path, session=session, stdout=out)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["token"], "TOKEN-DEFINITIVO")
+            self.assertTrue(data["identificador"].startswith("SYSVAR-"))
+            self.assertEqual(data["campo_futuro"], original["campo_futuro"])
+            self.assertEqual(data["poll_interval_seconds"], 15)
+            self.assertNotIn("ABCD-EFGH-IJKL", path.read_text(encoding="utf-8"))
+            self.assertNotIn("TOKEN-DEFINITIVO", out.getvalue())
+            payload = session.post.call_args.kwargs["json"]
+            self.assertEqual(payload["codigo"], "ABCD-EFGH-IJKL")
+            self.assertEqual(payload["identificador"], data["identificador"])
+            self.assertEqual(payload["hostname"], "HOST-ATIVACAO")
+            self.assertIn("versao", payload)
+
+    def test_activate_reutiliza_identificador_e_so_substitui_token_apos_sucesso(self):
+        import sysvar_agent.activation as activation
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SYSVAR_AGENT_ACTIVATION_CODE": "MNOP-QRST-UVWX"}, clear=True):
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps({"api_base_url": "http://sysvar", "token": "TOKEN-ANTIGO", "identificador": "SYSVAR-EXISTENTE"}), encoding="utf-8")
+            session = Mock()
+            session.headers = {}
+            session.post.side_effect = [Response(status_code=400, data={"codigo": "inválido"}), Response(data={"token": "TOKEN-NOVO", "agente": 1})]
+            with self.assertRaises(NonRetryableApiError):
+                activation.activate_agent(path, session=session, stdout=io.StringIO())
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["token"], "TOKEN-ANTIGO")
+            activation.activate_agent(path, session=session, stdout=io.StringIO())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["token"], "TOKEN-NOVO")
+            self.assertEqual(data["identificador"], "SYSVAR-EXISTENTE")
+
+    def test_activate_resposta_sem_token_ou_json_invalido_nao_altera_config(self):
+        import sysvar_agent.activation as activation
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SYSVAR_AGENT_ACTIVATION_CODE": "ABCD-EFGH-IJKL"}, clear=True):
+            path = Path(tmp) / "config.json"
+            original = {"api_base_url": "http://sysvar", "token": "TOKEN-ANTIGO", "identificador": "SYSVAR-EXISTENTE"}
+            path.write_text(json.dumps(original), encoding="utf-8")
+            session = Mock()
+            session.headers = {}
+            session.post.return_value = Response(data={"agente": 1})
+            with self.assertRaises(NonRetryableApiError):
+                activation.activate_agent(path, session=session, stdout=io.StringIO())
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
+            session.post.return_value = Response(invalid_json=True)
+            with self.assertRaises(TransientApiError):
+                activation.activate_agent(path, session=session, stdout=io.StringIO())
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
 
     def test_windows_service_build_spec_nao_empacota_dados_locais(self):
         spec = Path(__file__).resolve().parents[1] / "SysvarLocalAgent.spec"
