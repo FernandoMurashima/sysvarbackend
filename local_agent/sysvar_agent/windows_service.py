@@ -8,7 +8,7 @@ import threading
 import tempfile
 from pathlib import Path
 
-from .config import default_config_path
+from .config import DEFAULT_CONFIG, ConfigError, default_config_path
 from .host import run_agent
 
 
@@ -17,6 +17,7 @@ SERVICE_DISPLAY_NAME = "Sysvar Local Agent"
 SERVICE_DESCRIPTION = "Serviço local de integração do Sysvar para detecção segura de XML de NF-e."
 PYTHON_MODULE = "sysvar_agent.windows_service"
 PYTHON_CLASS = f"{PYTHON_MODULE}.SysvarLocalAgentService"
+CONFIG_OPTION = "ConfigPath"
 
 try:
     import servicemanager
@@ -38,6 +39,9 @@ log = logging.getLogger(__name__)
 
 
 def service_config_path():
+    persisted = persisted_service_config_path()
+    if persisted:
+        return persisted
     configured = os.environ.get("SYSVAR_AGENT_CONFIG")
     if configured:
         return str(Path(configured).resolve())
@@ -79,12 +83,18 @@ sys.modules.setdefault(PYTHON_MODULE, sys.modules[__name__])
 def main():
     if win32serviceutil is None:
         raise RuntimeError("pywin32 não está instalado. Instale as dependências do local_agent antes de registrar o serviço.")
+    command = service_command(sys.argv)
     _ensure_default_startup_auto(sys.argv)
+    config_path = None
+    if command in {"install", "update"}:
+        config_path = install_config_path(command)
     if _command_requires_runtime_prepare(sys.argv):
         runtime = prepare_windows_service_runtime()
         configure_pythonservice_path(runtime["host"])
         validate_service_host_imports()
     win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
+    if config_path:
+        persist_service_config_path(config_path)
 
 
 def _ensure_default_startup_auto(argv):
@@ -99,6 +109,57 @@ def _ensure_default_startup_auto(argv):
 
 def _command_requires_runtime_prepare(argv):
     return any(arg.lower() in {"install", "update"} for arg in argv[1:])
+
+
+def service_command(argv):
+    commands = {"install", "update", "start", "stop", "restart", "remove", "debug"}
+    return next((arg.lower() for arg in argv[1:] if arg.lower() in commands), None)
+
+
+def persisted_service_config_path():
+    if win32serviceutil is None:
+        return None
+    try:
+        configured = win32serviceutil.GetServiceCustomOption(SERVICE_NAME, CONFIG_OPTION, None)
+    except Exception:
+        return None
+    if configured:
+        return str(Path(configured).resolve())
+    return None
+
+
+def persist_service_config_path(path):
+    if win32serviceutil is None:
+        raise RuntimeError("pywin32 não está instalado. Não foi possível gravar o caminho do config.json do serviço.")
+    resolved = str(Path(path).resolve())
+    win32serviceutil.SetServiceCustomOption(SERVICE_NAME, CONFIG_OPTION, resolved)
+    return resolved
+
+
+def install_config_path(command):
+    if command == "update":
+        persisted = persisted_service_config_path()
+        if persisted and Path(persisted).exists():
+            return persisted
+    candidate = os.environ.get("SYSVAR_AGENT_CONFIG")
+    path = Path(candidate).expanduser() if candidate else development_config_path()
+    path = path.resolve()
+    if not path.exists():
+        raise ConfigError(f"Arquivo de configuração do serviço não encontrado: {path}")
+    return str(path)
+
+
+def development_config_path():
+    cwd_config = Path.cwd() / DEFAULT_CONFIG
+    if cwd_config.exists():
+        return cwd_config
+    venv_parent_config = Path(sys.prefix).resolve().parent / DEFAULT_CONFIG
+    if venv_parent_config.exists():
+        return venv_parent_config
+    source_tree_config = Path(sys.prefix).resolve().parent / "local_agent" / DEFAULT_CONFIG
+    if source_tree_config.exists():
+        return source_tree_config
+    return default_config_path()
 
 
 def prepare_windows_service_runtime():

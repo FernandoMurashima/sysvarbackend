@@ -94,9 +94,11 @@ Abra o PowerShell como Administrador e execute:
 
 O nome técnico é `SysvarLocalAgent` e o nome exibido é `Sysvar Local Agent`. A instalação configura inicialização automática. Após instalar, o serviço pode ser visto em `services.msc` como `Sysvar Local Agent`.
 
-Durante `install` e `update`, o agente prepara automaticamente o host do pywin32 para que `pythonservice.exe` encontre as DLLs necessárias do Python e do pywin32 dentro do ambiente do agente. Ele também gera `pythonservice._pth` ao lado do host com os caminhos do venv necessários para `site-packages`, `win32`, `win32\lib` e `pythonwin`. Não copie `python312.dll` manualmente, não edite o Registry manualmente, não altere `System32` e não dependa do `PATH` ou `PYTHONPATH` do usuário.
+Durante `install` e `update`, o agente valida `local_agent\config.json` e grava o caminho absoluto no registro do próprio serviço. Em execução, o serviço usa esse caminho persistido, sem depender do diretório corrente nem do local onde o pacote `sysvar_agent` foi instalado. O arquivo não deve ser copiado para `.venv\Lib\site-packages`.
 
-Se preferir um `config.json` fora da pasta do agente, defina `SYSVAR_AGENT_CONFIG` no ambiente do serviço apontando para o caminho absoluto do arquivo. Não coloque token em argumentos de linha de comando.
+Durante `install` e `update`, o agente prepara automaticamente o host do pywin32 para que `pythonservice.exe` encontre as DLLs necessárias do Python e do pywin32 dentro do ambiente do agente. Ele também gera `pythonservice._pth` ao lado do host com os caminhos do venv necessários para `site-packages`, `win32`, `win32\lib` e `pythonwin`. Não copie `python312.dll` manualmente, não edite o Registry manualmente, não altere `System32` e não dependa do diretório corrente, do `PATH` ou do `PYTHONPATH` do usuário.
+
+Se preferir um `config.json` fora da pasta do agente, defina `SYSVAR_AGENT_CONFIG` antes de executar `install` ou `update`; o caminho absoluto será validado e persistido no serviço. Não coloque token em argumentos de linha de comando.
 
 Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.
 

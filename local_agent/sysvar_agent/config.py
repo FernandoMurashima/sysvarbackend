@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 DEFAULT_CONFIG = "config.json"
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConfigError(ValueError):
@@ -71,7 +70,7 @@ def validate_config(config: AgentConfig):
 
 
 def default_config_path():
-    return PACKAGE_ROOT / DEFAULT_CONFIG
+    return (Path.cwd() / DEFAULT_CONFIG).resolve()
 
 
 def _resolve_local_path(value, config_path):
