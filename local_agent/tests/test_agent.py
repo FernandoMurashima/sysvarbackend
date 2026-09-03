@@ -144,7 +144,7 @@ class ApiTests(unittest.TestCase):
         client = SysvarApiClient("http://sysvar", "token-secreto", 7, session=session)
         self.assertEqual(session.headers["Authorization"], "Agent token-secreto")
         self.assertEqual(client.get_configuracoes(), {"configuracoes": []})
-        self.assertEqual(client.heartbeat("0.1.0", "HOST"), {"ok": True})
+        self.assertEqual(client.heartbeat("0.2.0", "HOST"), {"ok": True})
         self.assertEqual(client.enviar_xml_detectado({"x": 1}), {"created": False})
 
     def test_erros_http_classificados(self):
@@ -535,7 +535,7 @@ class ScannerRunnerTests(unittest.TestCase):
             self.assertEqual(payload["codigo"], "ABCD-EFGH-IJKL")
             self.assertEqual(payload["identificador"], data["identificador"])
             self.assertEqual(payload["hostname"], "HOST-ATIVACAO")
-            self.assertIn("versao", payload)
+            self.assertEqual(payload["versao"], "0.2.0")
 
     def test_activate_reutiliza_identificador_e_so_substitui_token_apos_sucesso(self):
         import sysvar_agent.activation as activation
