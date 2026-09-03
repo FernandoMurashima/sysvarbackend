@@ -482,6 +482,47 @@ class ScannerRunnerTests(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 self.assertTrue(service.config_allows_service_start(config_path))
 
+    def test_windows_service_config_ok_python_valido_retorna_zero(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "TOKEN_TESTE_VALIDO"}), encoding="utf-8")
+            with patch.object(service, "win32serviceutil", Mock()), patch.object(service.sys, "argv", ["windows_service.py", "config-ok"]), patch.dict(os.environ, {"SYSVAR_AGENT_CONFIG": str(config_path)}, clear=True):
+                with self.assertRaises(SystemExit) as exc:
+                    service.main()
+            self.assertEqual(exc.exception.code, 0)
+
+    def test_windows_service_config_ok_python_placeholder_retorna_um(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "COLOQUE_O_TOKEN_AQUI"}), encoding="utf-8")
+            with patch.object(service, "win32serviceutil", Mock()), patch.object(service.sys, "argv", ["windows_service.py", "config-ok"]), patch.dict(os.environ, {"SYSVAR_AGENT_CONFIG": str(config_path)}, clear=True):
+                with self.assertRaises(SystemExit) as exc:
+                    service.main()
+            self.assertEqual(exc.exception.code, 1)
+
+    def test_windows_service_config_ok_frozen_usa_env_explicito(self):
+        import sysvar_agent.windows_service as service
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            registered = Path(tmp) / "registered.json"
+            config_path.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "TOKEN_TESTE_VALIDO"}), encoding="utf-8")
+            registered.write_text(json.dumps({"api_base_url": "http://127.0.0.1:8000", "token": "COLOQUE_O_TOKEN_AQUI"}), encoding="utf-8")
+            with patch.object(service, "win32serviceutil", Mock()), patch.object(service, "persisted_service_config_path", return_value=str(registered)), patch.object(service.sys, "frozen", True, create=True), patch.object(service.sys, "argv", ["SysvarLocalAgent.exe", "config-ok"]), patch.dict(os.environ, {"SYSVAR_AGENT_CONFIG": str(config_path)}, clear=True):
+                with self.assertRaises(SystemExit) as exc:
+                    service.main()
+            self.assertEqual(exc.exception.code, 0)
+
+    def test_windows_service_config_ok_erro_nao_expoe_token(self):
+        import sysvar_agent.windows_service as service
+
+        with patch.dict(os.environ, {"SYSVAR_AGENT_TOKEN": "TOKEN_SUPER_SECRETO"}, clear=True):
+            self.assertNotIn("TOKEN_SUPER_SECRETO", service.safe_config_error(ValueError("erro TOKEN_SUPER_SECRETO")))
+
     def test_windows_service_persiste_config_dentro_do_handle(self):
         import sysvar_agent.windows_service as service
 

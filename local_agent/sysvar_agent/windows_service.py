@@ -115,7 +115,8 @@ def main():
         return
     command = service_command(sys.argv)
     if command == "config-ok":
-        raise SystemExit(0 if config_allows_service_start() else 1)
+        ok, _reason = config_start_status(diagnostics=True)
+        raise SystemExit(0 if ok else 1)
     _ensure_default_startup_auto(sys.argv)
     config_path = None
     if command in {"install", "update"}:
@@ -153,11 +154,50 @@ def config_option_handler(path):
 
 
 def config_allows_service_start(path=None):
+    ok, _reason = config_start_status(path=path)
+    return ok
+
+
+def config_start_status(path=None, diagnostics=False):
+    config_path = path or config_ok_config_path()
     try:
-        cfg = load_config(path or service_config_path())
-    except Exception:
-        return False
-    return bool(cfg.api_base_url and cfg.token and cfg.token != PLACEHOLDER_TOKEN)
+        cfg = load_config(config_path)
+    except Exception as exc:
+        reason = f"config inválido em {config_path}: {safe_config_error(exc)}"
+        if diagnostics:
+            print(reason, file=sys.stderr)
+        return False, reason
+    if not cfg.api_base_url:
+        reason = f"config inválido em {config_path}: api_base_url ausente"
+        if diagnostics:
+            print(reason, file=sys.stderr)
+        return False, reason
+    if not cfg.token:
+        reason = f"config inválido em {config_path}: token ausente"
+        if diagnostics:
+            print(reason, file=sys.stderr)
+        return False, reason
+    if cfg.token == PLACEHOLDER_TOKEN:
+        reason = f"config inválido em {config_path}: token placeholder"
+        if diagnostics:
+            print(reason, file=sys.stderr)
+        return False, reason
+    return True, "config válido"
+
+
+def config_ok_config_path():
+    configured = os.environ.get("SYSVAR_AGENT_CONFIG")
+    if configured:
+        return str(Path(configured).resolve())
+    return service_config_path()
+
+
+def safe_config_error(exc):
+    text = str(exc)
+    token = os.environ.get("SYSVAR_AGENT_TOKEN")
+    if token:
+        text = text.replace(token, "***")
+    return text
 
 
 def persisted_service_config_path():
