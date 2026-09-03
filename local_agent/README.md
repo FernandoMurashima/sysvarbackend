@@ -14,6 +14,7 @@ Agente local para detectar XML de NF-e em pastas do cliente e registrar somente 
 cd local_agent
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install .
 ```
 
 ## Configuração
@@ -76,6 +77,7 @@ Instale as dependências no venv do agente:
 cd local_agent
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install .
 ```
 
 Crie `config.json` em `local_agent\config.json`. Caminhos relativos como `data/agent.db` e `logs/sysvar-agent.log` são resolvidos a partir da pasta do `config.json`, não do diretório corrente do processo.

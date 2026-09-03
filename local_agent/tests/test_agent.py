@@ -366,6 +366,9 @@ class ScannerRunnerTests(unittest.TestCase):
 
         self.assertEqual(service.SERVICE_NAME, "SysvarLocalAgent")
         self.assertEqual(service.SERVICE_DISPLAY_NAME, "Sysvar Local Agent")
+        self.assertEqual(service.PYTHON_CLASS, "sysvar_agent.windows_service.SysvarLocalAgentService")
+        self.assertNotIn("\\", service.PYTHON_CLASS)
+        self.assertNotIn(":", service.PYTHON_CLASS)
         self.assertTrue(hasattr(service, "run_agent"))
         self.assertFalse(hasattr(service.SysvarLocalAgentService, "scanner"))
 
@@ -374,17 +377,18 @@ class ScannerRunnerTests(unittest.TestCase):
 
         fake_util = Mock()
         argv = ["windows_service.py", "install"]
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service.sys, "argv", argv):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service, "ensure_package_importable_for_service_host"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "auto", "install"])
         fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
+        self.assertEqual(service.SysvarLocalAgentService.__module__, "sysvar_agent.windows_service")
 
     def test_windows_service_startup_explicito_nao_e_modificado(self):
         import sysvar_agent.windows_service as service
 
         fake_util = Mock()
         argv = ["windows_service.py", "--startup", "delayed", "install"]
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service.sys, "argv", argv):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime"), patch.object(service, "ensure_package_importable_for_service_host"), patch.object(service.sys, "argv", argv):
             service.main()
         self.assertEqual(argv, ["windows_service.py", "--startup", "delayed", "install"])
         fake_util.HandleCommandLine.assert_called_once_with(service.SysvarLocalAgentService)
@@ -460,13 +464,13 @@ class ScannerRunnerTests(unittest.TestCase):
         calls = []
         fake_util = Mock()
         fake_util.HandleCommandLine.side_effect = lambda *_: calls.append("handle")
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service.sys, "argv", ["windows_service.py", "install"]):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service, "ensure_package_importable_for_service_host", side_effect=lambda: calls.append("package")), patch.object(service.sys, "argv", ["windows_service.py", "install"]):
             service.main()
-        self.assertEqual(calls, ["prepare", "handle"])
+        self.assertEqual(calls, ["prepare", "package", "handle"])
         calls.clear()
-        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service.sys, "argv", ["windows_service.py", "update"]):
+        with patch.object(service, "win32serviceutil", fake_util), patch.object(service, "prepare_windows_service_runtime", side_effect=lambda: calls.append("prepare")), patch.object(service, "ensure_package_importable_for_service_host", side_effect=lambda: calls.append("package")), patch.object(service.sys, "argv", ["windows_service.py", "update"]):
             service.main()
-        self.assertEqual(calls, ["prepare", "handle"])
+        self.assertEqual(calls, ["prepare", "package", "handle"])
 
     def test_windows_service_start_stop_restart_debug_nao_preparam_runtime(self):
         import sysvar_agent.windows_service as service
@@ -484,6 +488,27 @@ class ScannerRunnerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as exc:
                 service.prepare_windows_service_runtime()
         self.assertNotIn("TOKEN_SUPER_SECRETO", str(exc.exception))
+
+    def test_windows_service_valida_pacote_importavel_fora_do_cwd_sem_pythonpath(self):
+        import sysvar_agent.windows_service as service
+
+        completed = Mock(returncode=0, stderr="", stdout="")
+        with patch.object(service.subprocess, "run", return_value=completed) as run_mock:
+            self.assertTrue(service.ensure_package_importable_for_service_host())
+        kwargs = run_mock.call_args.kwargs
+        self.assertNotEqual(Path(kwargs["cwd"]), Path.cwd())
+        self.assertNotIn("PYTHONPATH", kwargs["env"])
+        command = run_mock.call_args.args[0]
+        self.assertIn("sysvar_agent.windows_service", command[2])
+        self.assertIn(service.PYTHON_CLASS, command[2])
+
+    def test_windows_service_valida_pacote_com_erro_claro(self):
+        import sysvar_agent.windows_service as service
+
+        completed = Mock(returncode=1, stderr="No module named sysvar_agent", stdout="")
+        with patch.object(service.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "pip install"):
+                service.ensure_package_importable_for_service_host()
 
 
 if __name__ == "__main__":

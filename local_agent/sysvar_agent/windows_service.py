@@ -1,8 +1,10 @@
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import threading
+import tempfile
 from pathlib import Path
 
 from .config import default_config_path
@@ -12,6 +14,8 @@ from .host import run_agent
 SERVICE_NAME = "SysvarLocalAgent"
 SERVICE_DISPLAY_NAME = "Sysvar Local Agent"
 SERVICE_DESCRIPTION = "Serviço local de integração do Sysvar para detecção segura de XML de NF-e."
+PYTHON_MODULE = "sysvar_agent.windows_service"
+PYTHON_CLASS = f"{PYTHON_MODULE}.SysvarLocalAgentService"
 
 try:
     import servicemanager
@@ -67,6 +71,9 @@ else:
     class SysvarLocalAgentService:
         pass
 
+SysvarLocalAgentService.__module__ = PYTHON_MODULE
+sys.modules.setdefault(PYTHON_MODULE, sys.modules[__name__])
+
 
 def main():
     if win32serviceutil is None:
@@ -74,6 +81,7 @@ def main():
     _ensure_default_startup_auto(sys.argv)
     if _command_requires_runtime_prepare(sys.argv):
         prepare_windows_service_runtime()
+        ensure_package_importable_for_service_host()
     win32serviceutil.HandleCommandLine(SysvarLocalAgentService)
 
 
@@ -102,6 +110,37 @@ def prepare_windows_service_runtime():
         if not dst.exists() or src.stat().st_size != dst.stat().st_size:
             shutil.copy2(src, dst)
     return {"host": host, "files": files}
+
+
+def ensure_package_importable_for_service_host():
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import importlib; "
+                    f"mod = importlib.import_module('{PYTHON_MODULE}'); "
+                    f"assert getattr(mod, 'PYTHON_CLASS') == '{PYTHON_CLASS}'; "
+                    f"assert '\\\\' not in '{PYTHON_CLASS}'"
+                ),
+            ],
+            cwd=tmp,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        raise RuntimeError(
+            "Pacote sysvar_agent não está importável pelo Python do serviço. "
+            "Execute no diretório local_agent: python -m pip install . "
+            f"Detalhe: {detail}"
+        )
+    return True
 
 
 def locate_pythonservice_exe():
