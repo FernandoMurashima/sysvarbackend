@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Cfop,
+    AgenteLocalSysvar,
     ConfiguracaoXmlFornecedor,
     FormaPagamentoFiscalMap,
     NFCe,
@@ -17,6 +18,14 @@ from .models import (
     RegraTributaria,
     Tributo,
 )
+
+
+@admin.register(AgenteLocalSysvar)
+class AgenteLocalSysvarAdmin(admin.ModelAdmin):
+    list_display = ("id", "empresa", "identificador", "nome", "ativo", "token_prefixo", "ultimo_contato", "versao", "hostname")
+    list_filter = ("empresa", "ativo")
+    search_fields = ("identificador", "nome", "hostname", "empresa__nome")
+    readonly_fields = ("token_hash", "token_prefixo", "ultimo_contato", "criado_em", "atualizado_em")
 
 
 @admin.register(Cfop)

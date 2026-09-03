@@ -13,9 +13,166 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class AgenteLocalSysvarApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Agente", documento="11222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Agente B", documento="11222333000262", plano_completo=True)
+        self.user_admin = get_user_model().objects.create_user("ag-admin", "agadmin@sysvar.test", "123", empresa=self.empresa, type="Admin")
+        self.user_b = get_user_model().objects.create_user("ag-admin-b", "agadminb@sysvar.test", "123", empresa=self.empresa_b, type="Admin")
+        modulo = ModuloSistema.objects.update_or_create(
+            chave="fiscal",
+            defaults={"nome": "Fiscal", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        for empresa, user in ((self.empresa, self.user_admin), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(empresa=empresa, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=modulo, defaults={"contratado": True})
+            perfil = PerfilAcesso.objects.create(empresa=empresa, nome=f"Perfil {empresa.id}")
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=modulo, acesso=UserModulePermission.Access.EDIT)
+            user.perfil_principal = perfil
+            user.save(update_fields=["perfil_principal"])
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Agente", apelido_loja="AG", cnpj="11222333000181", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Agente B", apelido_loja="AGB", cnpj="11222333000262", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="21222333000181", cnpj="21222333000181", nome_fornecedor="Fornecedor Agente")
+        self.fornecedor_b = Fornecedor.objects.create(empresa=self.empresa_b, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="21222333000181", cnpj="21222333000181", nome_fornecedor="Fornecedor Outra Empresa")
+
+    def _admin(self):
+        self.client.credentials()
+        self.client.force_authenticate(self.user_admin)
+
+    def _token(self, agente):
+        token = agente.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Agent {token}")
+        return token
+
+    def _payload_xml(self, config, chave="35260822345678000195550010000001234567890121", **extras):
+        data = {
+            "configuracao_id": config.id,
+            "caminho_origem_local": r"X:\Fiscal\XML\arquivo.xml",
+            "chave_acesso": chave,
+            "modelo": "55",
+            "serie": "1",
+            "numero": "12345",
+            "dh_emissao": "2026-09-03T08:00:00-03:00",
+            "emitente_documento": "21222333000181",
+            "emitente_nome": "Fornecedor Agente",
+            "destinatario_documento": "11222333000181",
+            "destinatario_nome": "Loja Agente",
+            "valor_total": "1000.00",
+            "situacao_fiscal": XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+        }
+        data.update(extras)
+        return data
+
+    def test_crud_admin_token_e_escopo_multiempresa(self):
+        self._admin()
+        resp = self.client.post("/api/fiscal/agentes-locais/", {"empresa": self.empresa.id, "identificador": "FABRICA-SERVIDOR-01", "nome": "Servidor"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertNotIn("token_hash", resp.data)
+        agente = AgenteLocalSysvar.objects.get(pk=resp.data["id"])
+        self.assertEqual(agente.empresa_id, self.empresa.id)
+        self.assertEqual(self.client.post("/api/fiscal/agentes-locais/", {"identificador": "SEM-EMPRESA", "nome": "Servidor"}, format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/fiscal/agentes-locais/", {"empresa": self.empresa.id, "identificador": "FABRICA-SERVIDOR-01", "nome": "Duplicado"}, format="json").status_code, 400)
+        AgenteLocalSysvar.objects.create(empresa=self.empresa_b, identificador="FABRICA-SERVIDOR-01", nome="Outra empresa")
+        resp_token = self.client.post(f"/api/fiscal/agentes-locais/{agente.id}/gerar-token/")
+        self.assertEqual(resp_token.status_code, 200, resp_token.data)
+        self.assertIn("token", resp_token.data)
+        self.assertNotEqual(resp_token.data["token"], agente.token_hash)
+        self.client.force_authenticate(self.user_b)
+        self.assertEqual(self.client.get(f"/api/fiscal/agentes-locais/{agente.id}/").status_code, 404)
+
+    def test_autenticacao_token_valido_invalido_inativo_e_rotacao(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        token_antigo = self._token(agente)
+        self.assertEqual(self.client.get("/api/fiscal/agente-local/configuracoes/").status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION="Agent token-errado")
+        self.assertEqual(self.client.get("/api/fiscal/agente-local/configuracoes/").status_code, 403)
+        token_novo = agente.gerar_token()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Agent {token_antigo}")
+        self.assertEqual(self.client.get("/api/fiscal/agente-local/configuracoes/").status_code, 403)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Agent {token_novo}")
+        self.assertEqual(self.client.get("/api/fiscal/agente-local/configuracoes/").status_code, 200)
+        agente.ativo = False
+        agente.save(update_fields=["ativo"])
+        self.assertEqual(self.client.get("/api/fiscal/agente-local/configuracoes/").status_code, 403)
+
+    def test_configuracoes_do_agente_filtram_empresa_identificador_e_ativo(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg_vazia = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        cfg_agente = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML2", identificador_agente="AG-1")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa_b, loja=self.loja_b, caminho_local=r"X:\Fiscal\XML")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\OUTRO", identificador_agente="OUTRO")
+        ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\INATIVO", ativo=False)
+        resp = self.client.get("/api/fiscal/agente-local/configuracoes/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual({item["id"] for item in resp.data["configuracoes"]}, {cfg_vazia.id, cfg_agente.id})
+
+    def test_heartbeat_atualiza_apenas_metadados_permitidos(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        resp = self.client.post("/api/fiscal/agente-local/heartbeat/", {"versao": "1.0.0", "hostname": "SERVIDOR", "identificador": "OUTRO", "empresa": self.empresa_b.id}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        agente.refresh_from_db()
+        self.assertIsNotNone(agente.ultimo_contato)
+        self.assertEqual(agente.versao, "1.0.0")
+        self.assertEqual(agente.hostname, "SERVIDOR")
+        self.assertEqual(agente.identificador, "AG-1")
+        self.assertEqual(agente.empresa_id, self.empresa.id)
+
+    def test_xml_detectado_cria_resolve_relacoes_e_nao_gera_efeitos_operacionais(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, empresa=self.empresa_b.id, identificador_agente="ERRADO"), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        self.assertTrue(resp.data["created"])
+        self.assertEqual(xml.empresa_id, self.empresa.id)
+        self.assertEqual(xml.loja_id, self.loja.id)
+        self.assertEqual(xml.fornecedor_id, self.fornecedor.id)
+        self.assertEqual(xml.identificador_agente, "AG-1")
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(MovimentacaoFinanceira.objects.exists())
+        self.assertFalse(PedidoCompra.objects.exists())
+
+    def test_xml_detectado_configuracao_central_fornecedor_desconhecido_e_idempotencia(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML")
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, emitente_documento="99999999999999"), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        self.assertEqual(xml.loja_id, self.loja.id)
+        self.assertIsNone(xml.fornecedor_id)
+        xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
+        xml.save(update_fields=["status_operacional"])
+        retry = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, emitente_documento="99999999999999", caminho_origem_local=r"X:\Fiscal\XML\retry.xml"), format="json")
+        self.assertEqual(retry.status_code, 200, retry.data)
+        self.assertFalse(retry.data["created"])
+        self.assertEqual(XmlFornecedorRecebido.objects.filter(chave_acesso=xml.chave_acesso).count(), 1)
+        xml.refresh_from_db()
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+
+    def test_xml_detectado_rejeita_configuracoes_fora_do_escopo(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg_outra_empresa = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa_b, loja=self.loja_b, caminho_local=r"X:\Fiscal\XML")
+        cfg_outro_agente = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\OUTRO", identificador_agente="OUTRO")
+        cfg_inativa = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\INATIVO", ativo=False)
+        for cfg in (cfg_outra_empresa, cfg_outro_agente, cfg_inativa):
+            resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg), format="json")
+            self.assertEqual(resp.status_code, 400, resp.data)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

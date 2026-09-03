@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
@@ -16,6 +18,49 @@ def _fmt_money(value):
 def _fmt_qty(value):
     text = f"{Decimal(value or 0).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP):f}".rstrip("0").rstrip(".")
     return text.replace(".", ",") or "0"
+
+
+class AgenteLocalSysvar(models.Model):
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="agentes_locais_sysvar", db_index=True)
+    identificador = models.CharField(max_length=120)
+    nome = models.CharField(max_length=120)
+    token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    token_prefixo = models.CharField(max_length=12, blank=True, default="")
+    ativo = models.BooleanField(default=True, db_index=True)
+    ultimo_contato = models.DateTimeField(null=True, blank=True)
+    versao = models.CharField(max_length=40, blank=True, default="")
+    hostname = models.CharField(max_length=120, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_agente_local_sysvar"
+        ordering = ["empresa_id", "identificador"]
+        constraints = [
+            UniqueConstraint(fields=["empresa", "identificador"], name="uq_agente_local_sysvar_empresa_ident"),
+        ]
+        indexes = [
+            Index(fields=["empresa", "ativo"], name="ix_agente_local_emp_ativo"),
+            Index(fields=["token_hash"], name="ix_agente_local_token_hash"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.empresa_id} - {self.identificador}"
+
+    @property
+    def is_authenticated(self):
+        return True
+
+    @staticmethod
+    def hash_token(token: str) -> str:
+        return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+    def gerar_token(self) -> str:
+        token = secrets.token_urlsafe(48)
+        self.token_hash = self.hash_token(token)
+        self.token_prefixo = token[:12]
+        self.save(update_fields=["token_hash", "token_prefixo", "atualizado_em"])
+        return token
 
 
 class NotaFiscalEntrada(models.Model):

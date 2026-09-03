@@ -4,7 +4,7 @@ from datetime import date
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
-from rest_framework import parsers, status, viewsets
+from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -25,12 +25,16 @@ except Exception:
     FIN_OK = False
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
-from fiscal.models import ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.authentication import AgentTokenAuthentication
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
 from fiscal.serializers import (
     ConfiguracaoXmlFornecedorSerializer,
+    AgenteLocalConfiguracaoSerializer,
+    AgenteLocalSysvarSerializer,
+    AgenteLocalXmlDetectadoSerializer,
     FormaPagamentoFiscalMapSerializer,
     NotaFiscalEntradaDivergenciaXmlSerializer,
     NotaFiscalEntradaEventoSerializer,
@@ -41,6 +45,11 @@ from fiscal.serializers import (
 )
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
+
+
+class IsAgentAuthenticated(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(getattr(request, "agente_local_sysvar", None))
 
 
 def _q4(valor) -> Decimal:
@@ -2358,6 +2367,147 @@ class ConfiguracaoXmlFornecedorViewSet(BaseViewSet):
     def perform_update(self, serializer):
         self._validar_empresa_usuario(serializer.validated_data.get("empresa") or serializer.instance.empresa)
         serializer.save()
+
+
+class AgenteLocalSysvarViewSet(BaseViewSet):
+    required_module = "fiscal"
+    read_roles = ["Admin", "Diretor"]
+    write_roles = ["Admin", "Diretor"]
+    queryset = AgenteLocalSysvar.objects.select_related("empresa").all().order_by("empresa_id", "identificador")
+    serializer_class = AgenteLocalSysvarSerializer
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        user = request.user
+        if not user.is_superuser and getattr(user, "type", "") not in ADMIN_CONFIG_ROLES:
+            self.permission_denied(request, message="Usuário sem permissão para administrar agentes locais.")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        return qs
+
+    def _validar_empresa_usuario(self, empresa):
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa and empresa.id != int(user_empresa_id):
+            raise ValidationError({"empresa": "Empresa fora do escopo do usuário."})
+
+    def perform_create(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa"))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._validar_empresa_usuario(serializer.validated_data.get("empresa") or serializer.instance.empresa)
+        serializer.save()
+
+    @action(detail=True, methods=["post"], url_path="gerar-token")
+    def gerar_token(self, request, pk=None):
+        agente = self.get_object()
+        token = agente.gerar_token()
+        return Response({"token": token, "prefixo": agente.token_prefixo, "agente": agente.pk}, status=status.HTTP_200_OK)
+
+
+class AgenteLocalApiViewSet(viewsets.ViewSet):
+    authentication_classes = [AgentTokenAuthentication]
+    permission_classes = [IsAgentAuthenticated]
+
+    def _agente(self):
+        return self.request.agente_local_sysvar
+
+    def _configuracoes_qs(self):
+        agente = self._agente()
+        return ConfiguracaoXmlFornecedor.objects.filter(empresa=agente.empresa, ativo=True).filter(
+            Q(identificador_agente="") | Q(identificador_agente=agente.identificador)
+        )
+
+    @action(detail=False, methods=["get"], url_path="configuracoes")
+    def configuracoes(self, request):
+        agente = self._agente()
+        qs = self._configuracoes_qs().select_related("loja").order_by("loja_id", "caminho_local")
+        return Response(
+            {
+                "agente": {"identificador": agente.identificador},
+                "configuracoes": AgenteLocalConfiguracaoSerializer(qs, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="heartbeat")
+    def heartbeat(self, request):
+        agente = self._agente()
+        agente.ultimo_contato = timezone.now()
+        agente.versao = str(request.data.get("versao") or "")[:40]
+        agente.hostname = str(request.data.get("hostname") or "")[:120]
+        agente.save(update_fields=["ultimo_contato", "versao", "hostname", "atualizado_em"])
+        return Response({"ok": True}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="xml-detectado")
+    @transaction.atomic
+    def xml_detectado(self, request):
+        agente = self._agente()
+        serializer = AgenteLocalXmlDetectadoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        configuracao = self._configuracoes_qs().select_for_update().filter(pk=data.pop("configuracao_id")).first()
+        if not configuracao:
+            raise ValidationError({"configuracao_id": "Configuração inválida para este agente."})
+        loja = self._resolver_loja(agente.empresa_id, configuracao, data.get("destinatario_documento"))
+        fornecedor = self._resolver_fornecedor(agente.empresa_id, data.get("emitente_documento"))
+        chave = data["chave_acesso"]
+        existente = XmlFornecedorRecebido.objects.select_for_update().filter(chave_acesso=chave).first()
+        if existente:
+            if existente.empresa_id != agente.empresa_id:
+                raise ValidationError({"chave_acesso": "Chave de acesso já registrada."})
+            self._atualizar_retry_seguro(existente, data)
+            return Response({"created": False, "xml": XmlFornecedorRecebidoSerializer(existente).data}, status=status.HTTP_200_OK)
+        xml = XmlFornecedorRecebido.objects.create(
+            empresa=agente.empresa,
+            loja=loja,
+            fornecedor=fornecedor,
+            identificador_agente=agente.identificador,
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            **data,
+        )
+        return Response({"created": True, "xml": XmlFornecedorRecebidoSerializer(xml).data}, status=status.HTTP_201_CREATED)
+
+    def _resolver_loja(self, empresa_id, configuracao, destinatario_documento):
+        if configuracao.loja_id:
+            if configuracao.loja.empresa_id != empresa_id:
+                raise ValidationError({"configuracao_id": "Loja da configuração pertence a outra empresa."})
+            doc = only_digits(destinatario_documento or "")
+            if doc and only_digits(configuracao.loja.cnpj or "") != doc:
+                raise ValidationError({"destinatario_documento": "Documento do destinatário incompatível com a loja configurada."})
+            return configuracao.loja
+        doc = only_digits(destinatario_documento or "")
+        if not doc:
+            return None
+        lojas = list(Loja.objects.filter(empresa_id=empresa_id, cnpj=doc)[:2])
+        return lojas[0] if len(lojas) == 1 else None
+
+    def _resolver_fornecedor(self, empresa_id, emitente_documento):
+        doc = only_digits(emitente_documento or "")
+        if not doc:
+            return None
+        fornecedores = list(Fornecedor.objects.filter(empresa_id=empresa_id, documento=doc)[:2])
+        return fornecedores[0] if len(fornecedores) == 1 else None
+
+    def _atualizar_retry_seguro(self, xml, data):
+        campos = ["caminho_origem_local", "emitente_nome", "destinatario_nome"]
+        changed = []
+        for campo in campos:
+            value = data.get(campo)
+            if value and getattr(xml, campo) != value:
+                setattr(xml, campo, value)
+                changed.append(campo)
+        if changed:
+            changed.append("atualizado_em")
+            xml.save(update_fields=changed)
 
 
 class NotaFiscalEntradaItemViewSet(BaseViewSet):
