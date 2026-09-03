@@ -155,6 +155,10 @@ O Setup instala os binários em `C:\Program Files\Sysvar\LocalAgent` e cria dado
 
 Durante a instalação, o Setup executa `SysvarLocalAgent.exe install` com `SYSVAR_AGENT_CONFIG` apontando para `C:\ProgramData\Sysvar\LocalAgent\config.json`, deixando o `ConfigPath` persistido no serviço. Se o arquivo ainda estiver com token placeholder, o serviço é registrado, mas não é iniciado automaticamente. Se a configuração já estiver válida, o serviço pode ser iniciado após instalação ou upgrade.
 
+Em instalações novas ou quando a configuração preservada ainda não estiver válida, o wizard solicita o código de ativação gerado no Sysvar. Após copiar os arquivos, o Setup executa `SysvarLocalAgent.exe activate` com `SYSVAR_AGENT_CONFIG` apontando para `C:\ProgramData\Sysvar\LocalAgent\config.json` e passa o código apenas por variável de ambiente temporária. O código não vai para a linha de comando, não é salvo no config e é removido do ambiente do Setup após a chamada. Depois da ativação, o Setup valida `config-ok`, registra/atualiza o serviço e só então inicia o serviço.
+
+Em upgrade ou reinstalação com config já válido, o wizard pula a ativação, preserva token e identificador existentes em `ProgramData`, atualiza o serviço e restaura o estado de execução quando aplicável. Se a ativação tiver sucesso mas um passo posterior falhar, a próxima execução do Setup reconhece o config válido e não tenta reutilizar o código consumido.
+
 Se `config.json` não existir, estiver inválido ou sem token, o serviço registra a falha e encerra de forma controlada. Backend ou internet offline não derrubam o serviço; a fila SQLite permanece e o retry/backoff continua valendo.
 
 Ao receber parada do Windows, o serviço sinaliza encerramento limpo, deixa o loop terminar, fecha a conexão SQLite e preserva `data/agent.db`, logs e configuração.

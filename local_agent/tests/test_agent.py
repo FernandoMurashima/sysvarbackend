@@ -666,6 +666,7 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertIn("{commonappdata}\\Sysvar\\LocalAgent", content)
         self.assertIn("SYSVAR_AGENT_CONFIG=", content)
         self.assertIn("ExecAgentWithConfig('install')", content)
+        self.assertIn("ExecAgentWithConfig('update')", content)
 
     def test_installer_preserva_config_fila_logs_e_programdata(self):
         installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
@@ -674,6 +675,7 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertIn("onlyifdoesntexist uninsneveruninstall", content)
         self.assertIn("data\"; Permissions: system-full admins-full; Flags: uninsneveruninstall", content)
         self.assertIn("logs\"; Permissions: system-full admins-full; Flags: uninsneveruninstall", content)
+        self.assertIn("Name: \"{commonappdata}\\Sysvar\\LocalAgent\"; Permissions: system-full admins-full; Flags: uninsneveruninstall", content)
         self.assertNotIn("agent.db", content)
         self.assertNotIn("sysvar-agent.log", content)
 
@@ -684,6 +686,66 @@ class ScannerRunnerTests(unittest.TestCase):
         self.assertNotIn("TOKEN_SUPER_SECRETO", content)
         self.assertNotIn("[Icons]", content)
         self.assertNotIn("Desktop", content)
+        self.assertNotIn("--code", content)
+        self.assertNotIn("Authorization", content)
+
+    def test_installer_tem_pagina_de_ativacao_e_exige_codigo_quando_visivel(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("ActivationPage: TInputQueryWizardPage", content)
+        self.assertIn("CreateInputQueryPage", content)
+        self.assertIn("Ativação do Sysvar Local Agent", content)
+        self.assertIn("Código de ativação:", content)
+        self.assertIn("function NextButtonClick", content)
+        self.assertIn("ActivationCode() = ''", content)
+        self.assertIn("Informe o código de ativação gerado no Sysvar.", content)
+
+    def test_installer_pula_ativacao_com_config_existente_valido(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("ConfigValidBeforeInstall := ExistingConfigAllowsStart();", content)
+        self.assertIn("function ShouldSkipPage", content)
+        self.assertIn("PageID = ActivationPage.ID", content)
+        self.assertIn("ConfigValidBeforeInstall", content)
+        self.assertIn("FileExists(AgentExe()) and FileExists(AgentConfig()) and ConfigAllowsStart()", content)
+
+    def test_installer_ativacao_usa_env_sem_command_line_e_limpa_codigo(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("SetEnvironmentVariableW@kernel32.dll", content)
+        self.assertIn("function ExecAgentActivation(Code: String): Boolean", content)
+        self.assertIn("SetEnvironmentVariable('SYSVAR_AGENT_ACTIVATION_CODE', Code)", content)
+        self.assertIn("Result := ExecHidden(AgentExe(), 'activate')", content)
+        self.assertIn("SetEnvironmentVariable('SYSVAR_AGENT_ACTIVATION_CODE', '')", content)
+        self.assertNotIn("'activate ' +", content)
+        self.assertNotIn("activate --", content)
+
+    def test_installer_ordem_ativacao_config_ok_servico_start(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+        post_install = content[content.index("procedure CurStepChanged") :]
+
+        activate_pos = post_install.index("ExecAgentActivation(ActivationCode())")
+        config_ok_pos = post_install.index("Configuração do Sysvar Local Agent não ficou válida")
+        install_pos = post_install.index("InstallOrUpdateService()")
+        start_pos = post_install.index("ExecAgentWithConfig('start')")
+        self.assertLess(activate_pos, config_ok_pos)
+        self.assertLess(config_ok_pos, install_pos)
+        self.assertLess(install_pos, start_pos)
+
+    def test_installer_falhas_de_activate_ou_config_ok_impedem_start(self):
+        installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"
+        content = installer.read_text(encoding="utf-8")
+
+        self.assertIn("not ExecAgentActivation(ActivationCode())", content)
+        self.assertIn("Não foi possível ativar o Sysvar Local Agent", content)
+        self.assertIn("if not ConfigAllowsStart() then begin", content)
+        self.assertIn("Configuração do Sysvar Local Agent não ficou válida após a ativação.", content)
+        self.assertLess(content.index("Não foi possível ativar"), content.index("ExecAgentWithConfig('start')"))
+        self.assertLess(content.index("Configuração do Sysvar Local Agent não ficou válida"), content.index("ExecAgentWithConfig('start')"))
 
     def test_installer_appid_versao_output_e_x64(self):
         installer = Path(__file__).resolve().parents[1] / "installer" / "SysvarLocalAgent.iss"

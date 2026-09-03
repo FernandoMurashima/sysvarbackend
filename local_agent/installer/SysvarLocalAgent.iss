@@ -35,6 +35,11 @@ Name: "{commonappdata}\Sysvar\LocalAgent\logs"; Permissions: system-full admins-
 var
   HadService: Boolean;
   WasServiceRunning: Boolean;
+  ActivationPage: TInputQueryWizardPage;
+  ConfigValidBeforeInstall: Boolean;
+
+function SetEnvironmentVariable(lpName: String; lpValue: String): Boolean;
+external 'SetEnvironmentVariableW@kernel32.dll stdcall';
 
 function ServiceName(): String;
 begin
@@ -77,6 +82,28 @@ begin
     ExpandConstant('{cmd}'),
     '/C set "SYSVAR_AGENT_CONFIG=' + AgentConfig() + '" && "' + AgentExe() + '" ' + Command
   );
+end;
+
+function ExecAgentWithSetupEnvironment(Command: String): Boolean;
+begin
+  SetEnvironmentVariable('SYSVAR_AGENT_CONFIG', AgentConfig());
+  try
+    Result := ExecHidden(AgentExe(), Command);
+  finally
+    SetEnvironmentVariable('SYSVAR_AGENT_CONFIG', '');
+  end;
+end;
+
+function ExecAgentActivation(Code: String): Boolean;
+begin
+  SetEnvironmentVariable('SYSVAR_AGENT_CONFIG', AgentConfig());
+  SetEnvironmentVariable('SYSVAR_AGENT_ACTIVATION_CODE', Code);
+  try
+    Result := ExecHidden(AgentExe(), 'activate');
+  finally
+    SetEnvironmentVariable('SYSVAR_AGENT_ACTIVATION_CODE', '');
+    SetEnvironmentVariable('SYSVAR_AGENT_CONFIG', '');
+  end;
 end;
 
 function ExecAgentAdmin(Command: String): Boolean;
@@ -181,16 +208,63 @@ end;
 
 function ConfigAllowsStart(): Boolean;
 begin
-  Result := ExecAgentWithConfig('config-ok');
+  Result := ExecAgentWithSetupEnvironment('config-ok');
+end;
+
+function ActivationCode(): String;
+begin
+  if ActivationPage = nil then
+    Result := ''
+  else
+    Result := Trim(UpperCase(ActivationPage.Values[0]));
+end;
+
+function ExistingConfigAllowsStart(): Boolean;
+begin
+  Result := FileExists(AgentExe()) and FileExists(AgentConfig()) and ConfigAllowsStart();
+end;
+
+procedure InitializeWizard();
+begin
+  ConfigValidBeforeInstall := ExistingConfigAllowsStart();
+  ActivationPage := CreateInputQueryPage(
+    wpSelectDir,
+    'Ativação do Sysvar Local Agent',
+    'Informe o código de ativação gerado no Sysvar.',
+    'O código é necessário em instalações novas ou para recuperar uma configuração inválida.'
+  );
+  ActivationPage.Add('Código de ativação:', False);
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (ActivationPage <> nil) and (PageID = ActivationPage.ID) and ConfigValidBeforeInstall;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (ActivationPage <> nil) and (CurPageID = ActivationPage.ID) and (ActivationCode() = '') then begin
+    MsgBox('Informe o código de ativação gerado no Sysvar.', mbError, MB_OK);
+    Result := False;
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
+    if not ConfigAllowsStart() then begin
+      if (ActivationCode() = '') or (not ExecAgentActivation(ActivationCode())) then begin
+        RaiseException('Não foi possível ativar o Sysvar Local Agent. Verifique o código de ativação e a conexão com o Sysvar.');
+      end;
+    end;
+    if not ConfigAllowsStart() then begin
+      RaiseException('Configuração do Sysvar Local Agent não ficou válida após a ativação.');
+    end;
     if not InstallOrUpdateService() then begin
       RaiseException('Falha ao registrar ou atualizar o serviço Sysvar Local Agent.');
     end;
-    if ConfigAllowsStart() and (WasServiceRunning or not HadService) then begin
+    if WasServiceRunning or not HadService then begin
       ExecAgentWithConfig('start');
     end;
   end;
