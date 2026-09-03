@@ -577,6 +577,8 @@ class ScannerRunnerTests(unittest.TestCase):
         content = spec.read_text(encoding="utf-8")
 
         self.assertIn("servicemanager", content)
+        self.assertIn("win32evtlog", content)
+        self.assertIn("win32evtlogutil", content)
         self.assertIn("win32serviceutil", content)
         self.assertIn("pywintypes", content)
         self.assertIn("pythoncom", content)

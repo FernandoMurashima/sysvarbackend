@@ -23,6 +23,8 @@ a = Analysis(
     hiddenimports=[
         "servicemanager",
         "win32event",
+        "win32evtlog",
+        "win32evtlogutil",
         "win32service",
         "win32serviceutil",
         "pywintypes",
