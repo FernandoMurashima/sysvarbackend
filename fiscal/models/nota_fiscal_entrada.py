@@ -24,7 +24,7 @@ class AgenteLocalSysvar(models.Model):
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="agentes_locais_sysvar", db_index=True)
     identificador = models.CharField(max_length=120)
     nome = models.CharField(max_length=120)
-    token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    token_hash = models.CharField(max_length=64, blank=True, null=True, unique=True, default=None)
     token_prefixo = models.CharField(max_length=12, blank=True, default="")
     ativo = models.BooleanField(default=True, db_index=True)
     ultimo_contato = models.DateTimeField(null=True, blank=True)
@@ -41,7 +41,6 @@ class AgenteLocalSysvar(models.Model):
         ]
         indexes = [
             Index(fields=["empresa", "ativo"], name="ix_agente_local_emp_ativo"),
-            Index(fields=["token_hash"], name="ix_agente_local_token_hash"),
         ]
 
     def __str__(self) -> str:

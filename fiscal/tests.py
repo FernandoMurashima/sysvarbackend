@@ -85,6 +85,7 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(resp_token.status_code, 200, resp_token.data)
         self.assertIn("token", resp_token.data)
         self.assertNotEqual(resp_token.data["token"], agente.token_hash)
+        self.assertTrue(AgenteLocalSysvar._meta.get_field("token_hash").unique)
         self.client.force_authenticate(self.user_b)
         self.assertEqual(self.client.get(f"/api/fiscal/agentes-locais/{agente.id}/").status_code, 404)
 
@@ -117,7 +118,7 @@ class AgenteLocalSysvarApiTests(TestCase):
 
     def test_heartbeat_atualiza_apenas_metadados_permitidos(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
-        self._token(agente)
+        token = self._token(agente)
         resp = self.client.post("/api/fiscal/agente-local/heartbeat/", {"versao": "1.0.0", "hostname": "SERVIDOR", "identificador": "OUTRO", "empresa": self.empresa_b.id}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         agente.refresh_from_db()
@@ -126,12 +127,15 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(agente.hostname, "SERVIDOR")
         self.assertEqual(agente.identificador, "AG-1")
         self.assertEqual(agente.empresa_id, self.empresa.id)
+        self.assertTrue(agente.ativo)
+        self.assertEqual(agente.token_hash, AgenteLocalSysvar.hash_token(token))
 
     def test_xml_detectado_cria_resolve_relacoes_e_nao_gera_efeitos_operacionais(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
         self._token(agente)
         cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
-        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, empresa=self.empresa_b.id, identificador_agente="ERRADO"), format="json")
+        with patch("builtins.open", side_effect=AssertionError("backend não deve abrir caminho_local")):
+            resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, empresa=self.empresa_b.id, identificador_agente="ERRADO"), format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
         self.assertTrue(resp.data["created"])
@@ -173,6 +177,43 @@ class AgenteLocalSysvarApiTests(TestCase):
         for cfg in (cfg_outra_empresa, cfg_outro_agente, cfg_inativa):
             resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg), format="json")
             self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_xml_detectado_rejeita_chave_existente_de_outra_empresa(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=None, caminho_local=r"X:\Fiscal\XML")
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa_b,
+            loja=self.loja_b,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+        )
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(XmlFornecedorRecebido.objects.count(), 1)
+
+    def test_xml_detectado_integrityerror_de_corrida_retorna_idempotente(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        existente = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+        )
+        def concorrente_criou(*args, **kwargs):
+            raise IntegrityError("duplicate key")
+
+        with patch.object(XmlFornecedorRecebido.objects, "create", side_effect=concorrente_criou), patch(
+            "fiscal.views.nota_fiscal_entrada.AgenteLocalApiViewSet._xml_existente_por_chave",
+            side_effect=[None, existente],
+        ):
+            resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg), format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["created"])
+        self.assertEqual(XmlFornecedorRecebido.objects.filter(chave_acesso="35260822345678000195550010000001234567890121").count(), 1)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

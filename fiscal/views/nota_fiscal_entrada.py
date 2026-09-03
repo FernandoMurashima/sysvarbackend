@@ -2460,21 +2460,34 @@ class AgenteLocalApiViewSet(viewsets.ViewSet):
         loja = self._resolver_loja(agente.empresa_id, configuracao, data.get("destinatario_documento"))
         fornecedor = self._resolver_fornecedor(agente.empresa_id, data.get("emitente_documento"))
         chave = data["chave_acesso"]
-        existente = XmlFornecedorRecebido.objects.select_for_update().filter(chave_acesso=chave).first()
+        existente = self._xml_existente_por_chave(chave)
         if existente:
             if existente.empresa_id != agente.empresa_id:
                 raise ValidationError({"chave_acesso": "Chave de acesso já registrada."})
             self._atualizar_retry_seguro(existente, data)
             return Response({"created": False, "xml": XmlFornecedorRecebidoSerializer(existente).data}, status=status.HTTP_200_OK)
-        xml = XmlFornecedorRecebido.objects.create(
-            empresa=agente.empresa,
-            loja=loja,
-            fornecedor=fornecedor,
-            identificador_agente=agente.identificador,
-            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
-            **data,
-        )
-        return Response({"created": True, "xml": XmlFornecedorRecebidoSerializer(xml).data}, status=status.HTTP_201_CREATED)
+        try:
+            with transaction.atomic():
+                xml = XmlFornecedorRecebido.objects.create(
+                    empresa=agente.empresa,
+                    loja=loja,
+                    fornecedor=fornecedor,
+                    identificador_agente=agente.identificador,
+                    status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+                    **data,
+                )
+            return Response({"created": True, "xml": XmlFornecedorRecebidoSerializer(xml).data}, status=status.HTTP_201_CREATED)
+        except IntegrityError:
+            existente = self._xml_existente_por_chave(chave)
+            if not existente:
+                raise
+            if existente.empresa_id != agente.empresa_id:
+                raise ValidationError({"chave_acesso": "Chave de acesso já registrada."})
+            self._atualizar_retry_seguro(existente, data)
+            return Response({"created": False, "xml": XmlFornecedorRecebidoSerializer(existente).data}, status=status.HTTP_200_OK)
+
+    def _xml_existente_por_chave(self, chave):
+        return XmlFornecedorRecebido.objects.select_for_update().filter(chave_acesso=chave).first()
 
     def _resolver_loja(self, empresa_id, configuracao, destinatario_documento):
         if configuracao.loja_id:
