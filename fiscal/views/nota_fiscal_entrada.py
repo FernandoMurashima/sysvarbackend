@@ -1,8 +1,9 @@
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
+from django.utils.dateparse import parse_date
 from django.utils import timezone
 from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -2316,6 +2317,8 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
         situacao_fiscal = self.request.query_params.get("situacao_fiscal")
         chave = self.request.query_params.get("chave_acesso")
         search = self.request.query_params.get("search")
+        detectado_de = self.request.query_params.get("detectado_de")
+        detectado_ate = self.request.query_params.get("detectado_ate")
 
         if loja:
             qs = qs.filter(loja_id=loja)
@@ -2327,6 +2330,16 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
             qs = qs.filter(situacao_fiscal=situacao_fiscal)
         if chave:
             qs = qs.filter(chave_acesso__icontains=chave)
+        if detectado_de:
+            data_de = parse_date(detectado_de)
+            if data_de:
+                inicio = timezone.make_aware(datetime.combine(data_de, datetime.min.time()))
+                qs = qs.filter(detectado_em__gte=inicio)
+        if detectado_ate:
+            data_ate = parse_date(detectado_ate)
+            if data_ate:
+                fim = timezone.make_aware(datetime.combine(data_ate + timedelta(days=1), datetime.min.time()))
+                qs = qs.filter(detectado_em__lt=fim)
         if search:
             qs = qs.filter(
                 Q(chave_acesso__icontains=search)
@@ -2337,6 +2350,31 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
                 | Q(destinatario_nome__icontains=search)
             )
         return qs
+
+    @action(detail=False, methods=["get"], url_path="indicadores")
+    def indicadores(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        total = qs.count()
+        detectadas = qs.filter(status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO).count()
+        aguardando = qs.filter(status_operacional=XmlFornecedorRecebido.StatusOperacional.AGUARDANDO_RECEBIMENTO).count()
+        em_recebimento = qs.filter(status_operacional=XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO).count()
+        finalizadas = qs.filter(
+            status_operacional__in=[
+                XmlFornecedorRecebido.StatusOperacional.RECEBIDO,
+                XmlFornecedorRecebido.StatusOperacional.PROCESSADO,
+            ]
+        ).count()
+        return Response(
+            {
+                "total": total,
+                "detectadas": detectadas,
+                "aguardando_recebimento": aguardando,
+                "em_recebimento": em_recebimento,
+                "recebidas_processadas": finalizadas,
+                "pendentes": detectadas + aguardando,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def _validar_empresa_usuario(self, empresa):
         user_empresa_id = self._empresa_id_usuario()

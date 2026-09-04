@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -447,6 +447,116 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.client.force_authenticate(self.user_b)
         resp = self.client.get(f"/api/fiscal/xmls-fornecedor-recebidos/{own.id}/")
         self.assertEqual(resp.status_code, 404)
+
+    def test_filtros_listagem_xmls_detectados(self):
+        own = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+            situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+        )
+        other = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=None,
+            fornecedor=None,
+            chave_acesso="35260822345678000195550010000009994567890125",
+            modelo="55",
+            serie="2",
+            numero="999",
+            situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.CANCELADA,
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.IGNORADO,
+        )
+        detectado_em = timezone.make_aware(datetime(2026, 9, 4, 12, 0, 0))
+        XmlFornecedorRecebido.objects.filter(pk=own.pk).update(detectado_em=detectado_em)
+        own.refresh_from_db()
+        queries = (
+            {"status_operacional": XmlFornecedorRecebido.StatusOperacional.DETECTADO},
+            {"situacao_fiscal": XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA},
+            {"loja": self.loja.id},
+            {"fornecedor": self.fornecedor.id},
+            {"search": "123"},
+            {"search": "35260822345678000195550010000001234567890121"},
+            {"chave_acesso": "0000001234567890121"},
+            {"detectado_de": own.detectado_em.date().isoformat(), "detectado_ate": own.detectado_em.date().isoformat()},
+        )
+        for params in queries:
+            resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/", params)
+            self.assertEqual(resp.status_code, 200, resp.data)
+            rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+            self.assertIn(own.id, [row["id"] for row in rows], params)
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/", {"status_operacional": XmlFornecedorRecebido.StatusOperacional.DETECTADO})
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(other.id, [row["id"] for row in rows])
+
+    def test_listagem_ordena_mais_recentes_primeiro_e_nulls_nao_quebram(self):
+        antigo = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=None,
+            fornecedor=None,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        recente = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890130",
+            modelo="55",
+            serie="1",
+            numero="124",
+        )
+        XmlFornecedorRecebido.objects.filter(pk=antigo.pk).update(detectado_em=timezone.now() - timedelta(days=1))
+
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertEqual(rows[0]["id"], recente.id)
+        self.assertIsNone(next(row for row in rows if row["id"] == antigo.id)["fornecedor"])
+        self.assertIsNone(next(row for row in rows if row["id"] == antigo.id)["loja"])
+        self.assertNotIn("xml_original", rows[0])
+        self.assertNotIn("token_hash", rows[0])
+
+    def test_indicadores_respeitam_empresa_e_filtros(self):
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+        )
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890130",
+            modelo="55",
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.AGUARDANDO_RECEBIMENTO,
+        )
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa_b,
+            loja=self.loja_b,
+            fornecedor=self.fornecedor_b,
+            chave_acesso="35260822345678000195550010000001234567890149",
+            modelo="55",
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+        )
+
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/indicadores/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["total"], 2)
+        self.assertEqual(resp.data["detectadas"], 1)
+        self.assertEqual(resp.data["aguardando_recebimento"], 1)
+        self.assertEqual(resp.data["pendentes"], 2)
 
     def test_usuario_somente_fiscal_consegue_consultar(self):
         obj = XmlFornecedorRecebido.objects.create(
