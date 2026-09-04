@@ -1,3 +1,5 @@
+import hashlib
+import json
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime, timedelta
 
@@ -29,7 +31,7 @@ except Exception:
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.authentication import AgentTokenAuthentication
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -2409,6 +2411,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         "vincular_pedidos",
         "gerar_conferencia",
         "salvar_conferencia",
+        "encerrar_conferencia",
     }
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
@@ -2422,6 +2425,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             "conferencia_itens__cor",
             "conferencia_itens__tamanho",
             "conferencia_itens__produto_detalhe",
+            "termo_encerramento",
         )
         .all()
         .order_by("-criado_em", "-id")
@@ -2519,6 +2523,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         pedido_ids = request.data.get("pedidos", [])
         if not isinstance(pedido_ids, list):
             return Response({"pedidos": "Informe uma lista de pedidos."}, status=status.HTTP_400_BAD_REQUEST)
+        if recebimento.status == RecebimentoMercadoriaEstoque.Status.CONCLUIDO:
+            return Response({"detail": "Recebimento concluído não permite alterar pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
         if recebimento.conferencia_itens.filter(quantidade_recebida__gt=0).exists():
             return Response({"detail": "Recebimento com conferência preenchida não permite alterar pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
         elegiveis = {pedido.id: pedido for pedido in self._pedidos_elegiveis_qs(recebimento).filter(id__in=pedido_ids)}
@@ -2535,6 +2541,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
     @transaction.atomic
     def gerar_conferencia(self, request, pk=None):
         recebimento = self.get_object()
+        if recebimento.status == RecebimentoMercadoriaEstoque.Status.CONCLUIDO:
+            return Response({"status": "Recebimento concluído não permite gerar conferência."}, status=status.HTTP_400_BAD_REQUEST)
         if recebimento.status not in [RecebimentoMercadoriaEstoque.Status.ABERTO, RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA]:
             return Response({"status": "Recebimento não permite gerar conferência neste status."}, status=status.HTTP_400_BAD_REQUEST)
         vinculos = list(recebimento.pedidos_vinculados.select_related("pedido").values_list("pedido_id", flat=True))
@@ -2588,6 +2596,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
     @transaction.atomic
     def salvar_conferencia(self, request, pk=None):
         recebimento = self.get_object()
+        if recebimento.status == RecebimentoMercadoriaEstoque.Status.CONCLUIDO:
+            return Response({"status": "Recebimento concluído não permite alterar conferência."}, status=status.HTTP_400_BAD_REQUEST)
         itens = request.data.get("itens", [])
         if not isinstance(itens, list):
             return Response({"itens": "Informe uma lista de itens."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2605,6 +2615,157 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             conferencia.save(update_fields=["quantidade_recebida", "atualizado_em"])
         recebimento = self.get_queryset().get(pk=recebimento.pk)
         return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="encerrar-conferencia")
+    @transaction.atomic
+    def encerrar_conferencia(self, request, pk=None):
+        recebimento = (
+            self.get_queryset()
+            .select_for_update()
+            .filter(pk=pk)
+            .first()
+        )
+        if not recebimento:
+            return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        self._validar_empresa_usuario(recebimento.empresa)
+
+        termo_existente = getattr(recebimento, "termo_encerramento", None)
+        if termo_existente:
+            return Response({"detail": "Recebimento já encerrado.", "termo_encerramento": self.get_serializer(recebimento).data.get("termo_encerramento")}, status=status.HTTP_400_BAD_REQUEST)
+        if recebimento.status != RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA:
+            return Response({"status": "Recebimento deve estar em conferência para encerrar."}, status=status.HTTP_400_BAD_REQUEST)
+        if not recebimento.pedidos_vinculados.exists():
+            return Response({"pedidos": "Vincule ao menos um pedido antes de encerrar."}, status=status.HTTP_400_BAD_REQUEST)
+        if not recebimento.conferencia_itens.exists():
+            return Response({"conferencia": "Gere a conferência antes de encerrar."}, status=status.HTTP_400_BAD_REQUEST)
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"detail": "Autenticação obrigatória."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        for item in recebimento.conferencia_itens.all():
+            if item.quantidade_recebida is None or item.quantidade_recebida < 0:
+                return Response({"quantidade_recebida": "Quantidades recebidas devem ser maiores ou iguais a zero."}, status=status.HTTP_400_BAD_REQUEST)
+
+        observacao = str(request.data.get("observacao_divergencia") or "").strip()
+        encerrado_em = timezone.now()
+        snapshot, possui_divergencia = self._snapshot_termo_recebimento(recebimento, request.user, observacao, encerrado_em)
+        if possui_divergencia and not observacao:
+            return Response({"observacao_divergencia": "Informe a justificativa da divergência antes de encerrar o recebimento."}, status=status.HTTP_400_BAD_REQUEST)
+        hash_sha256 = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+        RecebimentoMercadoriaTermo.objects.create(
+            recebimento=recebimento,
+            empresa=recebimento.empresa,
+            encerrado_por=request.user,
+            encerrado_em=encerrado_em,
+            observacao_divergencia=observacao,
+            possui_divergencia=possui_divergencia,
+            snapshot=snapshot,
+            hash_sha256=hash_sha256,
+        )
+        recebimento.status = RecebimentoMercadoriaEstoque.Status.CONCLUIDO
+        recebimento.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
+        recebimento = self.get_queryset().get(pk=recebimento.pk)
+        return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    def _snapshot_termo_recebimento(self, recebimento, user, observacao, encerrado_em):
+        xml = recebimento.xml_fornecedor
+        pedidos_vinculados = list(recebimento.pedidos_vinculados.select_related("pedido", "pedido__fornecedor", "pedido__loja").prefetch_related("pedido__itens"))
+        itens = list(recebimento.conferencia_itens.select_related("pedido", "pedido_item", "produto", "cor", "tamanho", "produto_detalhe").order_by("produto__referencia", "cor__Descricao", "tamanho__Tamanho", "id"))
+        pedido_total = sum((item.qtd or 0) for vinculo in pedidos_vinculados for item in vinculo.pedido.itens.all())
+        fisico_total = sum((item.quantidade_recebida or 0) for item in itens)
+        nfe_total = xml.quantidade_total_faturada if xml else None
+        linhas = []
+        faltas = []
+        sobras = []
+        referencias_recebidas = set()
+        skus_recebidos = set()
+        for item in itens:
+            diferenca = item.diferenca
+            situacao = "OK" if diferenca == 0 else "SOBRA" if diferenca > 0 else "FALTA"
+            linha = {
+                "referencia": item.produto.referencia or "",
+                "produto": item.produto.descricao or "",
+                "cor": item.cor.Descricao or "",
+                "tamanho": item.tamanho.Tamanho or "",
+                "ean": item.produto_detalhe.ean13 or "",
+                "esperado": str(item.quantidade_esperada),
+                "recebido": str(item.quantidade_recebida),
+                "diferenca": str(diferenca),
+                "situacao": situacao,
+            }
+            linhas.append(linha)
+            if item.quantidade_recebida and item.quantidade_recebida > 0:
+                referencias_recebidas.add(item.produto.referencia or str(item.produto_id))
+                skus_recebidos.add(item.produto_detalhe_id)
+            if diferenca < 0:
+                faltas.append(linha)
+            elif diferenca > 0:
+                sobras.append(linha)
+        possui_divergencia = (
+            fisico_total != pedido_total
+            or (nfe_total is not None and fisico_total != nfe_total)
+            or any(item.diferenca != 0 for item in itens)
+        )
+        snapshot = {
+            "recebimento": {
+                "id": recebimento.id,
+                "status_anterior": recebimento.status,
+                "criado_em": recebimento.criado_em.isoformat() if recebimento.criado_em else None,
+                "encerrado_em": encerrado_em.isoformat(),
+            },
+            "xml_nfe": {
+                "numero": getattr(xml, "numero", "") or "",
+                "serie": getattr(xml, "serie", "") or "",
+                "chave_acesso": getattr(xml, "chave_acesso", "") or "",
+                "fornecedor": getattr(xml, "emitente_nome", "") or getattr(recebimento.fornecedor, "nome_fornecedor", "") or "",
+                "documento_fornecedor": getattr(xml, "emitente_documento", "") or getattr(recebimento.fornecedor, "documento", "") or "",
+                "quantidade_total_faturada": str(nfe_total) if nfe_total is not None else None,
+                "unidade_comercial": getattr(xml, "unidade_comercial", "") or "",
+                "valor_total_nfe": str(getattr(xml, "valor_total", 0) or 0) if xml else None,
+                "dh_emissao": xml.dh_emissao.isoformat() if xml and xml.dh_emissao else None,
+            },
+            "estabelecimento": {
+                "id": recebimento.loja_id,
+                "nome": getattr(recebimento.loja, "nome_loja", None) or "Estabelecimento não identificado",
+            },
+            "pedidos_vinculados": [
+                {
+                    "id": vinculo.pedido.id,
+                    "numero": str(vinculo.pedido.id),
+                    "data": vinculo.pedido.emissao.isoformat() if vinculo.pedido.emissao else None,
+                    "fornecedor": getattr(vinculo.pedido.fornecedor, "nome_fornecedor", "") or "",
+                    "estabelecimento": getattr(vinculo.pedido.loja, "nome_loja", "") or "",
+                    "quantidade_total": str(sum((item.qtd or 0) for item in vinculo.pedido.itens.all())),
+                    "valor_total": str(vinculo.pedido.total_pedido or 0),
+                }
+                for vinculo in pedidos_vinculados
+            ],
+            "totais": {
+                "quantidade_pedido_total": str(pedido_total),
+                "quantidade_nfe_total": str(nfe_total) if nfe_total is not None else None,
+                "quantidade_fisica_total": str(fisico_total),
+                "diferenca_nfe_pedido": str(nfe_total - pedido_total) if nfe_total is not None else None,
+                "diferenca_fisico_nfe": str(fisico_total - nfe_total) if nfe_total is not None else None,
+                "diferenca_fisico_pedido": str(fisico_total - pedido_total),
+            },
+            "contagem_operacional": {
+                "quantidade_pedidos_vinculados": len(pedidos_vinculados),
+                "quantidade_referencias_distintas": len(referencias_recebidas),
+                "quantidade_skus_distintos": len(skus_recebidos),
+                "quantidade_skus_total_conferencia": len(itens),
+                "quantidade_skus_com_divergencia": sum(1 for item in itens if item.diferenca != 0),
+                "quantidade_total_fisica_recebida": str(fisico_total),
+            },
+            "conferencia_sku": linhas,
+            "divergencias": {"faltas": faltas, "sobras": sobras},
+            "usuario": {
+                "id": user.id,
+                "username": getattr(user, "username", "") or "",
+                "nome_completo": user.get_full_name() if hasattr(user, "get_full_name") else "",
+            },
+            "observacao": observacao,
+        }
+        return snapshot, possui_divergencia
 
     def _validar_empresa_usuario(self, empresa):
         user_empresa_id = self._empresa_id_usuario()

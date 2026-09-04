@@ -12,6 +12,7 @@ from .nota_fiscal_entrada import (
     NotaFiscalEntradaSerializer,
     RecebimentoMercadoriaConferenciaItemSerializer,
     RecebimentoMercadoriaEstoqueSerializer,
+    RecebimentoMercadoriaTermoSerializer,
     RecebimentoPedidoResumoSerializer,
     XmlFornecedorRecebidoSerializer,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "NotaFiscalEntradaSerializer",
     "RecebimentoMercadoriaConferenciaItemSerializer",
     "RecebimentoMercadoriaEstoqueSerializer",
+    "RecebimentoMercadoriaTermoSerializer",
     "RecebimentoPedidoResumoSerializer",
     "XmlFornecedorRecebidoSerializer",
     "NotaFiscalSaidaItemSerializer",

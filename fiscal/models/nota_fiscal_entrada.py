@@ -479,6 +479,37 @@ class RecebimentoMercadoriaConferenciaItem(models.Model):
         return f"Conferência recebimento {self.recebimento_id} item {self.pedido_item_id}/{self.tamanho_id}"
 
 
+class RecebimentoMercadoriaTermo(models.Model):
+    recebimento = models.OneToOneField(RecebimentoMercadoriaEstoque, on_delete=models.PROTECT, related_name="termo_encerramento")
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="recebimentos_mercadoria_termos", db_index=True)
+    encerrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="recebimentos_mercadoria_encerrados")
+    encerrado_em = models.DateTimeField()
+    observacao_divergencia = models.TextField(blank=True, default="")
+    possui_divergencia = models.BooleanField(default=False, db_index=True)
+    snapshot = models.JSONField(default=dict)
+    hash_sha256 = models.CharField(max_length=64)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_recebimento_mercadoria_termo"
+        ordering = ["-encerrado_em", "-id"]
+        indexes = [
+            Index(fields=["empresa", "encerrado_em"], name="ix_receb_term_emp_enc"),
+            Index(fields=["empresa", "possui_divergencia"], name="ix_receb_term_emp_div"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and not kwargs.pop("_allow_update", False):
+            raise ValueError("Termo de recebimento é imutável.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Termo de recebimento não pode ser excluído.")
+
+    def __str__(self) -> str:
+        return f"Termo recebimento {self.recebimento_id}"
+
+
 class ConfiguracaoXmlFornecedor(models.Model):
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", null=True, blank=True, db_index=True)

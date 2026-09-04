@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from compras.models import PedidoCompra
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -194,6 +194,20 @@ class RecebimentoMercadoriaConferenciaItemSerializer(serializers.ModelSerializer
         return "SOBRA" if obj.diferenca > 0 else "FALTA"
 
 
+class RecebimentoMercadoriaTermoSerializer(serializers.ModelSerializer):
+    encerrado_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecebimentoMercadoriaTermo
+        fields = ("id", "encerrado_em", "encerrado_por_nome", "observacao_divergencia", "possui_divergencia", "hash_sha256", "snapshot", "criado_em")
+        read_only_fields = fields
+
+    def get_encerrado_por_nome(self, obj):
+        user = obj.encerrado_por
+        nome = getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "")
+        return nome
+
+
 class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
@@ -202,13 +216,15 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
     pedidos = serializers.SerializerMethodField()
     conferencia_itens = RecebimentoMercadoriaConferenciaItemSerializer(many=True, read_only=True)
     conferencia_resumo = serializers.SerializerMethodField()
+    termo_encerramento = RecebimentoMercadoriaTermoSerializer(read_only=True)
+    pode_encerrar_conferencia = serializers.SerializerMethodField()
 
     class Meta:
         model = RecebimentoMercadoriaEstoque
         fields = (
             "id", "empresa", "loja", "loja_nome", "xml_fornecedor", "xml_fornecedor_dados", "fornecedor",
             "fornecedor_nome", "status", "status_label", "criado_por", "criado_em", "atualizado_em", "pedidos",
-            "conferencia_itens", "conferencia_resumo",
+            "conferencia_itens", "conferencia_resumo", "termo_encerramento", "pode_encerrar_conferencia",
         )
         read_only_fields = ("empresa", "criado_por", "criado_em", "atualizado_em", "pedidos")
 
@@ -240,6 +256,14 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
             "quantidade_skus": len(itens),
             "quantidade_skus_com_divergencia": divergentes,
         }
+
+    def get_pode_encerrar_conferencia(self, obj):
+        return (
+            obj.status == RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA
+            and obj.pedidos_vinculados.exists()
+            and obj.conferencia_itens.exists()
+            and not hasattr(obj, "termo_encerramento")
+        )
 
     def validate(self, attrs):
         xml = attrs.get("xml_fornecedor", getattr(self.instance, "xml_fornecedor", None))

@@ -13,7 +13,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -1025,6 +1025,111 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(Estoque.objects.count(), estoque_count)
         self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
+
+    def test_encerrar_sem_divergencia_cria_termo_onetoone_status_usuario_snapshot_hash_e_nao_movimenta_estoque(self):
+        self.xml.quantidade_total_faturada = Decimal("6.000")
+        self.xml.unidade_comercial = "UN"
+        self.xml.valor_total = Decimal("99.90")
+        self.xml.save(update_fields=["quantidade_total_faturada", "unidade_comercial", "valor_total"])
+        pedido, _ = self.pedido_com_item()
+        estoque_count = Estoque.objects.count()
+        mov_count = EstoqueMovimentacao.objects.count()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linha.id, "quantidade_recebida": str(linha.quantidade_esperada)} for linha in linhas]},
+            format="json",
+        )
+
+        antes = timezone.now()
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"encerrado_por": self.user_b.id, "hash_sha256": "x", "snapshot": {"x": 1}}, format="json")
+        depois = timezone.now()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.recebimento.refresh_from_db()
+        self.assertEqual(self.recebimento.status, RecebimentoMercadoriaEstoque.Status.CONCLUIDO)
+        termo = RecebimentoMercadoriaTermo.objects.get(recebimento=self.recebimento)
+        self.assertEqual(RecebimentoMercadoriaTermo.objects.filter(recebimento=self.recebimento).count(), 1)
+        self.assertEqual(termo.encerrado_por, self.user)
+        self.assertLessEqual(antes, termo.encerrado_em)
+        self.assertLessEqual(termo.encerrado_em, depois)
+        self.assertFalse(termo.possui_divergencia)
+        self.assertEqual(len(termo.hash_sha256), 64)
+        snapshot = termo.snapshot
+        self.assertEqual(snapshot["xml_nfe"]["numero"], "900")
+        self.assertEqual(snapshot["pedidos_vinculados"][0]["id"], pedido.id)
+        self.assertEqual(len(snapshot["conferencia_sku"]), 2)
+        self.assertEqual(snapshot["contagem_operacional"]["quantidade_referencias_distintas"], 1)
+        self.assertEqual(snapshot["totais"]["quantidade_fisica_total"], "6.000")
+        esperado_hash = __import__("hashlib").sha256(__import__("json").dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        self.assertEqual(termo.hash_sha256, esperado_hash)
+        self.assertNotEqual(termo.hash_sha256, "x")
+        self.assertEqual(Estoque.objects.count(), estoque_count)
+        self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
+        self.assertIn("termo_encerramento", resp.data)
+        self.assertFalse(resp.data["pode_encerrar_conferencia"])
+
+    def test_encerramento_com_divergencia_exige_justificativa_e_registra_faltas_sobras(self):
+        self.xml.quantidade_total_faturada = Decimal("7.000")
+        self.xml.save(update_fields=["quantidade_total_faturada"])
+        self.pedido_com_item()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "3.000"}, {"id": linhas[1].id, "quantidade_recebida": "3.000"}]},
+            format="json",
+        )
+
+        sem_obs = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": ""}, format="json")
+        self.assertEqual(sem_obs.status_code, 400)
+        self.assertIn("Informe a justificativa", sem_obs.data["observacao_divergencia"])
+
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": "Contagem física validada pelo conferente."}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        termo = RecebimentoMercadoriaTermo.objects.get(recebimento=self.recebimento)
+        self.assertTrue(termo.possui_divergencia)
+        self.assertEqual(termo.observacao_divergencia, "Contagem física validada pelo conferente.")
+        self.assertEqual(len(termo.snapshot["divergencias"]["faltas"]), 1)
+        self.assertEqual(len(termo.snapshot["divergencias"]["sobras"]), 1)
+
+    def test_segunda_tentativa_nao_cria_outro_termo_e_bloqueia_operacoes_pos_encerramento(self):
+        self.xml.quantidade_total_faturada = Decimal("6.000")
+        self.xml.save(update_fields=["quantidade_total_faturada"])
+        self.pedido_com_item()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linha.id, "quantidade_recebida": str(linha.quantidade_esperada)} for linha in linhas]},
+            format="json",
+        )
+        primeiro = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {}, format="json")
+        self.assertEqual(primeiro.status_code, 200, primeiro.data)
+
+        segundo = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {}, format="json")
+        salvar = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/", {"itens": [{"id": linhas[0].id, "quantidade_recebida": "0"}]}, format="json")
+        vincular = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/vincular-pedidos/", {"pedidos": []}, format="json")
+        gerar = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/gerar-conferencia/", {}, format="json")
+
+        self.assertEqual(segundo.status_code, 400)
+        self.assertEqual(segundo.data["detail"], "Recebimento já encerrado.")
+        self.assertEqual(RecebimentoMercadoriaTermo.objects.filter(recebimento=self.recebimento).count(), 1)
+        self.assertEqual(salvar.status_code, 400)
+        self.assertEqual(vincular.status_code, 400)
+        self.assertEqual(gerar.status_code, 400)
+
+    def test_encerramento_respeita_isolamento_multiempresa(self):
+        self.pedido_com_item()
+        self.gerar()
+        self.client.force_authenticate(self.user_b)
+
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(RecebimentoMercadoriaTermo.objects.exists())
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
