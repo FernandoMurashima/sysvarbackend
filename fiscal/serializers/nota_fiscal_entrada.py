@@ -146,6 +146,9 @@ class XmlFornecedorRecebidoSerializer(serializers.ModelSerializer):
         valor_total = attrs.get("valor_total", getattr(self.instance, "valor_total", 0))
         if Decimal(valor_total or 0) < 0:
             raise serializers.ValidationError({"valor_total": "Informe valor total maior ou igual a zero."})
+        quantidade_total = attrs.get("quantidade_total_faturada", getattr(self.instance, "quantidade_total_faturada", None))
+        if quantidade_total is not None and Decimal(quantidade_total) < 0:
+            raise serializers.ValidationError({"quantidade_total_faturada": "Informe quantidade maior ou igual a zero."})
         return attrs
 
 
@@ -217,11 +220,23 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
         itens = list(obj.conferencia_itens.all())
         esperado = sum((item.quantidade_esperada or 0) for item in itens)
         recebido = sum((item.quantidade_recebida or 0) for item in itens)
+        pedido_total = sum(
+            (item.qtd or 0)
+            for vinculo in obj.pedidos_vinculados.all()
+            for item in vinculo.pedido.itens.all()
+        )
+        nfe_total = obj.xml_fornecedor.quantidade_total_faturada if obj.xml_fornecedor_id else None
         divergentes = sum(1 for item in itens if item.diferenca != 0)
         return {
             "quantidade_esperada_total": str(esperado),
             "quantidade_recebida_total": str(recebido),
             "diferenca_total": str(recebido - esperado),
+            "quantidade_pedido_total": str(pedido_total),
+            "quantidade_nfe_total": str(nfe_total) if nfe_total is not None else None,
+            "quantidade_fisica_total": str(recebido),
+            "diferenca_nfe_pedido": str(nfe_total - pedido_total) if nfe_total is not None else None,
+            "diferenca_fisico_nfe": str(recebido - nfe_total) if nfe_total is not None else None,
+            "diferenca_fisico_pedido": str(recebido - pedido_total),
             "quantidade_skus": len(itens),
             "quantidade_skus_com_divergencia": divergentes,
         }
@@ -258,6 +273,7 @@ class AgenteLocalXmlDetectadoSerializer(XmlFornecedorRecebidoSerializer):
         fields = (
             "id", "configuracao_id", "loja", "fornecedor", "chave_acesso", "modelo", "serie", "numero", "dh_emissao",
             "emitente_documento", "emitente_nome", "destinatario_documento", "destinatario_nome", "valor_total",
+            "quantidade_total_faturada", "unidade_comercial",
             "situacao_fiscal", "status_operacional", "caminho_origem_local", "identificador_agente", "detectado_em",
             "atualizado_em",
         )
@@ -277,6 +293,9 @@ class AgenteLocalXmlDetectadoSerializer(XmlFornecedorRecebidoSerializer):
         valor_total = attrs.get("valor_total", 0)
         if Decimal(valor_total or 0) < 0:
             raise serializers.ValidationError({"valor_total": "Informe valor total maior ou igual a zero."})
+        quantidade_total = attrs.get("quantidade_total_faturada")
+        if quantidade_total is not None and Decimal(quantidade_total) < 0:
+            raise serializers.ValidationError({"quantidade_total_faturada": "Informe quantidade maior ou igual a zero."})
         return attrs
 
 

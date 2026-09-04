@@ -2886,11 +2886,11 @@ class AgenteLocalApiViewSet(viewsets.ViewSet):
         return fornecedores[0] if len(fornecedores) == 1 else None
 
     def _atualizar_retry_seguro(self, xml, data):
-        campos = ["caminho_origem_local", "emitente_nome", "destinatario_nome"]
+        campos = ["caminho_origem_local", "emitente_nome", "destinatario_nome", "quantidade_total_faturada", "unidade_comercial"]
         changed = []
         for campo in campos:
             value = data.get(campo)
-            if value and getattr(xml, campo) != value:
+            if value is not None and value != "" and getattr(xml, campo) != value:
                 setattr(xml, campo, value)
                 changed.append(campo)
         if changed:

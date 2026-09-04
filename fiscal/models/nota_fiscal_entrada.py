@@ -360,6 +360,8 @@ class XmlFornecedorRecebido(models.Model):
     destinatario_documento = models.CharField(max_length=14, blank=True, default="")
     destinatario_nome = models.CharField(max_length=120, blank=True, default="")
     valor_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    quantidade_total_faturada = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    unidade_comercial = models.CharField(max_length=10, blank=True, default="")
     situacao_fiscal = models.CharField(max_length=20, choices=SituacaoFiscal.choices, default=SituacaoFiscal.DESCONHECIDA, db_index=True)
     status_operacional = models.CharField(max_length=24, choices=StatusOperacional.choices, default=StatusOperacional.DETECTADO, db_index=True)
     caminho_origem_local = models.CharField(max_length=500, blank=True, default="")

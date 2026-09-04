@@ -32,6 +32,9 @@ def nfe_xml(chave=CHAVE):
       <ide><mod>55</mod><serie>1</serie><nNF>12345</nNF><dhEmi>2026-09-03T08:00:00-03:00</dhEmi></ide>
       <emit><CNPJ>21222333000181</CNPJ><xNome>Fornecedor Teste</xNome></emit>
       <dest><CNPJ>11222333000181</CNPJ><xNome>Loja Teste</xNome></dest>
+      <det nItem="1"><prod><uCom>UN</uCom><qCom>100.000</qCom></prod></det>
+      <det nItem="2"><prod><uCom>UN</uCom><qCom>250.000</qCom></prod></det>
+      <det nItem="3"><prod><uCom>UN</uCom><qCom>346.000</qCom></prod></det>
       <total><ICMSTot><vNF>1000.00</vNF></ICMSTot></total>
     </infNFe>
   </NFe>
@@ -126,7 +129,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(data["destinatario_documento"], "11222333000181")
         self.assertEqual(data["destinatario_nome"], "Loja Teste")
         self.assertEqual(data["valor_total"], "1000.00")
+        self.assertEqual(data["quantidade_total_faturada"], "696.000")
+        self.assertEqual(data["unidade_comercial"], "UN")
         self.assertEqual(data["situacao_fiscal"], "AUTORIZADA")
+
+    def test_soma_qcom_com_decimal_e_nao_conta_linhas(self):
+        data = parse_nfe_file(self._write(nfe_xml()))
+        self.assertNotEqual(data["quantidade_total_faturada"], "3")
+        self.assertEqual(data["quantidade_total_faturada"], "696.000")
+
+    def test_unidades_comerciais_diferentes_nao_somam_total(self):
+        xml = nfe_xml().replace("<uCom>UN</uCom><qCom>250.000</qCom>", "<uCom>CX</uCom><qCom>250.000</qCom>")
+        data = parse_nfe_file(self._write(xml))
+        self.assertIsNone(data["quantidade_total_faturada"])
+        self.assertEqual(data["unidade_comercial"], "DIVERSAS")
 
     def test_xml_sem_infnfe_e_chave_invalida_sao_recusados(self):
         with self.assertRaises(NFeParseError):

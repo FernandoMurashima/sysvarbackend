@@ -66,6 +66,8 @@ class AgenteLocalSysvarApiTests(TestCase):
             "destinatario_documento": "11222333000181",
             "destinatario_nome": "Loja Agente",
             "valor_total": "1000.00",
+            "quantidade_total_faturada": "696.000",
+            "unidade_comercial": "UN",
             "situacao_fiscal": XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
         }
         data.update(extras)
@@ -230,6 +232,8 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(xml.fornecedor_id, self.fornecedor.id)
         self.assertEqual(xml.identificador_agente, "AG-1")
         self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertEqual(xml.quantidade_total_faturada, Decimal("696.000"))
+        self.assertEqual(xml.unidade_comercial, "UN")
         self.assertFalse(EstoqueMovimentacao.objects.exists())
         self.assertFalse(NotaFiscalEntrada.objects.exists())
         self.assertFalse(Pagar.objects.exists())
@@ -247,12 +251,25 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertIsNone(xml.fornecedor_id)
         xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
         xml.save(update_fields=["status_operacional"])
-        retry = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, emitente_documento="99999999999999", caminho_origem_local=r"X:\Fiscal\XML\retry.xml"), format="json")
+        xml.quantidade_total_faturada = None
+        xml.unidade_comercial = ""
+        xml.save(update_fields=["quantidade_total_faturada", "unidade_comercial"])
+        retry = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, emitente_documento="99999999999999", caminho_origem_local=r"X:\Fiscal\XML\retry.xml", quantidade_total_faturada="699.000"), format="json")
         self.assertEqual(retry.status_code, 200, retry.data)
         self.assertFalse(retry.data["created"])
         self.assertEqual(XmlFornecedorRecebido.objects.filter(chave_acesso=xml.chave_acesso).count(), 1)
         xml.refresh_from_db()
         self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+        self.assertEqual(xml.quantidade_total_faturada, Decimal("699.000"))
+        self.assertEqual(xml.unidade_comercial, "UN")
+
+    def test_xml_detectado_rejeita_quantidade_total_negativa(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, quantidade_total_faturada="-1.000"), format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertFalse(XmlFornecedorRecebido.objects.exists())
 
     def test_xml_detectado_rejeita_configuracoes_fora_do_escopo(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
@@ -909,6 +926,9 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.assertIn("SKU não encontrado", resp2.data["detail"])
 
     def test_salva_quantidade_recebida_e_calcula_diferencas(self):
+        self.xml.quantidade_total_faturada = Decimal("7.000")
+        self.xml.unidade_comercial = "UN"
+        self.xml.save(update_fields=["quantidade_total_faturada", "unidade_comercial"])
         self.pedido_com_item()
         self.gerar()
         linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
@@ -922,6 +942,23 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.assertEqual(Decimal(por_id[linhas[0].id]["diferenca"]), Decimal("-1.000"))
         self.assertEqual(Decimal(por_id[linhas[1].id]["diferenca"]), Decimal("0.000"))
         self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_total"]), Decimal("-1.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("6.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_nfe_total"]), Decimal("7.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_fisica_total"]), Decimal("5.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_nfe_pedido"]), Decimal("1.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_fisico_nfe"]), Decimal("-2.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_fisico_pedido"]), Decimal("-1.000"))
+
+    def test_resumo_sem_quantidade_nfe_retorna_diferencas_nfe_nulas(self):
+        self.pedido_com_item()
+        self.gerar()
+        resp = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resumo = resp.data["conferencia_resumo"]
+        self.assertIsNone(resumo["quantidade_nfe_total"])
+        self.assertIsNone(resumo["diferenca_nfe_pedido"])
+        self.assertIsNone(resumo["diferenca_fisico_nfe"])
+        self.assertEqual(Decimal(resumo["quantidade_pedido_total"]), Decimal("6.000"))
 
     def test_usuario_com_edicao_somente_estoque_gera_e_salva_conferencia(self):
         self.assertFalse(
