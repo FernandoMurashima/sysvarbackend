@@ -1,0 +1,10 @@
+{
+  "api_base_url": "http://127.0.0.1:8000",
+  "token": "P3n1IX3uS4yIpFLgjaF7FJTLWH6bobxwzbI6MSbV2vFr5oLFpq1C319xWOt5JMT6",
+  "poll_interval_seconds": 15,
+  "heartbeat_interval_seconds": 60,
+  "request_timeout_seconds": 15,
+  "min_file_age_seconds": 3,
+  "database_path": "data/agent.db",
+  "log_file": "logs/sysvar-agent.log"
+}
