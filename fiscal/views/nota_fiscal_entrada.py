@@ -13,7 +13,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from accounts.authentication import CompanyTokenAuthentication
 from accounts.permissions import HasModuleRole
 from cadastros.models import Fornecedor, Loja, Nat_Lancamento
-from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, RequisicaoItem
+from compras.models import OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, RequisicaoItem
 from compras.services_necessidade import sincronizar_requisicao_disponivel_para_atendimento
 from compras.services_requisicao import atualizar_status_material_ordem_servico, atualizar_status_material_os
 from produto.models import Estoque, EstoqueMovimentacao, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao
@@ -29,7 +29,7 @@ except Exception:
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.authentication import AgentTokenAuthentication
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -44,6 +44,7 @@ from fiscal.serializers import (
     NotaFiscalEntradaItemSerializer,
     NotaFiscalEntradaItemXmlSerializer,
     NotaFiscalEntradaSerializer,
+    RecebimentoMercadoriaConferenciaItemSerializer,
     RecebimentoMercadoriaEstoqueSerializer,
     RecebimentoPedidoResumoSerializer,
     XmlFornecedorRecebidoSerializer,
@@ -2403,7 +2404,14 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
     queryset = (
         RecebimentoMercadoriaEstoque.objects
         .select_related("empresa", "loja", "fornecedor", "xml_fornecedor", "criado_por")
-        .prefetch_related("pedidos_vinculados__pedido", "pedidos_vinculados__pedido__itens")
+        .prefetch_related(
+            "pedidos_vinculados__pedido",
+            "pedidos_vinculados__pedido__itens",
+            "conferencia_itens__produto",
+            "conferencia_itens__cor",
+            "conferencia_itens__tamanho",
+            "conferencia_itens__produto_detalhe",
+        )
         .all()
         .order_by("-criado_em", "-id")
     )
@@ -2500,6 +2508,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         pedido_ids = request.data.get("pedidos", [])
         if not isinstance(pedido_ids, list):
             return Response({"pedidos": "Informe uma lista de pedidos."}, status=status.HTTP_400_BAD_REQUEST)
+        if recebimento.conferencia_itens.filter(quantidade_recebida__gt=0).exists():
+            return Response({"detail": "Recebimento com conferência preenchida não permite alterar pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
         elegiveis = {pedido.id: pedido for pedido in self._pedidos_elegiveis_qs(recebimento).filter(id__in=pedido_ids)}
         faltantes = [pedido_id for pedido_id in pedido_ids if pedido_id not in elegiveis]
         if faltantes:
@@ -2508,6 +2518,81 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         for pedido_id in pedido_ids:
             RecebimentoMercadoriaPedido.objects.get_or_create(recebimento=recebimento, pedido_id=pedido_id)
         recebimento.refresh_from_db()
+        return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="gerar-conferencia")
+    @transaction.atomic
+    def gerar_conferencia(self, request, pk=None):
+        recebimento = self.get_object()
+        if recebimento.status not in [RecebimentoMercadoriaEstoque.Status.ABERTO, RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA]:
+            return Response({"status": "Recebimento não permite gerar conferência neste status."}, status=status.HTTP_400_BAD_REQUEST)
+        vinculos = list(recebimento.pedidos_vinculados.select_related("pedido").values_list("pedido_id", flat=True))
+        if not vinculos:
+            return Response({"pedidos": "Vincule ao menos um pedido antes de gerar a conferência."}, status=status.HTTP_400_BAD_REQUEST)
+        if recebimento.conferencia_itens.exists():
+            return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+        itens = (
+            PedidoCompraItem.objects
+            .select_related("pedido", "produto", "cor", "pack")
+            .prefetch_related("pack__itens__tamanho")
+            .filter(pedido_id__in=vinculos)
+            .order_by("produto__referencia", "cor__Descricao", "id")
+        )
+        for item in itens:
+            if not (item.produto_id and item.cor_id and item.pack_id and item.n_packs):
+                continue
+            pack_itens = list(item.pack.itens.select_related("tamanho").order_by("tamanho__idgrade_id", "tamanho__Idtamanho"))
+            if not pack_itens:
+                return Response({"detail": f"Pack sem composição no pedido {item.pedido_id}, item {item.id}."}, status=status.HTTP_400_BAD_REQUEST)
+            esperado_total = sum(Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0) for pack_item in pack_itens)
+            if esperado_total != Decimal(item.qtd or 0):
+                return Response(
+                    {"detail": f"Soma do pack diferente da quantidade do pedido {item.pedido_id}, item {item.id}.", "esperado_pack": str(esperado_total), "qtd_item": str(item.qtd)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            for pack_item in pack_itens:
+                sku = ProdutoDetalhe.objects.filter(produto_id=item.produto_id, idcor_id=item.cor_id, idtamanho_id=pack_item.tamanho_id).first()
+                if not sku:
+                    return Response({"detail": f"SKU não encontrado para pedido {item.pedido_id}, item {item.id}, tamanho {pack_item.tamanho_id}."}, status=status.HTTP_400_BAD_REQUEST)
+                RecebimentoMercadoriaConferenciaItem.objects.create(
+                    recebimento=recebimento,
+                    pedido=item.pedido,
+                    pedido_item=item,
+                    produto_id=item.produto_id,
+                    cor_id=item.cor_id,
+                    tamanho_id=pack_item.tamanho_id,
+                    produto_detalhe=sku,
+                    quantidade_esperada=Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0),
+                )
+        if not RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).exists():
+            return Response({"detail": "Nenhum item de revenda com produto, cor e pack foi encontrado nos pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
+        if recebimento.status == RecebimentoMercadoriaEstoque.Status.ABERTO:
+            recebimento.status = RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA
+            recebimento.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
+        recebimento = self.get_queryset().get(pk=recebimento.pk)
+        return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="salvar-conferencia")
+    @transaction.atomic
+    def salvar_conferencia(self, request, pk=None):
+        recebimento = self.get_object()
+        itens = request.data.get("itens", [])
+        if not isinstance(itens, list):
+            return Response({"itens": "Informe uma lista de itens."}, status=status.HTTP_400_BAD_REQUEST)
+        ids = [item.get("id") for item in itens if isinstance(item, dict)]
+        conferencias = {item.id: item for item in recebimento.conferencia_itens.select_for_update().filter(id__in=ids)}
+        for item_data in itens:
+            item_id = item_data.get("id") if isinstance(item_data, dict) else None
+            conferencia = conferencias.get(item_id)
+            if not conferencia:
+                return Response({"itens": f"Item de conferência {item_id} não pertence ao recebimento."}, status=status.HTTP_400_BAD_REQUEST)
+            quantidade = Decimal(str(item_data.get("quantidade_recebida", 0) or 0))
+            if quantidade < 0:
+                return Response({"quantidade_recebida": "Quantidade recebida não pode ser negativa."}, status=status.HTTP_400_BAD_REQUEST)
+            conferencia.quantidade_recebida = quantidade
+            conferencia.save(update_fields=["quantidade_recebida", "atualizado_em"])
+        recebimento = self.get_queryset().get(pk=recebimento.pk)
         return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
 
     def _validar_empresa_usuario(self, empresa):

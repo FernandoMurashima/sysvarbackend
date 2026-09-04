@@ -443,6 +443,40 @@ class RecebimentoMercadoriaPedido(models.Model):
         return f"Recebimento {self.recebimento_id} - Pedido {self.pedido_id}"
 
 
+class RecebimentoMercadoriaConferenciaItem(models.Model):
+    recebimento = models.ForeignKey(RecebimentoMercadoriaEstoque, on_delete=models.CASCADE, related_name="conferencia_itens")
+    pedido = models.ForeignKey("compras.PedidoCompra", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    pedido_item = models.ForeignKey("compras.PedidoCompraItem", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    produto = models.ForeignKey("produto.Produto", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    cor = models.ForeignKey("produto.Cor", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    tamanho = models.ForeignKey("produto.Tamanho", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    produto_detalhe = models.ForeignKey("produto.ProdutoDetalhe", on_delete=models.PROTECT, related_name="recebimentos_conferencia")
+    quantidade_esperada = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    quantidade_recebida = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_recebimento_mercadoria_conferencia_item"
+        ordering = ["produto__referencia", "cor__Descricao", "tamanho__idgrade_id", "tamanho__Idtamanho", "id"]
+        constraints = [
+            UniqueConstraint(fields=["recebimento", "pedido_item", "tamanho"], name="uq_receb_conf_item_tamanho"),
+        ]
+        indexes = [
+            Index(fields=["recebimento"], name="ix_receb_conf_receb"),
+            Index(fields=["pedido"], name="ix_receb_conf_pedido"),
+            Index(fields=["pedido_item"], name="ix_receb_conf_peditem"),
+            Index(fields=["produto", "cor", "tamanho"], name="ix_receb_conf_sku_base"),
+        ]
+
+    @property
+    def diferenca(self):
+        return (self.quantidade_recebida or 0) - (self.quantidade_esperada or 0)
+
+    def __str__(self) -> str:
+        return f"Conferência recebimento {self.recebimento_id} item {self.pedido_item_id}/{self.tamanho_id}"
+
+
 class ConfiguracaoXmlFornecedor(models.Model):
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", null=True, blank=True, db_index=True)

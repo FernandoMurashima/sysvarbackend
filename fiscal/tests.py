@@ -13,7 +13,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -804,6 +804,165 @@ class RecebimentoMercadoriaEstoqueTests(TestCase):
         recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
         pedido = self.pedido()
         self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido.id]}, format="json")
+        self.assertEqual(Estoque.objects.count(), estoque_count)
+        self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class RecebimentoMercadoriaConferenciaTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Conferencia", documento="91222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Conferencia B", documento="91222333000262", plano_completo=True)
+        self.user = get_user_model().objects.create_user("conf-user", "conf@sysvar.test", "123", empresa=self.empresa, type="Gerente")
+        self.user_b = get_user_model().objects.create_user("conf-user-b", "confb@sysvar.test", "123", empresa=self.empresa_b, type="Gerente")
+        self.modulo_estoque = ModuloSistema.objects.update_or_create(chave="estoque", defaults={"nome": "Estoque", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True})[0]
+        for empresa, user in ((self.empresa, self.user), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(empresa=empresa, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_estoque, defaults={"contratado": True})
+            perfil = PerfilAcesso.objects.create(empresa=empresa, nome=f"Perfil {user.username}")
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.modulo_estoque, acesso=UserModulePermission.Access.EDIT)
+            user.perfil_principal = perfil
+            user.save(update_fields=["perfil_principal"])
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Conferencia", apelido_loja="CONF", cnpj="91222333000181", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Conferencia B", apelido_loja="CONB", cnpj="91222333000262", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="91222333000324", cnpj="91222333000324", nome_fornecedor="Fornecedor Conferencia", categoria="OUTROS")
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN")
+        self.grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade Conferencia")
+        self.tam_p = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="P")
+        self.tam_m = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="M")
+        self.cor_azul = Cor.objects.create(empresa=self.empresa, Descricao="Azul", Codigo="AZ", Cor="Azul")
+        self.cor_preta = Cor.objects.create(empresa=self.empresa, Descricao="Preta", Codigo="PR", Cor="Preta")
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="1", referencia="REF001", descricao="Camiseta", unidade=self.unidade, grade=self.grade)
+        self.produto2 = Produto.objects.create(empresa=self.empresa, tipo_produto="1", referencia="REF002", descricao="Calça", unidade=self.unidade, grade=self.grade)
+        ConfigEan.objects.create(empresa=self.empresa, country_prefix="789", company_prefix="1234", ativo=True)
+        self.pack = Pack.objects.create(empresa=self.empresa, nome="Pack PM", grade=self.grade)
+        PackItem.objects.create(pack=self.pack, tamanho=self.tam_p, qtd=1)
+        PackItem.objects.create(pack=self.pack, tamanho=self.tam_m, qtd=2)
+        self.sku_p = ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor_azul, idtamanho=self.tam_p)
+        self.sku_m = ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor_azul, idtamanho=self.tam_m)
+        ProdutoDetalhe.objects.create(produto=self.produto2, idcor=self.cor_preta, idtamanho=self.tam_p)
+        ProdutoDetalhe.objects.create(produto=self.produto2, idcor=self.cor_preta, idtamanho=self.tam_m)
+        self.xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso="35260822345678000195550010000001234567890185", modelo="55", serie="1", numero="900")
+        self.recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        self.client.force_authenticate(self.user)
+
+    def pedido_com_item(self, produto=None, cor=None, pack=None, n_packs=2, qtd=Decimal("6.000"), status="AP"):
+        pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="1", loja=self.loja, fornecedor=self.fornecedor, status=status, total_pedido=Decimal("10.00"))
+        item = PedidoCompraItem.objects.create(pedido=pedido, produto=produto or self.produto, cor=cor or self.cor_azul, pack=pack or self.pack, n_packs=n_packs, qtd=qtd, preco_unit=Decimal("1.00"), total_item=Decimal("10.00"))
+        RecebimentoMercadoriaPedido.objects.create(recebimento=self.recebimento, pedido=pedido)
+        return pedido, item
+
+    def gerar(self):
+        return self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/gerar-conferencia/", {}, format="json")
+
+    def test_gera_conferencia_de_pedido_com_pack_e_multiplos_tamanhos(self):
+        pedido, item = self.pedido_com_item()
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linhas = RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("tamanho_id")
+        self.assertEqual(linhas.count(), 2)
+        self.assertEqual(sum(l.quantidade_esperada for l in linhas), item.qtd)
+        self.assertEqual([l.quantidade_esperada for l in linhas], [Decimal("2.000"), Decimal("4.000")])
+        self.assertEqual({l.pedido_id for l in linhas}, {pedido.id})
+        self.recebimento.refresh_from_db()
+        self.assertEqual(self.recebimento.status, RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA)
+
+    def test_multiplas_cores_itens_e_multiplos_pedidos(self):
+        self.pedido_com_item()
+        outro_pedido, _ = self.pedido_com_item(produto=self.produto2, cor=self.cor_preta)
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).count(), 4)
+        self.assertIn(outro_pedido.id, {row["pedido"] for row in resp.data["conferencia_itens"]})
+
+    def test_idempotencia_nao_duplica_conferencia(self):
+        self.pedido_com_item()
+        self.gerar()
+        primeira_contagem = RecebimentoMercadoriaConferenciaItem.objects.count()
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(RecebimentoMercadoriaConferenciaItem.objects.count(), primeira_contagem)
+
+    def test_erro_quando_composicao_do_pack_inconsistente(self):
+        self.pedido_com_item(qtd=Decimal("5.000"))
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Soma do pack", resp.data["detail"])
+        self.assertFalse(RecebimentoMercadoriaConferenciaItem.objects.exists())
+
+    def test_sku_ean_resolvido_e_sku_ausente_retorna_erro_explicito(self):
+        _, item = self.pedido_com_item()
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linha = RecebimentoMercadoriaConferenciaItem.objects.get(pedido_item=item, tamanho=self.tam_p)
+        self.assertEqual(linha.produto_detalhe, self.sku_p)
+        self.assertEqual(resp.data["conferencia_itens"][0]["ean"], self.sku_p.ean13)
+
+        recebimento2 = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=None, criado_por=self.user)
+        produto_sem_sku = Produto.objects.create(empresa=self.empresa, tipo_produto="1", referencia="REF003", descricao="Jaqueta", unidade=self.unidade, grade=self.grade)
+        pedido = PedidoCompra.objects.create(empresa=self.empresa, tipo="1", loja=self.loja, fornecedor=self.fornecedor, status="AP")
+        PedidoCompraItem.objects.create(pedido=pedido, produto=produto_sem_sku, cor=self.cor_azul, pack=self.pack, n_packs=2, qtd=Decimal("6.000"), preco_unit=Decimal("1.00"), total_item=Decimal("6.00"))
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento2, pedido=pedido)
+        resp2 = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/gerar-conferencia/", {}, format="json")
+        self.assertEqual(resp2.status_code, 400)
+        self.assertIn("SKU não encontrado", resp2.data["detail"])
+
+    def test_salva_quantidade_recebida_e_calcula_diferencas(self):
+        self.pedido_com_item()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        resp = self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "1.000"}, {"id": linhas[1].id, "quantidade_recebida": "4.000"}]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        por_id = {row["id"]: row for row in resp.data["conferencia_itens"]}
+        self.assertEqual(Decimal(por_id[linhas[0].id]["diferenca"]), Decimal("-1.000"))
+        self.assertEqual(Decimal(por_id[linhas[1].id]["diferenca"]), Decimal("0.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_total"]), Decimal("-1.000"))
+
+    def test_diferenca_positiva_e_negativa_nao_bloqueiam_salvamento(self):
+        self.pedido_com_item()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        resp = self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "3.000"}, {"id": linhas[1].id, "quantidade_recebida": "3.000"}]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        diferencas = {Decimal(row["diferenca"]) for row in resp.data["conferencia_itens"]}
+        self.assertEqual(diferencas, {Decimal("1.000"), Decimal("-1.000")})
+
+    def test_nao_aceita_quantidade_negativa(self):
+        self.pedido_com_item()
+        self.gerar()
+        linha = RecebimentoMercadoriaConferenciaItem.objects.get(quantidade_esperada=Decimal("2.000"))
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/", {"itens": [{"id": linha.id, "quantidade_recebida": "-1"}]}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_isolamento_multiempresa_e_ids_arbitrarios(self):
+        self.pedido_com_item()
+        self.gerar()
+        linha = RecebimentoMercadoriaConferenciaItem.objects.first()
+        receb_b = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=None, criado_por=self.user_b)
+        self.client.force_authenticate(self.user_b)
+        detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/")
+        salvar = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{receb_b.id}/salvar-conferencia/", {"itens": [{"id": linha.id, "quantidade_recebida": "1"}]}, format="json")
+        self.assertEqual(detalhe.status_code, 404)
+        self.assertEqual(salvar.status_code, 400)
+
+    def test_nao_movimenta_estoque_e_bloqueia_alteracao_de_pedidos_com_conferencia_preenchida(self):
+        self.pedido_com_item()
+        estoque_count = Estoque.objects.count()
+        mov_count = EstoqueMovimentacao.objects.count()
+        self.gerar()
+        linha = RecebimentoMercadoriaConferenciaItem.objects.first()
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/", {"itens": [{"id": linha.id, "quantidade_recebida": "1"}]}, format="json")
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/vincular-pedidos/", {"pedidos": []}, format="json")
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(Estoque.objects.count(), estoque_count)
         self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
 

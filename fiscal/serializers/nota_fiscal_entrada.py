@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from compras.models import PedidoCompra
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -164,24 +164,67 @@ class RecebimentoPedidoResumoSerializer(serializers.ModelSerializer):
         return str(sum((item.qtd or 0) for item in obj.itens.all()))
 
 
+class RecebimentoMercadoriaConferenciaItemSerializer(serializers.ModelSerializer):
+    produto_referencia = serializers.CharField(source="produto.referencia", read_only=True)
+    produto_descricao = serializers.CharField(source="produto.descricao", read_only=True)
+    cor_nome = serializers.CharField(source="cor.Descricao", read_only=True)
+    tamanho_nome = serializers.CharField(source="tamanho.Tamanho", read_only=True)
+    ean = serializers.CharField(source="produto_detalhe.ean13", read_only=True)
+    diferenca = serializers.DecimalField(max_digits=14, decimal_places=3, read_only=True)
+    situacao = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecebimentoMercadoriaConferenciaItem
+        fields = (
+            "id", "recebimento", "pedido", "pedido_item", "produto", "produto_referencia", "produto_descricao",
+            "cor", "cor_nome", "tamanho", "tamanho_nome", "produto_detalhe", "ean", "quantidade_esperada",
+            "quantidade_recebida", "diferenca", "situacao", "criado_em", "atualizado_em",
+        )
+        read_only_fields = (
+            "recebimento", "pedido", "pedido_item", "produto", "cor", "tamanho", "produto_detalhe",
+            "quantidade_esperada", "criado_em", "atualizado_em",
+        )
+
+    def get_situacao(self, obj):
+        if obj.diferenca == 0:
+            return "OK"
+        return "SOBRA" if obj.diferenca > 0 else "FALTA"
+
+
 class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     xml_fornecedor_dados = XmlFornecedorRecebidoSerializer(source="xml_fornecedor", read_only=True)
     pedidos = serializers.SerializerMethodField()
+    conferencia_itens = RecebimentoMercadoriaConferenciaItemSerializer(many=True, read_only=True)
+    conferencia_resumo = serializers.SerializerMethodField()
 
     class Meta:
         model = RecebimentoMercadoriaEstoque
         fields = (
             "id", "empresa", "loja", "loja_nome", "xml_fornecedor", "xml_fornecedor_dados", "fornecedor",
             "fornecedor_nome", "status", "status_label", "criado_por", "criado_em", "atualizado_em", "pedidos",
+            "conferencia_itens", "conferencia_resumo",
         )
         read_only_fields = ("empresa", "criado_por", "criado_em", "atualizado_em", "pedidos")
 
     def get_pedidos(self, obj):
         pedidos = [vinculo.pedido for vinculo in obj.pedidos_vinculados.all()]
         return RecebimentoPedidoResumoSerializer(pedidos, many=True).data
+
+    def get_conferencia_resumo(self, obj):
+        itens = list(obj.conferencia_itens.all())
+        esperado = sum((item.quantidade_esperada or 0) for item in itens)
+        recebido = sum((item.quantidade_recebida or 0) for item in itens)
+        divergentes = sum(1 for item in itens if item.diferenca != 0)
+        return {
+            "quantidade_esperada_total": str(esperado),
+            "quantidade_recebida_total": str(recebido),
+            "diferenca_total": str(recebido - esperado),
+            "quantidade_skus": len(itens),
+            "quantidade_skus_com_divergencia": divergentes,
+        }
 
     def validate(self, attrs):
         xml = attrs.get("xml_fornecedor", getattr(self.instance, "xml_fornecedor", None))
