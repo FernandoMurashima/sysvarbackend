@@ -382,6 +382,67 @@ class XmlFornecedorRecebido(models.Model):
         return f"XML fornecedor {self.modelo}/{self.serie}/{self.numero} - {self.chave_acesso}"
 
 
+class RecebimentoMercadoriaEstoque(models.Model):
+    class Status(models.TextChoices):
+        ABERTO = "ABERTO", "Aberto"
+        EM_CONFERENCIA = "EM_CONFERENCIA", "Em conferência"
+        CONCLUIDO = "CONCLUIDO", "Concluído"
+        CANCELADO = "CANCELADO", "Cancelado"
+
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="recebimentos_mercadoria", db_index=True)
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="recebimentos_mercadoria", null=True, blank=True, db_index=True)
+    xml_fornecedor = models.ForeignKey("fiscal.XmlFornecedorRecebido", on_delete=models.PROTECT, related_name="recebimentos_mercadoria", null=True, blank=True, db_index=True)
+    xml_fornecedor_ativo_key = models.BigIntegerField(null=True, blank=True, editable=False)
+    fornecedor = models.ForeignKey("cadastros.Fornecedor", on_delete=models.PROTECT, related_name="recebimentos_mercadoria", null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ABERTO, db_index=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="recebimentos_mercadoria_criados", null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fiscal_recebimento_mercadoria_estoque"
+        ordering = ["-criado_em", "-id"]
+        constraints = [
+            UniqueConstraint(fields=["empresa", "xml_fornecedor_ativo_key"], name="uq_receb_merc_xml_ativo"),
+        ]
+        indexes = [
+            Index(fields=["empresa", "status"], name="ix_receb_merc_emp_status"),
+            Index(fields=["empresa", "loja"], name="ix_receb_merc_emp_loja"),
+            Index(fields=["empresa", "fornecedor"], name="ix_receb_merc_emp_forn"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Recebimento mercadoria {self.pk} - {self.status}"
+
+    def save(self, *args, **kwargs):
+        self.xml_fornecedor_ativo_key = (
+            self.xml_fornecedor_id
+            if self.xml_fornecedor_id and self.status in {self.Status.ABERTO, self.Status.EM_CONFERENCIA}
+            else None
+        )
+        super().save(*args, **kwargs)
+
+
+class RecebimentoMercadoriaPedido(models.Model):
+    recebimento = models.ForeignKey(RecebimentoMercadoriaEstoque, on_delete=models.CASCADE, related_name="pedidos_vinculados")
+    pedido = models.ForeignKey("compras.PedidoCompra", on_delete=models.PROTECT, related_name="recebimentos_mercadoria")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_recebimento_mercadoria_pedido"
+        ordering = ["pedido_id"]
+        constraints = [
+            UniqueConstraint(fields=["recebimento", "pedido"], name="uq_receb_merc_pedido"),
+        ]
+        indexes = [
+            Index(fields=["recebimento"], name="ix_receb_merc_ped_receb"),
+            Index(fields=["pedido"], name="ix_receb_merc_ped_pedido"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Recebimento {self.recebimento_id} - Pedido {self.pedido_id}"
+
+
 class ConfiguracaoXmlFornecedor(models.Model):
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", null=True, blank=True, db_index=True)

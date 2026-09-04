@@ -13,7 +13,7 @@ from accounts.models import PerfilAcesso, PerfilModuloPermissao, UserModulePermi
 from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
 from produto.models import Colecao, ConfigEan, Cor, Estoque, EstoqueMovimentacao, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 
@@ -679,6 +679,133 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.client.force_authenticate(self.user_compras)
         resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", self.payload(), format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class RecebimentoMercadoriaEstoqueTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Recebimento", documento="51222333000181", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Recebimento B", documento="51222333000262", plano_completo=True)
+        self.user = get_user_model().objects.create_user("receb-estoque", "receb@sysvar.test", "123", empresa=self.empresa, type="Gerente")
+        self.user_b = get_user_model().objects.create_user("receb-estoque-b", "recebb@sysvar.test", "123", empresa=self.empresa_b, type="Gerente")
+        self.modulo_estoque = ModuloSistema.objects.update_or_create(
+            chave="estoque",
+            defaults={"nome": "Estoque", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        self.modulo_compras = ModuloSistema.objects.update_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "basico": False, "ativo": True},
+        )[0]
+        for empresa, user in ((self.empresa, self.user), (self.empresa_b, self.user_b)):
+            EmpresaContrato.objects.update_or_create(empresa=empresa, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "usuario_master": user})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_estoque, defaults={"contratado": True})
+            EmpresaModulo.objects.update_or_create(empresa=empresa, modulo=self.modulo_compras, defaults={"contratado": True})
+            perfil = PerfilAcesso.objects.create(empresa=empresa, nome=f"Perfil {user.username}")
+            PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.modulo_estoque, acesso=UserModulePermission.Access.EDIT)
+            user.perfil_principal = perfil
+            user.save(update_fields=["perfil_principal"])
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Recebimento", apelido_loja="REC", cnpj="51222333000181", estado="SP")
+        self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Recebimento B", apelido_loja="RECB", cnpj="51222333000262", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="61222333000181", cnpj="61222333000181", nome_fornecedor="Fornecedor Recebimento", categoria="OUTROS")
+        self.fornecedor_outro = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="71222333000181", cnpj="71222333000181", nome_fornecedor="Fornecedor Outro", categoria="OUTROS")
+        self.fornecedor_b = Fornecedor.objects.create(empresa=self.empresa_b, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="81222333000181", cnpj="81222333000181", nome_fornecedor="Fornecedor B", categoria="OUTROS")
+        self.xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso="35260822345678000195550010000001234567890121", modelo="55", serie="1", numero="123")
+        self.xml_b = XmlFornecedorRecebido.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, chave_acesso="35260822345678000195550010000001234567890130", modelo="55", serie="1", numero="124")
+        self.client.force_authenticate(self.user)
+
+    def pedido(self, fornecedor=None, loja=None, empresa=None, status="AP", total=Decimal("10.00")):
+        empresa = empresa or self.empresa
+        pedido = PedidoCompra.objects.create(empresa=empresa, tipo="2", loja=loja or self.loja, fornecedor=fornecedor or self.fornecedor, status=status, total_pedido=total)
+        PedidoCompraItem.objects.create(pedido=pedido, descricao_livre="Item", qtd=Decimal("2.000"), preco_unit=Decimal("5.00"), total_item=total)
+        return pedido
+
+    def iniciar(self, xml=None):
+        return self.client.post("/api/fiscal/recebimentos-mercadoria/iniciar-por-xml/", {"xml_fornecedor": (xml or self.xml).id}, format="json")
+
+    def test_cria_recebimento_a_partir_de_xml(self):
+        resp = self.iniciar()
+        self.assertEqual(resp.status_code, 201, resp.data)
+        recebimento = RecebimentoMercadoriaEstoque.objects.get(pk=resp.data["id"])
+        self.assertEqual(recebimento.empresa, self.empresa)
+        self.assertEqual(recebimento.loja, self.loja)
+        self.assertEqual(recebimento.fornecedor, self.fornecedor)
+        self.assertEqual(recebimento.status, RecebimentoMercadoriaEstoque.Status.ABERTO)
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+
+    def test_impede_duplicacao_para_mesmo_xml(self):
+        primeiro = self.iniciar()
+        segundo = self.iniciar()
+        self.assertEqual(primeiro.status_code, 201, primeiro.data)
+        self.assertEqual(segundo.status_code, 200, segundo.data)
+        self.assertEqual(primeiro.data["id"], segundo.data["id"])
+        self.assertEqual(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=self.xml).count(), 1)
+
+    def test_isolamento_multiempresa(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, xml_fornecedor=self.xml_b, criado_por=self.user_b)
+        resp = self.client.get("/api/fiscal/recebimentos-mercadoria/")
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        self.assertNotIn(recebimento.id, [row["id"] for row in rows])
+        detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/")
+        self.assertEqual(detalhe.status_code, 404)
+        iniciar_outra = self.iniciar(self.xml_b)
+        self.assertIn(iniciar_outra.status_code, (400, 404))
+
+    def test_lista_pedidos_elegiveis(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        elegivel = self.pedido()
+        self.pedido(status="AB")
+        self.pedido(fornecedor=self.fornecedor_outro)
+        resp = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/pedidos-elegiveis/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual([row["id"] for row in resp.data], [elegivel.id])
+
+    def test_impede_pedido_de_outra_empresa(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=None, fornecedor=None, xml_fornecedor=self.xml, criado_por=self.user)
+        pedido_b = self.pedido(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b)
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido_b.id]}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(RecebimentoMercadoriaPedido.objects.exists())
+
+    def test_impede_fornecedor_incompativel(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        pedido = self.pedido(fornecedor=self.fornecedor_outro)
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido.id]}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_impede_estabelecimento_incompativel(self):
+        outra_loja = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Recebimento", apelido_loja="OREC", cnpj="51222333000343", estado="SP")
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        pedido = self.pedido(loja=outra_loja)
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido.id]}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_vincula_multiplos_pedidos_compativeis(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        pedido1 = self.pedido(total=Decimal("10.00"))
+        pedido2 = self.pedido(status="AT", total=Decimal("20.00"))
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido1.id, pedido2.id]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(RecebimentoMercadoriaPedido.objects.filter(recebimento=recebimento).count(), 2)
+        self.assertEqual({row["id"] for row in resp.data["pedidos"]}, {pedido1.id, pedido2.id})
+
+    def test_retrieve_e_list_do_recebimento(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        lista = self.client.get("/api/fiscal/recebimentos-mercadoria/")
+        detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/")
+        self.assertEqual(lista.status_code, 200, lista.data)
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        self.assertEqual(detalhe.data["id"], recebimento.id)
+
+    def test_nao_altera_estoque(self):
+        estoque_count = Estoque.objects.count()
+        mov_count = EstoqueMovimentacao.objects.count()
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        pedido = self.pedido()
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/vincular-pedidos/", {"pedidos": [pedido.id]}, format="json")
+        self.assertEqual(Estoque.objects.count(), estoque_count)
+        self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

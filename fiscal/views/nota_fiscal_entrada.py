@@ -29,7 +29,7 @@ except Exception:
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.authentication import AgentTokenAuthentication
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -44,6 +44,8 @@ from fiscal.serializers import (
     NotaFiscalEntradaItemSerializer,
     NotaFiscalEntradaItemXmlSerializer,
     NotaFiscalEntradaSerializer,
+    RecebimentoMercadoriaEstoqueSerializer,
+    RecebimentoPedidoResumoSerializer,
     XmlFornecedorRecebidoSerializer,
 )
 
@@ -2391,6 +2393,129 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
     def perform_update(self, serializer):
         self._validar_empresa_usuario(serializer.validated_data.get("empresa") or serializer.instance.empresa)
         serializer.save()
+
+
+class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
+    required_modules = ["estoque", "compras"]
+    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "iniciar_por_xml", "pedidos_elegiveis", "vincular_pedidos"}
+    read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
+    write_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
+    queryset = (
+        RecebimentoMercadoriaEstoque.objects
+        .select_related("empresa", "loja", "fornecedor", "xml_fornecedor", "criado_por")
+        .prefetch_related("pedidos_vinculados__pedido", "pedidos_vinculados__pedido__itens")
+        .all()
+        .order_by("-criado_em", "-id")
+    )
+    serializer_class = RecebimentoMercadoriaEstoqueSerializer
+    PEDIDO_STATUSES_ELEGIVEIS = ("AP", "AT")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            return qs.none()
+        status_q = self.request.query_params.get("status")
+        loja = self.request.query_params.get("loja")
+        fornecedor = self.request.query_params.get("fornecedor")
+        xml = self.request.query_params.get("xml_fornecedor")
+        if status_q:
+            qs = qs.filter(status=status_q)
+        if loja:
+            qs = qs.filter(loja_id=loja)
+        if fornecedor:
+            qs = qs.filter(fornecedor_id=fornecedor)
+        if xml:
+            qs = qs.filter(xml_fornecedor_id=xml)
+        return qs
+
+    def perform_create(self, serializer):
+        xml = serializer.validated_data.get("xml_fornecedor")
+        loja = serializer.validated_data.get("loja")
+        fornecedor = serializer.validated_data.get("fornecedor")
+        empresa = xml.empresa if xml else getattr(self.request.user, "empresa", None)
+        self._validar_empresa_usuario(empresa)
+        serializer.save(
+            empresa=empresa,
+            loja=loja or getattr(xml, "loja", None),
+            fornecedor=fornecedor or getattr(xml, "fornecedor", None),
+            criado_por=self.request.user,
+            status=RecebimentoMercadoriaEstoque.Status.ABERTO,
+        )
+
+    @action(detail=False, methods=["post"], url_path="iniciar-por-xml")
+    @transaction.atomic
+    def iniciar_por_xml(self, request):
+        xml_id = request.data.get("xml_fornecedor")
+        if not xml_id:
+            return Response({"xml_fornecedor": "Informe o XML detectado."}, status=status.HTTP_400_BAD_REQUEST)
+        xml = XmlFornecedorRecebido.objects.select_for_update().filter(pk=xml_id).first()
+        if not xml:
+            return Response({"detail": "XML detectado não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        self._validar_empresa_usuario(xml.empresa)
+        existente = (
+            RecebimentoMercadoriaEstoque.objects
+            .select_related("empresa", "loja", "fornecedor", "xml_fornecedor", "criado_por")
+            .prefetch_related("pedidos_vinculados__pedido", "pedidos_vinculados__pedido__itens")
+            .filter(xml_fornecedor=xml, status__in=[RecebimentoMercadoriaEstoque.Status.ABERTO, RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA])
+            .first()
+        )
+        if existente:
+            return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(
+            empresa=xml.empresa,
+            loja=xml.loja,
+            fornecedor=xml.fornecedor,
+            xml_fornecedor=xml,
+            status=RecebimentoMercadoriaEstoque.Status.ABERTO,
+            criado_por=request.user,
+        )
+        return Response(self.get_serializer(recebimento).data, status=status.HTTP_201_CREATED)
+
+    def _pedidos_elegiveis_qs(self, recebimento):
+        qs = (
+            PedidoCompra.objects
+            .select_related("empresa", "loja", "fornecedor")
+            .prefetch_related("itens")
+            .filter(empresa=recebimento.empresa, status__in=self.PEDIDO_STATUSES_ELEGIVEIS)
+            .order_by("-emissao", "-id")
+        )
+        if recebimento.fornecedor_id:
+            qs = qs.filter(fornecedor_id=recebimento.fornecedor_id)
+        if recebimento.loja_id:
+            qs = qs.filter(loja_id=recebimento.loja_id)
+        return qs
+
+    @action(detail=True, methods=["get"], url_path="pedidos-elegiveis")
+    def pedidos_elegiveis(self, request, pk=None):
+        recebimento = self.get_object()
+        return Response(RecebimentoPedidoResumoSerializer(self._pedidos_elegiveis_qs(recebimento), many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="vincular-pedidos")
+    @transaction.atomic
+    def vincular_pedidos(self, request, pk=None):
+        recebimento = self.get_object()
+        pedido_ids = request.data.get("pedidos", [])
+        if not isinstance(pedido_ids, list):
+            return Response({"pedidos": "Informe uma lista de pedidos."}, status=status.HTTP_400_BAD_REQUEST)
+        elegiveis = {pedido.id: pedido for pedido in self._pedidos_elegiveis_qs(recebimento).filter(id__in=pedido_ids)}
+        faltantes = [pedido_id for pedido_id in pedido_ids if pedido_id not in elegiveis]
+        if faltantes:
+            return Response({"pedidos": "Há pedido incompatível com este recebimento.", "ids": faltantes}, status=status.HTTP_400_BAD_REQUEST)
+        RecebimentoMercadoriaPedido.objects.filter(recebimento=recebimento).exclude(pedido_id__in=pedido_ids).delete()
+        for pedido_id in pedido_ids:
+            RecebimentoMercadoriaPedido.objects.get_or_create(recebimento=recebimento, pedido_id=pedido_id)
+        recebimento.refresh_from_db()
+        return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    def _validar_empresa_usuario(self, empresa):
+        user_empresa_id = self._empresa_id_usuario()
+        if not user_empresa_id and not self.request.user.is_superuser:
+            raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
+        if user_empresa_id and empresa and empresa.id != int(user_empresa_id):
+            raise ValidationError({"empresa": "Empresa fora do escopo do usuário."})
 
 
 class ConfiguracaoXmlFornecedorViewSet(BaseViewSet):

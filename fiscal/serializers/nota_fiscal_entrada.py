@@ -3,7 +3,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from rest_framework import serializers
 
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, XmlFornecedorRecebido
+from compras.models import PedidoCompra
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -145,6 +146,59 @@ class XmlFornecedorRecebidoSerializer(serializers.ModelSerializer):
         valor_total = attrs.get("valor_total", getattr(self.instance, "valor_total", 0))
         if Decimal(valor_total or 0) < 0:
             raise serializers.ValidationError({"valor_total": "Informe valor total maior ou igual a zero."})
+        return attrs
+
+
+class RecebimentoPedidoResumoSerializer(serializers.ModelSerializer):
+    fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    quantidade = serializers.SerializerMethodField()
+    valor = serializers.DecimalField(source="total_pedido", max_digits=18, decimal_places=2, read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = PedidoCompra
+        fields = ("id", "emissao", "fornecedor", "fornecedor_nome", "loja", "loja_nome", "quantidade", "valor", "status", "status_label")
+
+    def get_quantidade(self, obj):
+        return str(sum((item.qtd or 0) for item in obj.itens.all()))
+
+
+class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    xml_fornecedor_dados = XmlFornecedorRecebidoSerializer(source="xml_fornecedor", read_only=True)
+    pedidos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecebimentoMercadoriaEstoque
+        fields = (
+            "id", "empresa", "loja", "loja_nome", "xml_fornecedor", "xml_fornecedor_dados", "fornecedor",
+            "fornecedor_nome", "status", "status_label", "criado_por", "criado_em", "atualizado_em", "pedidos",
+        )
+        read_only_fields = ("empresa", "criado_por", "criado_em", "atualizado_em", "pedidos")
+
+    def get_pedidos(self, obj):
+        pedidos = [vinculo.pedido for vinculo in obj.pedidos_vinculados.all()]
+        return RecebimentoPedidoResumoSerializer(pedidos, many=True).data
+
+    def validate(self, attrs):
+        xml = attrs.get("xml_fornecedor", getattr(self.instance, "xml_fornecedor", None))
+        loja = attrs.get("loja", getattr(self.instance, "loja", None))
+        fornecedor = attrs.get("fornecedor", getattr(self.instance, "fornecedor", None))
+        empresa = getattr(self.instance, "empresa", None) or getattr(getattr(self.context.get("request"), "user", None), "empresa", None)
+        if xml:
+            empresa = xml.empresa
+            if loja and loja.empresa_id != xml.empresa_id:
+                raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+            if fornecedor and fornecedor.empresa_id != xml.empresa_id:
+                raise serializers.ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
+        elif empresa:
+            if loja and loja.empresa_id != empresa.id:
+                raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+            if fornecedor and fornecedor.empresa_id != empresa.id:
+                raise serializers.ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
         return attrs
 
 

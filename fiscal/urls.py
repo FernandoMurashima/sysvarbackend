@@ -1,6 +1,6 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import AgenteLocalApiViewSet, AgenteLocalSysvarViewSet, CfopViewSet, ConfiguracaoXmlFornecedorViewSet, NFCeViewSet, NotaFiscalEntradaItemViewSet, NotaFiscalEntradaViewSet, NotaFiscalSaidaItemViewSet, NotaFiscalSaidaViewSet, RegraTributariaViewSet, TributoViewSet, VendaDevolucaoViewSet, VendaPdvViewSet, XmlFornecedorRecebidoViewSet
+from .views import AgenteLocalApiViewSet, AgenteLocalSysvarViewSet, CfopViewSet, ConfiguracaoXmlFornecedorViewSet, NFCeViewSet, NotaFiscalEntradaItemViewSet, NotaFiscalEntradaViewSet, NotaFiscalSaidaItemViewSet, NotaFiscalSaidaViewSet, RecebimentoMercadoriaEstoqueViewSet, RegraTributariaViewSet, TributoViewSet, VendaDevolucaoViewSet, VendaPdvViewSet, XmlFornecedorRecebidoViewSet
 
 
 router = DefaultRouter()
@@ -13,6 +13,7 @@ router.register("agente-local", AgenteLocalApiViewSet, basename="agente-local")
 router.register("notas-entrada", NotaFiscalEntradaViewSet)
 router.register("notas-entrada-itens", NotaFiscalEntradaItemViewSet)
 router.register("xmls-fornecedor-recebidos", XmlFornecedorRecebidoViewSet)
+router.register("recebimentos-mercadoria", RecebimentoMercadoriaEstoqueViewSet)
 router.register("notas-saida", NotaFiscalSaidaViewSet)
 router.register("notas-saida-itens", NotaFiscalSaidaItemViewSet)
 router.register("vendas-pdv", VendaPdvViewSet)
