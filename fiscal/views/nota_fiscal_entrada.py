@@ -2398,7 +2398,18 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
 
 class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
     required_modules = ["estoque", "compras"]
-    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "iniciar_por_xml", "pedidos_elegiveis", "vincular_pedidos"}
+    action_required_modules_any = {
+        "list",
+        "retrieve",
+        "create",
+        "update",
+        "partial_update",
+        "iniciar_por_xml",
+        "pedidos_elegiveis",
+        "vincular_pedidos",
+        "gerar_conferencia",
+        "salvar_conferencia",
+    }
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     queryset = (

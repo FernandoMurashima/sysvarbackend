@@ -923,6 +923,29 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.assertEqual(Decimal(por_id[linhas[1].id]["diferenca"]), Decimal("0.000"))
         self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_total"]), Decimal("-1.000"))
 
+    def test_usuario_com_edicao_somente_estoque_gera_e_salva_conferencia(self):
+        self.assertFalse(
+            PerfilModuloPermissao.objects.filter(
+                perfil=self.user.perfil_principal,
+                modulo__chave="compras",
+                acesso=UserModulePermission.Access.EDIT,
+            ).exists()
+        )
+        self.pedido_com_item()
+        gerar = self.gerar()
+        self.assertEqual(gerar.status_code, 200, gerar.data)
+        linha = RecebimentoMercadoriaConferenciaItem.objects.get(recebimento=self.recebimento, tamanho=self.tam_p)
+
+        salvar = self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linha.id, "quantidade_recebida": "2.000"}]},
+            format="json",
+        )
+
+        self.assertEqual(salvar.status_code, 200, salvar.data)
+        linha.refresh_from_db()
+        self.assertEqual(linha.quantidade_recebida, Decimal("2.000"))
+
     def test_diferenca_positiva_e_negativa_nao_bloqueiam_salvamento(self):
         self.pedido_com_item()
         self.gerar()
