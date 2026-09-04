@@ -195,11 +195,17 @@ class ConfiguracaoXmlFornecedorSerializer(serializers.ModelSerializer):
         empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)
         loja = attrs.get("loja", getattr(self.instance, "loja", None))
         caminho = attrs.get("caminho_local", getattr(self.instance, "caminho_local", None))
+        identificador_agente = attrs.get("identificador_agente", getattr(self.instance, "identificador_agente", ""))
 
         if not empresa:
             raise serializers.ValidationError({"empresa": "Empresa é obrigatória."})
         if loja and loja.empresa_id != empresa.id:
             raise serializers.ValidationError({"loja": "Loja pertence a outra empresa."})
+        if identificador_agente is not None:
+            identificador_agente = str(identificador_agente).strip()
+            attrs["identificador_agente"] = identificador_agente
+            if identificador_agente and not AgenteLocalSysvar.objects.filter(empresa=empresa, identificador=identificador_agente).exists():
+                raise serializers.ValidationError({"identificador_agente": "Agente local inválido para esta empresa."})
 
         if caminho is not None:
             caminho = str(caminho).strip()

@@ -551,6 +551,8 @@ class ConfiguracaoXmlFornecedorTests(TestCase):
             user.save(update_fields=["perfil_principal"])
         self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Config XML", apelido_loja="CFG", cnpj="41222333000181", estado="SP")
         self.loja_b = Loja.objects.create(empresa=self.empresa_b, nome_loja="Loja Config XML B", apelido_loja="CFB", cnpj="41222333000262", estado="SP")
+        self.agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="agente-local-01", nome="Agente Local 01")
+        self.agente_b = AgenteLocalSysvar.objects.create(empresa=self.empresa_b, identificador="agente-local-b", nome="Agente Local B")
         self.client.force_authenticate(self.user_admin)
 
     def payload(self, caminho=r"X:\Fiscal\XML\Fornecedores", **extras):
@@ -607,6 +609,17 @@ class ConfiguracaoXmlFornecedorTests(TestCase):
 
     def test_loja_de_outra_empresa_e_recusada(self):
         self.post_config(self.payload(loja=self.loja_b.id), status_code=400)
+
+    def test_agente_da_mesma_empresa_e_aceito(self):
+        resp = self.post_config(self.payload(identificador_agente=self.agente.identificador))
+        self.assertEqual(resp.data["identificador_agente"], self.agente.identificador)
+
+    def test_agente_de_outra_empresa_e_recusado(self):
+        self.post_config(self.payload(identificador_agente=self.agente_b.identificador), status_code=400)
+
+    def test_identificador_agente_vazio_legado_continua_aceito(self):
+        resp = self.post_config(self.payload(identificador_agente=""))
+        self.assertEqual(resp.data["identificador_agente"], "")
 
     def test_usuario_de_outra_empresa_nao_consulta_configuracao(self):
         obj = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
