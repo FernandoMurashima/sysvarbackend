@@ -388,6 +388,20 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.assertEqual(resp.status_code, status_code, resp.data)
         return resp
 
+    def _usuario_com_acesso_fiscal(self, username, tipo):
+        user = get_user_model().objects.create_user(
+            username,
+            f"{username}@sysvar.test",
+            "123",
+            empresa=self.empresa,
+            type=tipo,
+        )
+        perfil = PerfilAcesso.objects.create(empresa=self.empresa, nome=f"Perfil {username}")
+        PerfilModuloPermissao.objects.create(perfil=perfil, modulo=self.modulo_fiscal, acesso=UserModulePermission.Access.VIEW)
+        user.perfil_principal = perfil
+        user.save(update_fields=["perfil_principal"])
+        return user
+
     def test_cria_registro_valido(self):
         resp = self.post_xml()
         obj = XmlFornecedorRecebido.objects.get(pk=resp.data["id"])
@@ -492,6 +506,39 @@ class XmlFornecedorRecebidoTests(TestCase):
         resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/", {"status_operacional": XmlFornecedorRecebido.StatusOperacional.DETECTADO})
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertNotIn(other.id, [row["id"] for row in rows])
+
+    def test_perfis_operacionais_podem_consultar_xmls_detectados(self):
+        from fiscal.views.nota_fiscal_entrada import XmlFornecedorRecebidoViewSet
+
+        self.assertEqual(
+            XmlFornecedorRecebidoViewSet.read_roles,
+            ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"],
+        )
+        self.assertEqual(XmlFornecedorRecebidoViewSet.write_roles, ["Admin", "Diretor", "Gerente", "AssistentePagar"])
+        XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+        usuarios_permitidos = (
+            self._usuario_com_acesso_fiscal("xml-diretor", "Diretor"),
+            self._usuario_com_acesso_fiscal("xml-gerente", "Gerente"),
+            self._usuario_com_acesso_fiscal("xml-auxiliar", "Auxiliar"),
+            self._usuario_com_acesso_fiscal("xml-assistente-pagar", "AssistentePagar"),
+        )
+
+        for user in usuarios_permitidos:
+            self.client.force_authenticate(user)
+            resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+            self.assertEqual(resp.status_code, 200, user.type)
+
+        self.client.force_authenticate(self.user_sem_modulo)
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+        self.assertEqual(resp.status_code, 403)
 
     def test_listagem_ordena_mais_recentes_primeiro_e_nulls_nao_quebram(self):
         antigo = XmlFornecedorRecebido.objects.create(
