@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from compras.models import PedidoCompra
-from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
 from fiscal.validators import normalizar_chave_acesso_nfe
@@ -208,6 +208,24 @@ class RecebimentoMercadoriaTermoSerializer(serializers.ModelSerializer):
         return nome
 
 
+class RecebimentoMercadoriaEfetivacaoEstoqueSerializer(serializers.ModelSerializer):
+    loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
+    efetivado_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecebimentoMercadoriaEfetivacaoEstoque
+        fields = (
+            "id", "recebimento", "termo", "empresa", "loja", "loja_nome", "efetivado_por",
+            "efetivado_por_nome", "efetivado_em", "quantidade_total", "quantidade_skus",
+            "hash_termo", "criado_em",
+        )
+        read_only_fields = fields
+
+    def get_efetivado_por_nome(self, obj):
+        user = obj.efetivado_por
+        return getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "")
+
+
 class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
@@ -218,6 +236,10 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
     conferencia_resumo = serializers.SerializerMethodField()
     termo_encerramento = RecebimentoMercadoriaTermoSerializer(read_only=True)
     pode_encerrar_conferencia = serializers.SerializerMethodField()
+    estoque_efetivado = serializers.SerializerMethodField()
+    efetivacao_estoque = RecebimentoMercadoriaEfetivacaoEstoqueSerializer(read_only=True)
+    pode_efetivar_estoque = serializers.SerializerMethodField()
+    efetivacao_estoque_resumo = serializers.SerializerMethodField()
 
     class Meta:
         model = RecebimentoMercadoriaEstoque
@@ -225,6 +247,7 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
             "id", "empresa", "loja", "loja_nome", "xml_fornecedor", "xml_fornecedor_dados", "fornecedor",
             "fornecedor_nome", "status", "status_label", "criado_por", "criado_em", "atualizado_em", "pedidos",
             "conferencia_itens", "conferencia_resumo", "termo_encerramento", "pode_encerrar_conferencia",
+            "estoque_efetivado", "efetivacao_estoque", "pode_efetivar_estoque", "efetivacao_estoque_resumo",
         )
         read_only_fields = ("empresa", "criado_por", "criado_em", "atualizado_em", "pedidos")
 
@@ -264,6 +287,44 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
             and obj.conferencia_itens.exists()
             and not hasattr(obj, "termo_encerramento")
         )
+
+    def get_estoque_efetivado(self, obj):
+        return hasattr(obj, "efetivacao_estoque")
+
+    def get_pode_efetivar_estoque(self, obj):
+        resumo = self._efetivacao_resumo(obj)
+        return bool(
+            obj.status == RecebimentoMercadoriaEstoque.Status.CONCLUIDO
+            and getattr(obj, "termo_encerramento", None)
+            and not hasattr(obj, "efetivacao_estoque")
+            and Decimal(resumo["quantidade_total"] or 0) > 0
+            and resumo["loja"] is not None
+        )
+
+    def get_efetivacao_estoque_resumo(self, obj):
+        return self._efetivacao_resumo(obj)
+
+    def _efetivacao_resumo(self, obj):
+        termo = getattr(obj, "termo_encerramento", None)
+        linhas = (getattr(termo, "snapshot", {}) or {}).get("conferencia_sku") or []
+        recebidas = [linha for linha in linhas if Decimal(str(linha.get("recebido") or 0)) > 0]
+        quantidade_total = sum(Decimal(str(linha.get("recebido") or 0)) for linha in recebidas)
+        loja = obj.loja
+        if loja is None:
+            lojas = {v.pedido.loja_id: v.pedido for v in obj.pedidos_vinculados.all() if v.pedido.loja_id}
+            if len(lojas) == 1:
+                loja = next(iter(lojas.values())).loja
+        return {
+            "loja": getattr(loja, "pk", None),
+            "loja_nome": getattr(loja, "nome_loja", None),
+            "quantidade_total": str(quantidade_total),
+            "quantidade_skus": len(recebidas),
+            "hash_termo": getattr(termo, "hash_sha256", "") or "",
+            "motivo_bloqueio": "" if loja and quantidade_total > 0 else (
+                "Não há quantidade física recebida para efetivar no estoque." if quantidade_total <= 0 else
+                "Não foi possível determinar um único estabelecimento para entrada do estoque."
+            ),
+        }
 
     def validate(self, attrs):
         xml = attrs.get("xml_fornecedor", getattr(self.instance, "xml_fornecedor", None))

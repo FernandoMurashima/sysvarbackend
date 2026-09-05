@@ -1259,6 +1259,7 @@ class EstoqueMovimentacao(models.Model):
     ORIGEM_INVENTARIO = 'INVENTARIO'
     ORIGEM_PRODUCAO = 'PRODUCAO'
     ORIGEM_AJUSTE_MANUAL = 'AJUSTE_MANUAL'
+    ORIGEM_RECEBIMENTO_MERCADORIA = 'RECEBIMENTO'
     ORIGEM_CHOICES = [
         (ORIGEM_NFE, 'NF-e'),
         (ORIGEM_VENDA, 'Venda'),
@@ -1267,6 +1268,7 @@ class EstoqueMovimentacao(models.Model):
         (ORIGEM_INVENTARIO, 'Inventário'),
         (ORIGEM_PRODUCAO, 'Produção'),
         (ORIGEM_AJUSTE_MANUAL, 'Ajuste manual'),
+        (ORIGEM_RECEBIMENTO_MERCADORIA, 'Recebimento de mercadoria'),
     ]
     TIPO_ENTRADA = 'ENTRADA'
     TIPO_SAIDA = 'SAIDA'

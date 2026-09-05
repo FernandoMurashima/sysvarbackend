@@ -510,6 +510,30 @@ class RecebimentoMercadoriaTermo(models.Model):
         return f"Termo recebimento {self.recebimento_id}"
 
 
+class RecebimentoMercadoriaEfetivacaoEstoque(models.Model):
+    recebimento = models.OneToOneField(RecebimentoMercadoriaEstoque, on_delete=models.PROTECT, related_name="efetivacao_estoque")
+    termo = models.ForeignKey(RecebimentoMercadoriaTermo, on_delete=models.PROTECT, related_name="efetivacoes_estoque")
+    empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="recebimentos_mercadoria_efetivacoes", db_index=True)
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="recebimentos_mercadoria_efetivacoes", db_index=True)
+    efetivado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="recebimentos_mercadoria_estoque_efetivados")
+    efetivado_em = models.DateTimeField()
+    quantidade_total = models.DecimalField(max_digits=14, decimal_places=3)
+    quantidade_skus = models.PositiveIntegerField()
+    hash_termo = models.CharField(max_length=64)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fiscal_recebimento_mercadoria_efetivacao_estoque"
+        ordering = ["-efetivado_em", "-id"]
+        indexes = [
+            Index(fields=["empresa", "loja"], name="ix_receb_efet_emp_loja"),
+            Index(fields=["empresa", "efetivado_em"], name="ix_receb_efet_emp_data"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Efetivação estoque recebimento {self.recebimento_id}"
+
+
 class ConfiguracaoXmlFornecedor(models.Model):
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="configuracoes_xml_fornecedor", null=True, blank=True, db_index=True)

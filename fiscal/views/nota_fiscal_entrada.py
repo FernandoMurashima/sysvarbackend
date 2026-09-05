@@ -31,7 +31,7 @@ except Exception:
     FormaPagamento = MovimentacaoFinanceira = Pagar = PagarItem = None
 
 from fiscal.authentication import AgentTokenAuthentication
-from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
+from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
@@ -47,6 +47,7 @@ from fiscal.serializers import (
     NotaFiscalEntradaItemXmlSerializer,
     NotaFiscalEntradaSerializer,
     RecebimentoMercadoriaConferenciaItemSerializer,
+    RecebimentoMercadoriaEfetivacaoEstoqueSerializer,
     RecebimentoMercadoriaEstoqueSerializer,
     RecebimentoPedidoResumoSerializer,
     XmlFornecedorRecebidoSerializer,
@@ -2412,6 +2413,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         "gerar_conferencia",
         "salvar_conferencia",
         "encerrar_conferencia",
+        "efetivar_estoque",
     }
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     write_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
@@ -2426,6 +2428,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             "conferencia_itens__tamanho",
             "conferencia_itens__produto_detalhe",
             "termo_encerramento",
+            "efetivacao_estoque",
         )
         .all()
         .order_by("-criado_em", "-id")
@@ -2666,6 +2669,109 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         recebimento.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
         recebimento = self.get_queryset().get(pk=recebimento.pk)
         return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="efetivar-estoque")
+    @transaction.atomic
+    def efetivar_estoque(self, request, pk=None):
+        recebimento = (
+            self.get_queryset()
+            .select_for_update()
+            .filter(pk=pk)
+            .first()
+        )
+        if not recebimento:
+            return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        self._validar_empresa_usuario(recebimento.empresa)
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"detail": "Autenticação obrigatória."}, status=status.HTTP_401_UNAUTHORIZED)
+        if recebimento.status != RecebimentoMercadoriaEstoque.Status.CONCLUIDO:
+            return Response({"status": "Recebimento deve estar concluído para efetivar estoque."}, status=status.HTTP_400_BAD_REQUEST)
+        termo = getattr(recebimento, "termo_encerramento", None)
+        if not termo:
+            return Response({"detail": "Termo de recebimento não encontrado."}, status=status.HTTP_400_BAD_REQUEST)
+        if termo.recebimento_id != recebimento.id or termo.empresa_id != recebimento.empresa_id:
+            return Response({"detail": "Termo de recebimento incompatível."}, status=status.HTTP_400_BAD_REQUEST)
+        if not termo.hash_sha256:
+            return Response({"detail": "Hash do termo de recebimento não preenchido."}, status=status.HTTP_400_BAD_REQUEST)
+        hash_recalculado = hashlib.sha256(json.dumps(termo.snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        if hash_recalculado != termo.hash_sha256:
+            return Response({"detail": "Integridade do termo de recebimento inválida."}, status=status.HTTP_400_BAD_REQUEST)
+        if RecebimentoMercadoriaEfetivacaoEstoque.objects.filter(recebimento=recebimento).exists():
+            return Response({"detail": "Estoque deste recebimento já foi efetivado."}, status=status.HTTP_400_BAD_REQUEST)
+
+        loja = self._loja_destino_estoque(recebimento)
+        if not loja:
+            return Response({"detail": "Não foi possível determinar um único estabelecimento para entrada do estoque."}, status=status.HTTP_400_BAD_REQUEST)
+        if loja.empresa_id != recebimento.empresa_id:
+            return Response({"detail": "Estabelecimento fora do escopo da empresa."}, status=status.HTTP_400_BAD_REQUEST)
+
+        linhas = self._linhas_fisicas_termo(termo)
+        if not linhas:
+            return Response({"detail": "Não há quantidade física recebida para efetivar no estoque."}, status=status.HTTP_400_BAD_REQUEST)
+        skus = {}
+        for linha in linhas:
+            ean = linha["ean"]
+            if not ean:
+                return Response({"detail": "EAN vazio no termo de recebimento."}, status=status.HTTP_400_BAD_REQUEST)
+            sku = ProdutoDetalhe.objects.select_related("produto").filter(ean13=ean, produto__empresa=recebimento.empresa).first()
+            if not sku:
+                return Response({"detail": f"SKU não encontrado para o EAN {ean}."}, status=status.HTTP_400_BAD_REQUEST)
+            skus[ean] = sku
+
+        quantidade_total = sum(linha["recebido"] for linha in linhas)
+        efetivacao = RecebimentoMercadoriaEfetivacaoEstoque.objects.create(
+            recebimento=recebimento,
+            termo=termo,
+            empresa=recebimento.empresa,
+            loja=loja,
+            efetivado_por=request.user,
+            efetivado_em=timezone.now(),
+            quantidade_total=quantidade_total,
+            quantidade_skus=len(linhas),
+            hash_termo=termo.hash_sha256,
+        )
+        for linha in linhas:
+            sku = skus[linha["ean"]]
+            estoque, _ = Estoque.objects.select_for_update().get_or_create(
+                CodigodeBarra=linha["ean"],
+                Idloja=loja,
+                defaults={"referencia": sku.produto.referencia or "", "Estoque": Decimal("0"), "reserva": Decimal("0")},
+            )
+            saldo_anterior = Decimal(estoque.Estoque or 0)
+            saldo_posterior = saldo_anterior + linha["recebido"]
+            estoque.Estoque = saldo_posterior
+            if not estoque.referencia:
+                estoque.referencia = sku.produto.referencia or ""
+            estoque.save(update_fields=["Estoque", "referencia"])
+            EstoqueMovimentacao.objects.create(
+                Idloja=loja,
+                CodigodeBarra=linha["ean"],
+                referencia=sku.produto.referencia or "",
+                tipo=EstoqueMovimentacao.TIPO_ENTRADA,
+                quantidade=linha["recebido"],
+                saldo_anterior=saldo_anterior,
+                saldo_posterior=saldo_posterior,
+                origem=EstoqueMovimentacao.ORIGEM_RECEBIMENTO_MERCADORIA,
+                documento=f"RECEB-{recebimento.id}",
+                observacao=f"Recebimento de mercadoria #{recebimento.id} - Termo #{termo.id}",
+            )
+        return Response(RecebimentoMercadoriaEfetivacaoEstoqueSerializer(efetivacao).data, status=status.HTTP_201_CREATED)
+
+    def _loja_destino_estoque(self, recebimento):
+        if recebimento.loja_id:
+            return recebimento.loja
+        pedidos = [v.pedido for v in recebimento.pedidos_vinculados.select_related("pedido__loja").all() if v.pedido.loja_id]
+        lojas = {pedido.loja_id: pedido.loja for pedido in pedidos}
+        return next(iter(lojas.values())) if len(lojas) == 1 else None
+
+    def _linhas_fisicas_termo(self, termo):
+        linhas = []
+        for linha in (termo.snapshot or {}).get("conferencia_sku") or []:
+            recebido = Decimal(str(linha.get("recebido") or 0))
+            if recebido <= 0:
+                continue
+            linhas.append({"ean": str(linha.get("ean") or ""), "recebido": recebido})
+        return linhas
 
     def _snapshot_termo_recebimento(self, recebimento, user, observacao, encerrado_em):
         xml = recebimento.xml_fornecedor
