@@ -2755,6 +2755,11 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                 documento=f"RECEB-{recebimento.id}",
                 observacao=f"Recebimento de mercadoria #{recebimento.id} - Termo #{termo.id}",
             )
+        from compras.services_recebimento import sincronizar_atendimento_pedido_compra
+
+        pedidos = {v.pedido for v in recebimento.pedidos_vinculados.select_related("pedido").all()}
+        for pedido in pedidos:
+            sincronizar_atendimento_pedido_compra(pedido)
         return Response(RecebimentoMercadoriaEfetivacaoEstoqueSerializer(efetivacao).data, status=status.HTTP_201_CREATED)
 
     def _loja_destino_estoque(self, recebimento):
@@ -2790,6 +2795,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             diferenca = item.diferenca
             situacao = "OK" if diferenca == 0 else "SOBRA" if diferenca > 0 else "FALTA"
             linha = {
+                "pedido_id": item.pedido_id,
+                "pedido_item_id": item.pedido_item_id,
                 "referencia": item.produto.referencia or "",
                 "produto": item.produto.descricao or "",
                 "cor": item.cor.Descricao or "",
