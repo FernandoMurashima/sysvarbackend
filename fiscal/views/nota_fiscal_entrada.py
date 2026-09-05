@@ -2765,13 +2765,14 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         return next(iter(lojas.values())) if len(lojas) == 1 else None
 
     def _linhas_fisicas_termo(self, termo):
-        linhas = []
+        quantidades_por_ean = {}
         for linha in (termo.snapshot or {}).get("conferencia_sku") or []:
             recebido = Decimal(str(linha.get("recebido") or 0))
             if recebido <= 0:
                 continue
-            linhas.append({"ean": str(linha.get("ean") or ""), "recebido": recebido})
-        return linhas
+            ean = str(linha.get("ean") or "")
+            quantidades_por_ean[ean] = quantidades_por_ean.get(ean, Decimal("0")) + recebido
+        return [{"ean": ean, "recebido": recebido} for ean, recebido in quantidades_por_ean.items()]
 
     def _snapshot_termo_recebimento(self, recebimento, user, observacao, encerrado_em):
         xml = recebimento.xml_fornecedor

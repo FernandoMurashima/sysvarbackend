@@ -1189,6 +1189,24 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertIn("Não há quantidade física", resp.data["detail"])
         self.assertFalse(EstoqueMovimentacao.objects.exists())
 
+    def test_consolida_linhas_repetidas_do_mesmo_ean(self):
+        termo = self.concluir(["3.000", "4.000"])
+        termo.snapshot["conferencia_sku"][0]["ean"] = self.sku_p.ean13
+        termo.snapshot["conferencia_sku"][1]["ean"] = self.sku_p.ean13
+        termo.hash_sha256 = __import__("hashlib").sha256(__import__("json").dumps(termo.snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        termo.save(_allow_update=True)
+
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        efetivacao = RecebimentoMercadoriaEfetivacaoEstoque.objects.get()
+        self.assertEqual(efetivacao.quantidade_skus, 1)
+        self.assertEqual(efetivacao.quantidade_total, Decimal("7.000"))
+        movs = EstoqueMovimentacao.objects.filter(documento=f"RECEB-{self.recebimento.id}", CodigodeBarra=self.sku_p.ean13)
+        self.assertEqual(movs.count(), 1)
+        self.assertEqual(movs.get().quantidade, Decimal("7.000"))
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja).Estoque, Decimal("7.000"))
+
     def test_hash_invalido_e_ean_inexistente_fazem_rollback_integral(self):
         termo = self.concluir(["1.000", "2.000"])
         termo.snapshot["conferencia_sku"][1]["ean"] = "0000000000000"
