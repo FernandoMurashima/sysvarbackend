@@ -34,6 +34,7 @@ from fiscal.authentication import AgentTokenAuthentication
 from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_divergencia, resumo_conferencia
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
+from fiscal.services.nfe_identidade import validation_error_from_integrity_error, validar_duplicidade_nota_entrada
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
 from fiscal.serializers import (
     ConfiguracaoXmlFornecedorSerializer,
@@ -245,9 +246,6 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             raise ValidationError({"arquivo": "Informe o arquivo XML da NF-e."})
         original_bytes = arquivo.read()
         dados = parse_nfe_xml(original_bytes)
-        if NotaFiscalEntrada.objects.select_for_update().filter(chave_acesso=dados.chave_acesso).exists():
-            raise ValidationError({"chave_acesso": "NF-e já importada para esta chave de acesso."})
-
         empresa_id = self._empresa_id_usuario()
         if not empresa_id and not request.user.is_superuser:
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
@@ -271,63 +269,78 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             xml_original = original_bytes.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise ValidationError({"arquivo": "XML deve estar em codificação textual válida."}) from exc
-
-        nota = NotaFiscalEntrada.objects.create(
-            empresa_id=empresa_id,
-            loja=loja,
-            fornecedor=fornecedor,
-            pedido_compra=pedido,
-            modelo=dados.modelo,
-            serie=dados.serie,
-            numero=dados.numero,
-            chave_acesso=dados.chave_acesso,
-            dt_emissao=dados.dt_emissao,
-            dt_entrada=dados.dt_emissao,
-            valor_produtos=dados.valor_produtos,
-            valor_desconto=dados.valor_desconto,
-            valor_frete=dados.valor_frete,
-            valor_total=dados.valor_total,
-            xml_original=xml_original,
-            xml_importado=True,
-            natureza_operacao=dados.natureza_operacao,
-            emitente_documento=dados.emitente_documento,
-            emitente_nome=dados.emitente_nome,
-            emitente_ie=dados.emitente_ie,
-            destinatario_documento=dados.destinatario_documento,
-            destinatario_nome=dados.destinatario_nome,
-            protocolo_autorizacao=dados.protocolo_autorizacao,
-            situacao_fiscal=dados.situacao_fiscal,
-            versao_leiaute=dados.versao_leiaute,
-            nfe_id_xml=dados.nfe_id_xml,
-            codigo_uf=dados.codigo_uf,
-            codigo_numerico=dados.codigo_numerico,
-            dh_emissao=dados.dh_emissao,
-            dh_saida_entrada=dados.dh_saida_entrada,
-            tipo_operacao=dados.tipo_operacao,
-            identificador_destino=dados.identificador_destino,
-            municipio_fato_gerador=dados.municipio_fato_gerador,
-            tipo_impressao=dados.tipo_impressao,
-            tipo_emissao=dados.tipo_emissao,
-            digito_verificador=dados.digito_verificador,
-            ambiente=dados.ambiente,
-            finalidade_nfe=dados.finalidade_nfe,
-            consumidor_final=dados.consumidor_final,
-            presenca_comprador=dados.presenca_comprador,
-            intermediador=dados.intermediador,
-            processo_emissao=dados.processo_emissao,
-            versao_processo=dados.versao_processo,
-            protocolo_chave_acesso=dados.protocolo_chave_acesso,
-            protocolo_recebido_em=dados.protocolo_recebido_em,
-            protocolo_cstat=dados.protocolo_cstat,
-            protocolo_motivo=dados.protocolo_motivo,
-            totais_fiscais=dados.totais_fiscais,
-            cobranca_fiscal=dados.cobranca_fiscal,
-            pagamentos_fiscais=dados.pagamentos_fiscais,
-            documentos_referenciados=dados.documentos_referenciados,
-            informacoes_complementares_fisco=dados.informacoes_complementares_fisco,
-            informacoes_complementares_contribuinte=dados.informacoes_complementares_contribuinte,
-            criado_por=request.user if request.user.is_authenticated else None,
+        validar_duplicidade_nota_entrada(
+            {
+                "empresa_id": empresa_id,
+                "fornecedor_id": fornecedor.id,
+                "modelo": dados.modelo,
+                "serie": dados.serie,
+                "numero": dados.numero,
+                "chave_acesso": dados.chave_acesso,
+            },
+            bloquear_linha=True,
+            validar_chave=False,
         )
+
+        try:
+            nota = NotaFiscalEntrada.objects.create(
+                empresa_id=empresa_id,
+                loja=loja,
+                fornecedor=fornecedor,
+                pedido_compra=pedido,
+                modelo=dados.modelo,
+                serie=dados.serie,
+                numero=dados.numero,
+                chave_acesso=dados.chave_acesso,
+                dt_emissao=dados.dt_emissao,
+                dt_entrada=dados.dt_emissao,
+                valor_produtos=dados.valor_produtos,
+                valor_desconto=dados.valor_desconto,
+                valor_frete=dados.valor_frete,
+                valor_total=dados.valor_total,
+                xml_original=xml_original,
+                xml_importado=True,
+                natureza_operacao=dados.natureza_operacao,
+                emitente_documento=dados.emitente_documento,
+                emitente_nome=dados.emitente_nome,
+                emitente_ie=dados.emitente_ie,
+                destinatario_documento=dados.destinatario_documento,
+                destinatario_nome=dados.destinatario_nome,
+                protocolo_autorizacao=dados.protocolo_autorizacao,
+                situacao_fiscal=dados.situacao_fiscal,
+                versao_leiaute=dados.versao_leiaute,
+                nfe_id_xml=dados.nfe_id_xml,
+                codigo_uf=dados.codigo_uf,
+                codigo_numerico=dados.codigo_numerico,
+                dh_emissao=dados.dh_emissao,
+                dh_saida_entrada=dados.dh_saida_entrada,
+                tipo_operacao=dados.tipo_operacao,
+                identificador_destino=dados.identificador_destino,
+                municipio_fato_gerador=dados.municipio_fato_gerador,
+                tipo_impressao=dados.tipo_impressao,
+                tipo_emissao=dados.tipo_emissao,
+                digito_verificador=dados.digito_verificador,
+                ambiente=dados.ambiente,
+                finalidade_nfe=dados.finalidade_nfe,
+                consumidor_final=dados.consumidor_final,
+                presenca_comprador=dados.presenca_comprador,
+                intermediador=dados.intermediador,
+                processo_emissao=dados.processo_emissao,
+                versao_processo=dados.versao_processo,
+                protocolo_chave_acesso=dados.protocolo_chave_acesso,
+                protocolo_recebido_em=dados.protocolo_recebido_em,
+                protocolo_cstat=dados.protocolo_cstat,
+                protocolo_motivo=dados.protocolo_motivo,
+                totais_fiscais=dados.totais_fiscais,
+                cobranca_fiscal=dados.cobranca_fiscal,
+                pagamentos_fiscais=dados.pagamentos_fiscais,
+                documentos_referenciados=dados.documentos_referenciados,
+                informacoes_complementares_fisco=dados.informacoes_complementares_fisco,
+                informacoes_complementares_contribuinte=dados.informacoes_complementares_contribuinte,
+                criado_por=request.user if request.user.is_authenticated else None,
+            )
+        except IntegrityError as exc:
+            raise validation_error_from_integrity_error(exc) from exc
         NotaFiscalEntradaItemXml.objects.bulk_create(
             [
                 NotaFiscalEntradaItemXml(
@@ -634,11 +647,11 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         self._validar_nota_empresa(serializer.validated_data)
-        self._validar_duplicidade_nota(serializer.validated_data)
+        validar_duplicidade_nota_entrada(serializer.validated_data, bloquear_linha=True)
         try:
             serializer.save()
         except IntegrityError as exc:
-            raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."}) from exc
+            raise validation_error_from_integrity_error(exc) from exc
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -652,11 +665,11 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         data.setdefault("numero", serializer.instance.numero)
         data.setdefault("chave_acesso", serializer.instance.chave_acesso)
         self._validar_nota_empresa(data)
-        self._validar_duplicidade_nota(data, instance=serializer.instance)
+        validar_duplicidade_nota_entrada(data, instance=serializer.instance, bloquear_linha=True)
         try:
             serializer.save()
         except IntegrityError as exc:
-            raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."}) from exc
+            raise validation_error_from_integrity_error(exc) from exc
 
     def destroy(self, request, *args, **kwargs):
         return Response(
@@ -684,39 +697,6 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             raise ValidationError({"loja": "A loja do pedido pertence a outra empresa."})
         if fornecedor and fornecedor.empresa_id != empresa_id:
             raise ValidationError({"fornecedor": "Fornecedor pertence a outra empresa."})
-
-    def _validar_duplicidade_nota(self, data, instance=None):
-        empresa = data.get("empresa")
-        fornecedor = data.get("fornecedor")
-        empresa_id = getattr(empresa, "id", None)
-        fornecedor_id = getattr(fornecedor, "id", None)
-        if not empresa_id or not fornecedor_id:
-            return
-        modelo = str(data.get("modelo") or "55").strip()
-        serie = str(data.get("serie") or "").strip()
-        numero = str(data.get("numero") or "").strip()
-        chave = data.get("chave_acesso")
-
-        duplicadas = NotaFiscalEntrada.objects.select_for_update().filter(
-            empresa_id=empresa_id,
-            fornecedor_id=fornecedor_id,
-            modelo=modelo,
-            serie=serie,
-            numero=numero,
-        )
-        if instance:
-            duplicadas = duplicadas.exclude(pk=instance.pk)
-        if duplicadas.exists():
-            raise ValidationError(
-                {"numero": "Nota fiscal de entrada já cadastrada para esta empresa, fornecedor, modelo, série e número."}
-            )
-
-        if chave:
-            chave_duplicada = NotaFiscalEntrada.objects.select_for_update().filter(chave_acesso=chave)
-            if instance:
-                chave_duplicada = chave_duplicada.exclude(pk=instance.pk)
-            if chave_duplicada.exists():
-                raise ValidationError({"chave_acesso": "Chave de acesso já utilizada em outra nota fiscal de entrada."})
 
     @action(detail=True, methods=["post"], url_path="fechar")
     @transaction.atomic

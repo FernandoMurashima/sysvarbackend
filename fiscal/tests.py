@@ -3836,6 +3836,56 @@ class NotaFiscalEntradaIdentidadeBloco3Tests(TestCase):
         NotaFiscalEntrada.objects.filter(pk=nota.pk).update(status=NotaFiscalEntrada.Status.CANCELADA)
         self.criar_nota_api(pedido2, numero="107", chave=chave, status_code=400)
 
+    def test_chave_global_bloqueia_outra_empresa_sem_vazar_detalhe(self):
+        pedido1, _ = self.criar_pedido()
+        pedido_b, _ = self.criar_pedido(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, produto=self.produto_b)
+        chave = self.chave_valida(11)
+        self.criar_nota_api(pedido1, numero="111", chave=chave)
+
+        resp = self.criar_nota_api(pedido_b, numero="112", chave=chave, status_code=400)
+
+        self.assertIn("NF-e já registrada no Sysvar", str(resp.data["chave_acesso"]))
+        self.assertNotIn(self.fornecedor.nome_fornecedor, str(resp.data["chave_acesso"]))
+
+    def test_documento_sem_chave_cancelado_bloqueia_e_fornecedor_ou_empresa_diferente_permite(self):
+        pedido1, _ = self.criar_pedido()
+        pedido2, _ = self.criar_pedido()
+        pedido_fornecedor_2, _ = self.criar_pedido(fornecedor=self.fornecedor_2)
+        pedido_b, _ = self.criar_pedido(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, produto=self.produto_b)
+        nota = self.criar_nota_api(pedido1, numero="113", serie=" 1 ")
+        NotaFiscalEntrada.objects.filter(pk=nota.pk).update(status=NotaFiscalEntrada.Status.CANCELADA)
+
+        duplicada = self.criar_nota_api(pedido2, numero="113", serie="1", status_code=400)
+        self.assertIn("mesmo modelo", str(duplicada.data["numero"]))
+        self.criar_nota_api(pedido_fornecedor_2, numero="113", serie="1")
+        self.criar_nota_api(pedido_b, numero="113", serie="1")
+
+    def test_update_para_chave_ou_documento_de_outra_nota_bloqueia(self):
+        pedido1, _ = self.criar_pedido()
+        pedido2, _ = self.criar_pedido()
+        chave1 = self.chave_valida(21)
+        chave2 = self.chave_valida(22)
+        nota1 = self.criar_nota_api(pedido1, numero="121", chave=chave1)
+        nota2 = self.criar_nota_api(pedido2, numero="122", chave=chave2)
+
+        propria = self.client.patch(f"/api/fiscal/notas-entrada/{nota1.pk}/?empresa={self.empresa.pk}", {"chave_acesso": chave1, "numero": "121"}, format="json")
+        self.assertEqual(propria.status_code, 200, propria.data)
+        chave_duplicada = self.client.patch(f"/api/fiscal/notas-entrada/{nota1.pk}/?empresa={self.empresa.pk}", {"chave_acesso": chave2}, format="json")
+        documento_duplicado = self.client.patch(f"/api/fiscal/notas-entrada/{nota1.pk}/?empresa={self.empresa.pk}", {"numero": nota2.numero, "serie": nota2.serie}, format="json")
+        self.assertEqual(chave_duplicada.status_code, 400, chave_duplicada.data)
+        self.assertEqual(documento_duplicado.status_code, 400, documento_duplicado.data)
+
+    def test_integrityerror_concorrente_vira_erro_de_negocio(self):
+        pedido, _ = self.criar_pedido()
+        with patch("fiscal.serializers.nota_fiscal_entrada.NotaFiscalEntrada.objects.create", side_effect=IntegrityError("Duplicate entry for key 'chave_acesso'")):
+            resp = self.client.post(
+                f"/api/fiscal/notas-entrada/?empresa={self.empresa.pk}",
+                self.payload_nota(pedido, numero="130", chave=self.chave_valida(30)),
+                format="json",
+            )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("NF-e já registrada no Sysvar", str(resp.data["chave_acesso"]))
+
     def test_estoque_identifica_movimentos_por_id_da_nf_e_nao_por_numero(self):
         pedido1, item1 = self.criar_pedido()
         pedido2, item2 = self.criar_pedido(fornecedor=self.fornecedor_2)

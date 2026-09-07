@@ -7,6 +7,7 @@ from compras.models import PedidoCompra
 from fiscal.models import AgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.services.nfe_conferencia import quantidade_interna_recebida
 from fiscal.services.nfe_conciliacao import conversao_info
+from fiscal.services.nfe_identidade import normalizar_identidade_nota_entrada
 from fiscal.validators import normalizar_chave_acesso_nfe
 
 
@@ -442,6 +443,7 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
             "loja": {"required": False},
             "fornecedor": {"required": False},
             "pedido_compra": {"required": False, "allow_null": True},
+            "chave_acesso": {"validators": []},
         }
         read_only_fields = (
             "status",
@@ -474,9 +476,7 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
             empresa = getattr(user, "empresa", None)
             if empresa:
                 attrs["empresa"] = empresa
-        for field in ("modelo", "serie", "numero"):
-            if field in attrs and attrs[field] is not None:
-                attrs[field] = str(attrs[field]).strip()
+        normalizar_identidade_nota_entrada(attrs)
 
         if pedido:
             attrs["empresa"] = pedido.empresa
@@ -502,13 +502,6 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"pedido_compra": "Não é possível criar nota para pedido cancelado."})
         if pedido and (pedido.status or "").upper() == "AT":
             raise serializers.ValidationError({"pedido_compra": "Este pedido já foi totalmente atendido."})
-
-        chave = attrs.get("chave_acesso")
-        if chave is not None:
-            try:
-                attrs["chave_acesso"] = normalizar_chave_acesso_nfe(chave) or None
-            except serializers.ValidationError as exc:
-                raise serializers.ValidationError({"chave_acesso": exc.detail})
 
         if self.instance and self.instance.status != NotaFiscalEntrada.Status.ABERTA:
             protected = {
