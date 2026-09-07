@@ -233,6 +233,7 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(xml.fornecedor_id, self.fornecedor.id)
         self.assertEqual(xml.identificador_agente, "AG-1")
         self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertEqual(xml.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO)
         self.assertEqual(xml.quantidade_total_faturada, Decimal("696.000"))
         self.assertEqual(xml.unidade_comercial, "UN")
         self.assertFalse(EstoqueMovimentacao.objects.exists())
@@ -251,7 +252,8 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(xml.loja_id, self.loja.id)
         self.assertIsNone(xml.fornecedor_id)
         xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
-        xml.save(update_fields=["status_operacional"])
+        xml.tipo_tratamento = XmlFornecedorRecebido.TipoTratamento.ESTOQUE
+        xml.save(update_fields=["status_operacional", "tipo_tratamento"])
         xml.quantidade_total_faturada = None
         xml.unidade_comercial = ""
         xml.save(update_fields=["quantidade_total_faturada", "unidade_comercial"])
@@ -261,6 +263,8 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(XmlFornecedorRecebido.objects.filter(chave_acesso=xml.chave_acesso).count(), 1)
         xml.refresh_from_db()
         self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+        self.assertEqual(xml.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
+        self.assertEqual(retry.data["xml"]["tipo_tratamento"], XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
         self.assertEqual(xml.quantidade_total_faturada, Decimal("699.000"))
         self.assertEqual(xml.unidade_comercial, "UN")
 
@@ -429,6 +433,9 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.assertEqual(obj.chave_acesso, "35260822345678000195550010000001234567890121")
         self.assertEqual(obj.situacao_fiscal, XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA)
         self.assertEqual(obj.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertEqual(obj.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO)
+        self.assertEqual(resp.data["tipo_tratamento"], XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO)
+        self.assertEqual(resp.data["tipo_tratamento_display"], "Não definido")
 
     def test_chave_acesso_duplicada_e_recusada(self):
         self.post_xml()
@@ -491,6 +498,7 @@ class XmlFornecedorRecebidoTests(TestCase):
             numero="123",
             situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
             status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            tipo_tratamento=XmlFornecedorRecebido.TipoTratamento.ESTOQUE,
         )
         other = XmlFornecedorRecebido.objects.create(
             empresa=self.empresa,
@@ -514,6 +522,7 @@ class XmlFornecedorRecebidoTests(TestCase):
             {"search": "123"},
             {"search": "35260822345678000195550010000001234567890121"},
             {"chave_acesso": "0000001234567890121"},
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.ESTOQUE},
             {"detectado_de": own.detectado_em.date().isoformat(), "detectado_ate": own.detectado_em.date().isoformat()},
         )
         for params in queries:
@@ -688,6 +697,139 @@ class XmlFornecedorRecebidoTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         obj.refresh_from_db()
         self.assertEqual(obj.numero, "124")
+
+    def test_definir_tratamentos_validos_nao_cria_efeitos_e_preserva_status(self):
+        tipos = (
+            XmlFornecedorRecebido.TipoTratamento.ESTOQUE,
+            XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO,
+            XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO,
+            XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+        )
+        chaves = (
+            "35260822345678000195550010000001234567890121",
+            "35260822345678000195550010000001234567890130",
+            "35260822345678000195550010000001234567890149",
+            "35260822345678000195550010000001234567890158",
+        )
+
+        for idx, tipo in enumerate(tipos):
+            xml = XmlFornecedorRecebido.objects.create(
+                empresa=self.empresa,
+                loja=self.loja,
+                fornecedor=self.fornecedor,
+                chave_acesso=chaves[idx],
+                modelo="55",
+                serie="1",
+                numero=str(200 + idx),
+                status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            )
+            resp = self.client.post(
+                f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/definir-tratamento/",
+                {"tipo_tratamento": tipo},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, 200, resp.data)
+            xml.refresh_from_db()
+            self.assertEqual(xml.tipo_tratamento, tipo)
+            self.assertEqual(resp.data["tipo_tratamento"], tipo)
+            self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+
+        self.assertFalse(RecebimentoMercadoriaEstoque.objects.exists())
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(MovimentacaoFinanceira.objects.exists())
+
+    def test_definir_tratamento_bloqueia_valor_invalido_tenant_e_processamento_iniciado(self):
+        xml = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+
+        resp = self.client.post(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/definir-tratamento/",
+            {"tipo_tratamento": "QUALQUER"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.post(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/definir-tratamento/",
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.ESTOQUE},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+        self.client.force_authenticate(self.user)
+        RecebimentoMercadoriaEstoque.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml,
+            criado_por=self.user,
+        )
+        resp = self.client.post(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/definir-tratamento/",
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["detail"], "Não é possível alterar o tratamento porque o processamento deste XML já foi iniciado.")
+
+        xml_nf = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890130",
+            modelo="55",
+            serie="1",
+            numero="124",
+        )
+        NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            modelo="55",
+            serie="1",
+            numero="124",
+            chave_acesso=xml_nf.chave_acesso,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+        )
+        resp = self.client.post(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{xml_nf.id}/definir-tratamento/",
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["detail"], "Não é possível alterar o tratamento porque o processamento deste XML já foi iniciado.")
+
+    def test_patch_generico_nao_altera_tipo_tratamento(self):
+        obj = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890121",
+            modelo="55",
+            serie="1",
+            numero="123",
+        )
+
+        resp = self.client.patch(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{obj.id}/",
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.ESTOQUE},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        obj.refresh_from_db()
+        self.assertEqual(obj.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO)
 
     def test_criacao_exige_acesso_de_edicao_em_fiscal_ou_compras(self):
         self.client.force_authenticate(self.user_fiscal_view)

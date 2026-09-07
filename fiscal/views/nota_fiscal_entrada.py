@@ -2280,7 +2280,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
 class XmlFornecedorRecebidoViewSet(BaseViewSet):
     required_modules = ["fiscal", "compras"]
-    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "destroy"}
+    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "destroy", "definir_tratamento"}
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     queryset = (
         XmlFornecedorRecebido.objects
@@ -2301,6 +2301,7 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
         loja = self.request.query_params.get("loja")
         fornecedor = self.request.query_params.get("fornecedor")
         status_operacional = self.request.query_params.get("status_operacional")
+        tipo_tratamento = self.request.query_params.get("tipo_tratamento")
         situacao_fiscal = self.request.query_params.get("situacao_fiscal")
         chave = self.request.query_params.get("chave_acesso")
         search = self.request.query_params.get("search")
@@ -2313,6 +2314,8 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
             qs = qs.filter(fornecedor_id=fornecedor)
         if status_operacional:
             qs = qs.filter(status_operacional=status_operacional)
+        if tipo_tratamento:
+            qs = qs.filter(tipo_tratamento=tipo_tratamento)
         if situacao_fiscal:
             qs = qs.filter(situacao_fiscal=situacao_fiscal)
         if chave:
@@ -2362,6 +2365,30 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="definir-tratamento")
+    @transaction.atomic
+    def definir_tratamento(self, request, pk=None):
+        xml = self.get_queryset().select_for_update().filter(pk=pk).first()
+        if not xml:
+            return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        self._validar_empresa_usuario(xml.empresa)
+        tipo = str(request.data.get("tipo_tratamento") or "").strip()
+        valores_validos = {choice.value for choice in XmlFornecedorRecebido.TipoTratamento}
+        if tipo not in valores_validos:
+            return Response({"tipo_tratamento": "Tipo de tratamento inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        processamento_iniciado = (
+            RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=xml).exists()
+            or NotaFiscalEntrada.objects.filter(chave_acesso=xml.chave_acesso).exists()
+        )
+        if processamento_iniciado:
+            return Response(
+                {"detail": "Não é possível alterar o tratamento porque o processamento deste XML já foi iniciado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        xml.tipo_tratamento = tipo
+        xml.save(update_fields=["tipo_tratamento", "atualizado_em"])
+        return Response(self.get_serializer(xml).data, status=status.HTTP_200_OK)
 
     def _validar_empresa_usuario(self, empresa):
         user_empresa_id = self._empresa_id_usuario()

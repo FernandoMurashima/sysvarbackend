@@ -347,6 +347,13 @@ class XmlFornecedorRecebido(models.Model):
         CANCELADA = "CANCELADA", "Cancelada"
         DENEGADA = "DENEGADA", "Denegada"
 
+    class TipoTratamento(models.TextChoices):
+        NAO_DEFINIDO = "NAO_DEFINIDO", "Não definido"
+        ESTOQUE = "ESTOQUE", "Mercadoria para estoque"
+        USO_CONSUMO = "USO_CONSUMO", "Uso e consumo"
+        INSUMO_PRODUCAO = "INSUMO_PRODUCAO", "Insumo / produção"
+        FISCAL_SEM_ESTOQUE = "FISCAL_SEM_ESTOQUE", "Entrada fiscal sem estoque"
+
     empresa = models.ForeignKey("cadastros.Empresa", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", db_index=True)
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", null=True, blank=True, db_index=True)
     fornecedor = models.ForeignKey("cadastros.Fornecedor", on_delete=models.PROTECT, related_name="xmls_fornecedor_recebidos", null=True, blank=True, db_index=True)
@@ -364,6 +371,7 @@ class XmlFornecedorRecebido(models.Model):
     unidade_comercial = models.CharField(max_length=10, blank=True, default="")
     situacao_fiscal = models.CharField(max_length=20, choices=SituacaoFiscal.choices, default=SituacaoFiscal.DESCONHECIDA, db_index=True)
     status_operacional = models.CharField(max_length=24, choices=StatusOperacional.choices, default=StatusOperacional.DETECTADO, db_index=True)
+    tipo_tratamento = models.CharField(max_length=24, choices=TipoTratamento.choices, default=TipoTratamento.NAO_DEFINIDO, db_index=True)
     caminho_origem_local = models.CharField(max_length=500, blank=True, default="")
     identificador_agente = models.CharField(max_length=120, blank=True, default="")
     detectado_em = models.DateTimeField(auto_now_add=True)
