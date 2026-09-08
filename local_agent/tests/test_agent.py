@@ -158,6 +158,14 @@ class ParserTests(unittest.TestCase):
         self.assertNotEqual(data["quantidade_total_faturada"], "3")
         self.assertEqual(data["quantidade_total_faturada"], "696.000")
 
+    def test_soma_qcom_preserva_quarta_casa_significativa(self):
+        xml = nfe_xml().replace("<qCom>100.000</qCom>", "<qCom>1.2345</qCom>").replace("<qCom>250.000</qCom>", "<qCom>3.7655</qCom>").replace("<qCom>346.000</qCom>", "<qCom>0.0000</qCom>")
+        data = parse_nfe_file(self._write(xml))
+        self.assertEqual(data["quantidade_total_faturada"], "5.0000")
+        xml = nfe_xml().replace("<qCom>100.000</qCom>", "<qCom>1.2345</qCom>").replace("<qCom>250.000</qCom>", "<qCom>0.0000</qCom>").replace("<qCom>346.000</qCom>", "<qCom>0.0000</qCom>")
+        data = parse_nfe_file(self._write(xml))
+        self.assertEqual(data["quantidade_total_faturada"], "1.2345")
+
     def test_unidades_comerciais_diferentes_nao_somam_total(self):
         xml = nfe_xml().replace("<uCom>UN</uCom><qCom>250.000</qCom>", "<uCom>CX</uCom><qCom>250.000</qCom>")
         data = parse_nfe_file(self._write(xml))

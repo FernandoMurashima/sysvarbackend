@@ -348,6 +348,24 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertFalse(XmlFornecedorRecebido.objects.exists())
 
+    def test_xml_detectado_aceita_quantidade_total_com_quatro_casas_decimais(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, quantidade_total_faturada="5.0000"), format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        self.assertEqual(xml.quantidade_total_faturada, Decimal("5.0000"))
+
+        resp = self.client.post(
+            "/api/fiscal/agente-local/xml-detectado/",
+            self._payload_xml(cfg, chave="35260822345678000195550010000001234567890130", quantidade_total_faturada="1.2345"),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        self.assertEqual(xml.quantidade_total_faturada, Decimal("1.2345"))
+
     def test_xml_detectado_rejeita_configuracoes_fora_do_escopo(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
         self._token(agente)
