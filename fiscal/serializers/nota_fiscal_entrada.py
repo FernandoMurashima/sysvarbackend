@@ -449,6 +449,8 @@ class NotaFiscalEntradaSerializer(serializers.ModelSerializer):
     loja_estoque_id = serializers.IntegerField(source="loja_id", read_only=True)
     resumo_conciliacao = serializers.SerializerMethodField()
     resumo_conferencia = serializers.SerializerMethodField()
+    tipo_tratamento = serializers.CharField(source="xml_fornecedor.tipo_tratamento", read_only=True, allow_null=True)
+    tipo_tratamento_display = serializers.CharField(source="xml_fornecedor.get_tipo_tratamento_display", read_only=True, allow_null=True)
 
     class Meta:
         model = NotaFiscalEntrada

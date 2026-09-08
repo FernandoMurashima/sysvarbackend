@@ -959,6 +959,40 @@ class XmlFornecedorRecebidoTests(TestCase):
             self.assertEqual(resp.status_code, 201, resp.data)
             self.assertEqual(NotaFiscalEntrada.objects.get(xml_fornecedor=xml).itens_xml.count(), 2)
 
+    def test_nota_fiscal_entrada_serializa_tratamento_do_xml_fornecedor(self):
+        xml = self.xml_materializavel(
+            XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+            chave="35260822345678000195550010000001234567891047",
+            numero="147",
+        )
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["xml_fornecedor"], xml.id)
+        self.assertEqual(resp.data["tipo_tratamento"], XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
+        self.assertEqual(resp.data["tipo_tratamento_display"], "Entrada fiscal sem estoque")
+
+    def test_nota_fiscal_entrada_sem_xml_fornecedor_serializa_tratamento_nulo(self):
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            modelo="55",
+            serie="1",
+            numero="148",
+            chave_acesso="35260822345678000195550010000001234567891055",
+            dt_emissao=date(2026, 9, 8),
+            dt_entrada=date(2026, 9, 8),
+            criado_por=self.user,
+        )
+
+        resp = self.client.get(f"/api/fiscal/notas-entrada/{nota.id}/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIsNone(resp.data["xml_fornecedor"])
+        self.assertIsNone(resp.data["tipo_tratamento"])
+        self.assertIsNone(resp.data["tipo_tratamento_display"])
+
     def test_encaminhar_fiscal_bloqueia_tratamentos_e_payload_incompleto(self):
         casos = (
             (XmlFornecedorRecebido.TipoTratamento.ESTOQUE, "35260822345678000195550010000001234567891004", "estoque"),
