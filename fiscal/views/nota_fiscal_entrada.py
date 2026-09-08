@@ -707,7 +707,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return Response({"detail": "Somente notas abertas podem ser fechadas."}, status=status.HTTP_400_BAD_REQUEST)
         if nota.xml_importado:
             try:
-                resultado = self._fechar_xml(nota, request)
+                resultado = self._fechar_xml_detectado(nota, request) if nota.xml_fornecedor_id else self._fechar_xml(nota, request)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -781,6 +781,94 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             "necessidades": necessidades,
         }
 
+    def _fechar_xml_detectado(self, nota, request):
+        xml = XmlFornecedorRecebido.objects.select_for_update().get(pk=nota.xml_fornecedor_id)
+        tratamento = xml.tipo_tratamento
+        if tratamento == XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO:
+            raise ValueError("Defina o tratamento fiscal do XML antes de fechar a NF-e.")
+        if tratamento == XmlFornecedorRecebido.TipoTratamento.ESTOQUE:
+            raise ValueError("NF-e de estoque deve seguir pelo recebimento de mercadoria.")
+        if tratamento not in {
+            XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO,
+            XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO,
+            XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+        }:
+            raise ValueError("Tipo de tratamento não permite fechamento fiscal.")
+
+        self._validar_pronto_xml_detectado(nota, tratamento)
+        before = nota.status
+        if tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+            estoque = {"disponivel": True, "movimentos": 0}
+            custos_produtos = {"atualizados": 0}
+        else:
+            estoque = self._movimentar_estoque_xml(nota, usar_quantidade_recebida=True, tratamento=tratamento)
+            custos_produtos = self._atualizar_custos_xml(nota)
+        financeiro = self._vincular_financeiro_xml(nota)
+        recebimento = {"status_pedido": None, "itens_atualizados": 0}
+        necessidades = {"requisicao_itens": 0, "materiais_os": 0}
+        nota.status = NotaFiscalEntrada.Status.FECHADA
+        nota.save(update_fields=["status", "atualizado_em"])
+        xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.PROCESSADO
+        xml.save(update_fields=["status_operacional", "atualizado_em"])
+        AuditService.success(
+            AuditAction.OBJECT_UPDATED,
+            category=AuditCategory.FISCAL,
+            request=request,
+            user=getattr(request, "user", None),
+            instance=nota,
+            after={
+                "empresa": nota.empresa_id,
+                "loja": nota.loja_id,
+                "fornecedor": nota.fornecedor_id,
+                "xml_fornecedor": xml.pk,
+                "tipo_tratamento": tratamento,
+                "status": nota.status,
+                "estoque": estoque,
+                "financeiro": financeiro,
+            },
+            metadata={"legacy_action": "fechar_xml_detectado", "status_anterior": before},
+        )
+        return {
+            "financeiro": financeiro,
+            "estoque": estoque,
+            "custos_produtos": custos_produtos,
+            "recebimento_pedido": recebimento,
+            "necessidades": necessidades,
+        }
+
+    def _validar_pronto_xml_detectado(self, nota, tratamento):
+        if nota.situacao_fiscal != NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA:
+            raise ValueError("A NF-e XML precisa estar fiscalmente autorizada para efetivação operacional.")
+        if nota.finalidade_nfe and nota.finalidade_nfe != "1":
+            raise ValueError("NF-e com finalidade fiscal especial requer fluxo específico antes da efetivação operacional.")
+        cobranca = self._cobranca_financeira_xml(nota)
+        if not cobranca["financeiro_pronto"]:
+            raise ValueError(cobranca["pendencias"][0])
+        if tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+            return
+
+        tipo_exigido = "2" if tratamento == XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO else "4"
+        itens = list(
+            nota.itens_xml.select_for_update()
+            .select_related("produto", "produto_fornecedor")
+            .order_by("numero_item")
+        )
+        if not itens:
+            raise ValueError("NF-e XML não possui itens importados.")
+        if any(not item.produto_id for item in itens):
+            raise ValueError("Concilie todos os itens XML da NF-e antes de fechar a nota.")
+        if any(item.quantidade_recebida is None for item in itens):
+            raise ValueError("Informe a conferência física de todos os itens XML da NF-e antes de fechar a nota.")
+        for item in itens:
+            if Decimal(item.quantidade_recebida or 0) < 0 or Decimal(item.quantidade_recebida or 0) > Decimal(item.quantidade_comercial or 0):
+                raise ValueError("Quantidade recebida inválida para item XML.")
+            if item.produto.empresa_id != nota.empresa_id:
+                raise ValueError("Produto conciliado pertence a outra empresa.")
+            if item.produto.tipo_produto != tipo_exigido:
+                raise ValueError(f"Tratamento {tratamento} exige produto tipo {tipo_exigido} em todos os itens.")
+            if not item.produto_fornecedor_id or not item.conversao_pronta:
+                raise ValueError("Resolva as pendências de conversão dos itens XML da NF-e antes de fechar a nota.")
+
     def _validar_pronto_xml(self, nota):
         if nota.situacao_fiscal != NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA:
             raise ValueError("A NF-e XML precisa estar fiscalmente autorizada para efetivação operacional.")
@@ -821,7 +909,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 if qtd_fiscal > saldo:
                     raise ValueError("Quantidade recebida do XML ultrapassa o saldo permitido do Pedido.")
 
-    def _movimentar_estoque_xml(self, nota):
+    def _movimentar_estoque_xml(self, nota, usar_quantidade_recebida=False, tratamento=None):
         documento = self._documento_estoque(nota, "ENTRADA")
         if (
             EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists()
@@ -830,7 +918,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
         movimentos = 0
         for item in nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").order_by("numero_item"):
-            qtd = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(item.quantidade_comercial or 0))
+            quantidade_base = item.quantidade_recebida if usar_quantidade_recebida else item.quantidade_comercial
+            qtd = Decimal(item.produto_fornecedor.converter_quantidade_fornecedor(quantidade_base or 0))
             item.unidade_fornecedor_efetivada = item.produto_fornecedor.unidade_fornecedor
             item.fator_conversao_efetivado = item.produto_fornecedor.fator_conversao
             item.quantidade_interna_efetivada = qtd
@@ -838,7 +927,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             item.save(update_fields=["unidade_fornecedor_efetivada", "fator_conversao_efetivado", "quantidade_interna_efetivada", "efetivado_em"])
             if qtd <= 0:
                 continue
-            if item.produto.tipo_produto == "2":
+            if tratamento == XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO or (not tratamento and item.produto.tipo_produto == "2"):
                 movimentos += self._movimentar_produto_xml_uso_consumo(nota, item, qtd, documento)
             else:
                 movimentos += self._movimentar_produto_xml_estoque(nota, item, qtd, documento)
@@ -1190,6 +1279,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return {"valor": valor, "baixado": baixado, "movimentacao_ativa": movimentacao_ativa}
 
     def _avisos_estoque_cancelamento(self, nota):
+        if nota.xml_fornecedor_id and nota.xml_fornecedor.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+            return []
         documento_entrada = self._documento_estoque(nota, "ENTRADA")
         avisos = []
         for alvo in self._alvos_estoque_cancelamento(nota):
@@ -1237,6 +1328,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     def _alvos_estoque_cancelamento(self, nota):
         alvos = []
         if nota.xml_importado:
+            if nota.xml_fornecedor_id and nota.xml_fornecedor.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+                return alvos
             for item in nota.itens_xml.select_related("produto"):
                 produto = item.produto
                 qtd = _q3(item.quantidade_interna_efetivada or 0)
@@ -1536,6 +1629,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return {"disponivel": True, "movimentos": movimentos}
 
     def _movimentar_estoque_cancelamento_xml(self, nota, motivo, request, documento):
+        if nota.xml_fornecedor_id and nota.xml_fornecedor.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+            return {"disponivel": True, "movimentos": 0}
         movimentos = 0
         for item in nota.itens_xml.select_related("produto", "produto__unidade").order_by("numero_item"):
             qtd = _q3(item.quantidade_interna_efetivada or 0)

@@ -2590,11 +2590,27 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
                 skus[(cor_nome, tamanho_nome)] = ProdutoDetalhe.objects.create(produto=produto, idcor=cor, idtamanho=tamanho)
         return produto, skus
 
-    def criar_nota_xml_manual(self, numero="990001", itens=()):
+    def criar_xml_detectado(self, numero="990001", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO):
+        return XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso=f"3526082234567800019555001000000{int(numero):013d}",
+            modelo="55",
+            serie="1",
+            numero=numero,
+            situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            tipo_tratamento=tipo,
+            valor_total=Decimal("50.00"),
+        )
+
+    def criar_nota_xml_manual(self, numero="990001", itens=(), xml_fornecedor=None):
         nota = NotaFiscalEntrada.objects.create(
             empresa=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
+            xml_fornecedor=xml_fornecedor,
             modelo="55",
             serie="1",
             numero=numero,
@@ -2604,6 +2620,7 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
             xml_importado=True,
             situacao_fiscal=NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA,
             finalidade_nfe="1",
+            chave_acesso=getattr(xml_fornecedor, "chave_acesso", ""),
             valor_produtos=sum(Decimal(str(item.get("quantidade", "0"))) * Decimal(str(item.get("valor_unitario", "10.00"))) for item in itens),
             valor_total=sum(Decimal(str(item.get("quantidade", "0"))) * Decimal(str(item.get("valor_unitario", "10.00"))) for item in itens),
         )
@@ -2938,6 +2955,193 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         item1.refresh_from_db()
         self.assertEqual(item1.fator_conversao_efetivado, Decimal("10.000000"))
         self.assertEqual(item1.quantidade_interna_efetivada, Decimal("30.000000"))
+
+    def test_agente_uso_consumo_fecha_por_tratamento_com_quantidade_recebida(self):
+        xml = self.criar_xml_detectado(numero="991001", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991001",
+            xml_fornecedor=xml,
+            itens=[{"produto": self.produto, "codigo": "USO-AG", "quantidade": "5.0000", "quantidade_recebida": "3.0000"}],
+        )
+
+        resp = self.fechar_xml(nota)
+
+        xml.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertEqual(resp.data["estoque"]["movimentos"], 1)
+        self.assertEqual(item.quantidade_comercial, Decimal("5.000000"))
+        self.assertEqual(item.quantidade_recebida, Decimal("3.000000"))
+        self.assertEqual(item.quantidade_interna_efetivada, Decimal("3.000000"))
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("3.000"))
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
+
+    def test_agente_insumo_fecha_em_estoque_regular_com_quantidade_recebida(self):
+        insumo = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Insumo Agente", unidade=self.unidade)
+        xml = self.criar_xml_detectado(numero="991002", tipo=XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO)
+        nota = self.criar_nota_xml_manual(
+            numero="991002",
+            xml_fornecedor=xml,
+            itens=[{"produto": insumo, "codigo": "INS-AG", "quantidade": "5.0000", "quantidade_recebida": "3.0000"}],
+        )
+
+        self.fechar_xml(nota)
+
+        codigo = f"29{int(insumo.pk) % 100000000000:011d}"
+        item = nota.itens_xml.get()
+        self.assertEqual(item.quantidade_interna_efetivada, Decimal("3.000000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=codigo).Estoque, Decimal("3.000"))
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+    def test_agente_fiscal_sem_estoque_fecha_sem_conciliacao_estoque_ou_custo(self):
+        xml = self.criar_xml_detectado(numero="991003", tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml,
+            modelo="55",
+            serie="1",
+            numero="991003",
+            chave_acesso=xml.chave_acesso,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+            status=NotaFiscalEntrada.Status.ABERTA,
+            xml_importado=True,
+            situacao_fiscal=NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA,
+            finalidade_nfe="1",
+            valor_produtos=Decimal("12.34"),
+            valor_total=Decimal("12.34"),
+        )
+        NotaFiscalEntradaItemXml.objects.create(
+            nota=nota,
+            numero_item=1,
+            codigo_produto_fornecedor="FISCAL",
+            descricao_produto="Servico fiscal",
+            unidade_comercial="UN",
+            quantidade_comercial=Decimal("1.2345"),
+            valor_unitario_comercial=Decimal("10.0000"),
+            valor_produto=Decimal("12.34"),
+        )
+
+        resp = self.fechar_xml(nota)
+
+        xml.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertEqual(resp.data["estoque"]["movimentos"], 0)
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 1)
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
+
+    def test_agente_bloqueia_tratamento_estoque_ou_nao_definido_no_fechamento(self):
+        for idx, tipo in enumerate((XmlFornecedorRecebido.TipoTratamento.ESTOQUE, XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO), start=4):
+            xml = self.criar_xml_detectado(numero=f"99100{idx}", tipo=tipo)
+            nota = self.criar_nota_xml_manual(numero=f"99100{idx}", xml_fornecedor=xml, itens=[{"produto": self.produto, "codigo": f"BLQ-{idx}", "quantidade": "1"}])
+            resp = self.fechar_xml(nota, status_code=400)
+            nota.refresh_from_db()
+            xml.refresh_from_db()
+            self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+            self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+            self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+            self.assertTrue("estoque" in resp.data["detail"].lower() or "tratamento" in resp.data["detail"].lower())
+
+    def test_agente_tipo_incompativel_bloqueia_sem_efeitos_parciais(self):
+        insumo = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Insumo Incompativel", unidade=self.unidade)
+        xml = self.criar_xml_detectado(numero="991009", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991009",
+            xml_fornecedor=xml,
+            itens=[{"produto": insumo, "codigo": "TIPO-ERR", "quantidade": "5", "quantidade_recebida": "3"}],
+        )
+
+        resp = self.fechar_xml(nota, status_code=400)
+
+        xml.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertIn("produto tipo 2", resp.data["detail"])
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+
+    def test_agente_conciliacao_respeita_tipo_de_produto_do_tratamento(self):
+        revenda, skus = self.criar_revenda_com_skus(descricao="Revenda Tratamento", tamanhos=("54",))
+        ProdutoFornecedor.objects.create(
+            empresa=self.empresa,
+            fornecedor=self.fornecedor,
+            produto=revenda,
+            codigo_produto_fornecedor="TRAT-COD",
+            unidade_fornecedor="UN",
+            fator_conversao=Decimal("1"),
+            gtin_ean=skus[("Azul", "54")].ean13,
+        )
+        xml = self.criar_xml_detectado(numero="991006", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991006",
+            xml_fornecedor=xml,
+            itens=[{"produto": self.produto, "codigo": "TRAT-COD", "gtin": skus[("Azul", "54")].ean13, "quantidade": "1"}],
+        )
+        item = nota.itens_xml.get()
+        item.produto = None
+        item.produto_fornecedor = None
+        item.save(update_fields=["produto", "produto_fornecedor"])
+
+        resp = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/conciliar-automaticamente/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item.refresh_from_db()
+        self.assertIsNone(item.produto_id)
+        candidatos = self.client.get(f"/api/fiscal/notas-entrada/{nota.pk}/item-xml-candidatos/", {"item": item.pk, "q": "Revenda"})
+        self.assertEqual(candidatos.status_code, 200, candidatos.data)
+        self.assertNotIn(revenda.pk, [row["id"] for row in candidatos.data])
+        manual = self.client.post(f"/api/fiscal/notas-entrada/{nota.pk}/item-xml-conciliar/", {"item": item.pk, "produto": revenda.pk}, format="json")
+        self.assertEqual(manual.status_code, 400, manual.data)
+
+    def test_cancelamento_agente_respeita_tratamento_e_nao_muda_xml_processado(self):
+        xml = self.criar_xml_detectado(numero="991007", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991007",
+            xml_fornecedor=xml,
+            itens=[{"produto": self.produto, "codigo": "USO-CANC", "quantidade": "5", "quantidade_recebida": "3"}],
+        )
+        self.fechar_xml(nota)
+        self.cancelar_xml(nota)
+
+        xml.refresh_from_db()
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
+        self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("0.000"))
+        self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", quantidade=Decimal("3.000")).exists())
+
+    def test_cancelamento_agente_fiscal_sem_estoque_cancela_financeiro_sem_estoque(self):
+        xml = self.criar_xml_detectado(numero="991008", tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml,
+            modelo="55",
+            serie="1",
+            numero="991008",
+            chave_acesso=xml.chave_acesso,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+            status=NotaFiscalEntrada.Status.ABERTA,
+            xml_importado=True,
+            situacao_fiscal=NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA,
+            finalidade_nfe="1",
+            valor_total=Decimal("10.00"),
+        )
+        NotaFiscalEntradaItemXml.objects.create(nota=nota, numero_item=1, descricao_produto="Fiscal", quantidade_comercial=Decimal("1"), valor_produto=Decimal("10.00"))
+        self.fechar_xml(nota)
+
+        resp = self.cancelar_xml(nota)
+
+        xml.refresh_from_db()
+        self.assertEqual(resp.data["estoque"]["movimentos"], 0)
+        self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 0)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").exists())
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

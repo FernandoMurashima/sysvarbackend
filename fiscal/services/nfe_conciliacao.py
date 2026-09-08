@@ -11,8 +11,32 @@ from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItemXml
 from produto.models import Produto, ProdutoDetalhe, ProdutoFornecedor
 
 
+TRATAMENTO_TIPO_PRODUTO = {
+    "USO_CONSUMO": ("2", "Uso/Consumo"),
+    "INSUMO_PRODUCAO": ("4", "Insumo de Produção"),
+}
+
+
 def normalizar_unidade(value):
     return str(value or "").strip().upper()
+
+
+def tipo_produto_exigido(nota):
+    xml = getattr(nota, "xml_fornecedor", None)
+    if not xml:
+        return None, ""
+    return TRATAMENTO_TIPO_PRODUTO.get(xml.tipo_tratamento, (None, ""))
+
+
+def filtrar_produtos_por_tratamento(qs, nota):
+    tipo, _ = tipo_produto_exigido(nota)
+    return qs.filter(tipo_produto=tipo) if tipo else qs
+
+
+def validar_tipo_produto_tratamento(nota, produto):
+    tipo, label = tipo_produto_exigido(nota)
+    if tipo and produto and produto.tipo_produto != tipo:
+        raise ValidationError({"produto": f"Tratamento {label} exige produto tipo {tipo}."})
 
 
 def conversao_info(item):
@@ -90,6 +114,7 @@ def conciliar_manual(item, produto_id, user=None, request=None):
     produto = Produto.objects.select_related("unidade").filter(pk=produto_id, empresa_id=nota.empresa_id).first()
     if not produto:
         raise ValidationError({"produto": "Produto não encontrado para a empresa da NF."})
+    validar_tipo_produto_tratamento(nota, produto)
 
     vinculo = None
     codigo = ProdutoFornecedor.normalizar_codigo(item.codigo_produto_fornecedor)
@@ -159,6 +184,7 @@ def conciliar_manual(item, produto_id, user=None, request=None):
 def candidatos_item(item, search=""):
     nota = item.nota
     qs = Produto.objects.select_related("unidade").filter(empresa_id=nota.empresa_id, ativo=True)
+    qs = filtrar_produtos_por_tratamento(qs, nota)
     search = str(search or item.descricao_produto or "").strip()
     if search:
         qs = qs.filter(Q(descricao__icontains=search) | Q(referencia__icontains=search))
@@ -171,11 +197,16 @@ def _vinculo_por_codigo(nota, item):
         return None
     vinculos = list(
         ProdutoFornecedor.objects.select_related("produto", "produto__unidade")
-        .filter(empresa_id=nota.empresa_id, fornecedor_id=nota.fornecedor_id, codigo_vigente=codigo, ativo=True)[:2]
+        .filter(empresa_id=nota.empresa_id, fornecedor_id=nota.fornecedor_id, codigo_vigente=codigo, ativo=True)
     )
+    tipo, _ = tipo_produto_exigido(nota)
+    if tipo:
+        vinculos = [vinculo for vinculo in vinculos if vinculo.produto.tipo_produto == tipo]
+    vinculos = vinculos[:2]
     if len(vinculos) != 1:
         return None
     vinculo = vinculos[0]
+    validar_tipo_produto_tratamento(nota, vinculo.produto)
     unidade_xml = normalizar_unidade(item.unidade_comercial)
     unidade_vinculo = normalizar_unidade(vinculo.unidade_fornecedor)
     if unidade_vinculo and unidade_xml and unidade_xml != unidade_vinculo:
@@ -190,12 +221,17 @@ def _produto_por_gtin(nota, item):
         gtin_ean=item.gtin_ean,
         ativo=True,
     )
+    tipo, _ = tipo_produto_exigido(nota)
+    if tipo:
+        vinculos = vinculos.filter(produto__tipo_produto=tipo)
     for vinculo in vinculos:
         if vinculo.fornecedor_id == nota.fornecedor_id:
             produtos[vinculo.produto_id] = (vinculo.produto, vinculo)
         else:
             produtos.setdefault(vinculo.produto_id, (vinculo.produto, None))
     skus = ProdutoDetalhe.objects.select_related("produto", "produto__unidade").filter(produto__empresa_id=nota.empresa_id, ean13=item.gtin_ean)
+    if tipo:
+        skus = skus.filter(produto__tipo_produto=tipo)
     for sku in skus:
         produtos.setdefault(sku.produto_id, (sku.produto, None))
     if len(produtos) == 1:
@@ -209,6 +245,7 @@ def _produto_por_pedido(nota, item):
         return None, None, ""
     total = item.valor_produto - item.valor_desconto
     qs = nota.pedido_compra.itens.select_related("produto", "produto__unidade").filter(produto__isnull=False)
+    qs = filtrar_produtos_por_tratamento(qs, nota)
     candidatos = qs.filter(qtd=item.quantidade_comercial, preco_unit=item.valor_unitario_comercial)
     if not candidatos.exists():
         candidatos = qs.filter(total_item=total)
