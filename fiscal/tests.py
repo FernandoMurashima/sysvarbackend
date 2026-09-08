@@ -74,6 +74,37 @@ class AgenteLocalSysvarApiTests(TestCase):
         data.update(extras)
         return data
 
+    def _dados_fiscais(self, chave="35260822345678000195550010000001234567890121", numero="12345"):
+        return {
+            "modelo": "55",
+            "serie": "1",
+            "numero": numero,
+            "chave_acesso": chave,
+            "dh_emissao": "2026-09-03T08:00:00-03:00",
+            "natureza_operacao": "Compra",
+            "emitente": {"documento": "21222333000181", "nome": "Fornecedor Agente", "ie": "123456789"},
+            "destinatario": {"documento": "11222333000181", "nome": "Loja Agente"},
+            "protocolo_autorizacao": "135260000000001",
+            "protocolo_cstat": "100",
+            "situacao_fiscal": "AUTORIZADA",
+            "valor_produtos": "65.00",
+            "valor_desconto": "1.00",
+            "valor_frete": "5.00",
+            "valor_total": "69.00",
+            "totais_fiscais": {"vProd": "65.00", "vNF": "69.00", "ICMS": {"vICMS": "11.70"}},
+            "cobranca_fiscal": {"fat": {"nFat": numero}},
+            "pagamentos_fiscais": [{"tPag": "15", "vPag": "69.00"}],
+            "documentos_referenciados": [],
+            "informacoes_complementares_fisco": "Info fisco",
+            "informacoes_complementares_contribuinte": "Info contribuinte",
+        }
+
+    def _itens_fiscais(self):
+        return [
+            {"numero_item": 1, "codigo_produto_fornecedor": "ABC", "descricao_produto": "Produto A", "gtin_ean": "7891234567895", "ncm": "61091000", "cfop": "5102", "unidade_comercial": "UN", "quantidade_comercial": "2.0000", "valor_unitario_comercial": "10.0000", "valor_produto": "20.00", "valor_desconto": "1.00", "informacoes_adicionais": "Lote A", "impostos_fiscais": {"ICMS": {"ICMS00": {"vICMS": "3.60"}}, "PIS": {"PISAliq": {"vPIS": "0.33"}}, "COFINS": {"COFINSAliq": {"vCOFINS": "1.52"}}}},
+            {"numero_item": 2, "codigo_produto_fornecedor": "DEF", "descricao_produto": "Produto B", "gtin_ean": "7899876543210", "ncm": "62052000", "cfop": "5102", "unidade_comercial": "UN", "quantidade_comercial": "3.0000", "valor_unitario_comercial": "15.0000", "valor_produto": "45.00", "valor_desconto": "0.00", "informacoes_adicionais": "", "impostos_fiscais": {"ICMS": {"ICMS00": {"vICMS": "8.10"}}, "PIS": {"PISAliq": {"vPIS": "0.74"}}, "COFINS": {"COFINSAliq": {"vCOFINS": "3.42"}}}},
+        ]
+
     def test_crud_admin_token_e_escopo_multiempresa(self):
         self._admin()
         resp = self.client.post("/api/fiscal/agentes-locais/", {"empresa": self.empresa.id, "identificador": "FABRICA-SERVIDOR-01", "nome": "Servidor"}, format="json")
@@ -242,6 +273,24 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertFalse(MovimentacaoFinanceira.objects.exists())
         self.assertFalse(PedidoCompra.objects.exists())
 
+    def test_xml_detectado_persiste_dados_fiscais_e_itens_sem_efeitos_operacionais(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        payload = self._payload_xml(cfg, dados_fiscais=self._dados_fiscais(), itens_fiscais=self._itens_fiscais())
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        self.assertEqual(xml.dados_fiscais["totais_fiscais"]["ICMS"]["vICMS"], "11.70")
+        self.assertIsInstance(xml.itens_fiscais, list)
+        self.assertEqual(len(xml.itens_fiscais), 2)
+        self.assertEqual(xml.itens_fiscais[0]["impostos_fiscais"]["PIS"]["PISAliq"]["vPIS"], "0.33")
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+        self.assertFalse(RecebimentoMercadoriaEstoque.objects.exists())
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(MovimentacaoFinanceira.objects.exists())
+
     def test_xml_detectado_configuracao_central_fornecedor_desconhecido_e_idempotencia(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
         self._token(agente)
@@ -267,6 +316,29 @@ class AgenteLocalSysvarApiTests(TestCase):
         self.assertEqual(retry.data["xml"]["tipo_tratamento"], XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
         self.assertEqual(xml.quantidade_total_faturada, Decimal("699.000"))
         self.assertEqual(xml.unidade_comercial, "UN")
+
+    def test_xml_detectado_retry_preserva_e_atualiza_dados_fiscais_sem_apagar(self):
+        agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")
+        self._token(agente)
+        cfg = ConfiguracaoXmlFornecedor.objects.create(empresa=self.empresa, loja=self.loja, caminho_local=r"X:\Fiscal\XML")
+        resp = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, dados_fiscais=self._dados_fiscais(), itens_fiscais=self._itens_fiscais()), format="json")
+        xml = XmlFornecedorRecebido.objects.get(pk=resp.data["xml"]["id"])
+        xml.tipo_tratamento = XmlFornecedorRecebido.TipoTratamento.ESTOQUE
+        xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
+        xml.save(update_fields=["tipo_tratamento", "status_operacional"])
+        retry_antigo = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg), format="json")
+        self.assertEqual(retry_antigo.status_code, 200, retry_antigo.data)
+        xml.refresh_from_db()
+        self.assertEqual(xml.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+        self.assertEqual(xml.dados_fiscais["numero"], "12345")
+        self.assertEqual(len(xml.itens_fiscais), 2)
+        retry_novo = self.client.post("/api/fiscal/agente-local/xml-detectado/", self._payload_xml(cfg, dados_fiscais=self._dados_fiscais(numero="12346"), itens_fiscais=[self._itens_fiscais()[0]]), format="json")
+        self.assertEqual(retry_novo.status_code, 200, retry_novo.data)
+        xml.refresh_from_db()
+        self.assertEqual(xml.dados_fiscais["numero"], "12346")
+        self.assertEqual(len(xml.itens_fiscais), 1)
+        self.assertEqual(XmlFornecedorRecebido.objects.filter(chave_acesso=xml.chave_acesso).count(), 1)
 
     def test_xml_detectado_rejeita_quantidade_total_negativa(self):
         agente = AgenteLocalSysvar.objects.create(empresa=self.empresa, identificador="AG-1", nome="Agente")

@@ -3169,6 +3169,10 @@ class AgenteLocalApiViewSet(viewsets.ViewSet):
 
     def _atualizar_retry_seguro(self, xml, data):
         campos = ["caminho_origem_local", "emitente_nome", "destinatario_nome", "quantidade_total_faturada", "unidade_comercial"]
+        if data.get("dados_fiscais"):
+            campos.append("dados_fiscais")
+        if data.get("itens_fiscais"):
+            campos.append("itens_fiscais")
         changed = []
         for campo in campos:
             value = data.get(campo)

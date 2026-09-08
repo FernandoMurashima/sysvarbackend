@@ -374,6 +374,8 @@ class XmlFornecedorRecebido(models.Model):
     tipo_tratamento = models.CharField(max_length=24, choices=TipoTratamento.choices, default=TipoTratamento.NAO_DEFINIDO, db_index=True)
     caminho_origem_local = models.CharField(max_length=500, blank=True, default="")
     identificador_agente = models.CharField(max_length=120, blank=True, default="")
+    dados_fiscais = models.JSONField(default=dict, blank=True)
+    itens_fiscais = models.JSONField(default=list, blank=True)
     detectado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
     erro_processamento = models.TextField(blank=True, default="")

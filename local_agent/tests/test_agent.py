@@ -42,6 +42,26 @@ def nfe_xml(chave=CHAVE):
 </nfeProc>"""
 
 
+def nfe_xml_fiscal(chave=CHAVE):
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe{chave}" versao="4.00">
+      <ide><cUF>35</cUF><cNF>67890123</cNF><natOp>Compra</natOp><mod>55</mod><serie>1</serie><nNF>12345</nNF><dhEmi>2026-09-03T08:00:00-03:00</dhEmi><dhSaiEnt>2026-09-03T09:00:00-03:00</dhSaiEnt><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3550308</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>1</cDV><tpAmb>1</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>SYSVAR</verProc></ide>
+      <emit><CNPJ>21222333000181</CNPJ><xNome>Fornecedor Teste</xNome><IE>123456789</IE></emit>
+      <dest><CNPJ>11222333000181</CNPJ><xNome>Loja Teste</xNome></dest>
+      <det nItem="1"><prod><cProd>ABC</cProd><cEAN>7891234567895</cEAN><xProd>Produto A</xProd><NCM>61091000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>10.0000</vUnCom><vProd>20.00</vProd><vDesc>1.00</vDesc></prod><imposto><ICMS><ICMS00><CST>00</CST><vICMS>3.60</vICMS></ICMS00></ICMS><PIS><PISAliq><vPIS>0.33</vPIS></PISAliq></PIS><COFINS><COFINSAliq><vCOFINS>1.52</vCOFINS></COFINSAliq></COFINS></imposto><infAdProd>Lote A</infAdProd></det>
+      <det nItem="2"><prod><cProd>DEF</cProd><cEAN>7899876543210</cEAN><xProd>Produto B</xProd><NCM>62052000</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>3.0000</qCom><vUnCom>15.0000</vUnCom><vProd>45.00</vProd></prod><imposto><ICMS><ICMS00><CST>00</CST><vICMS>8.10</vICMS></ICMS00></ICMS><PIS><PISAliq><vPIS>0.74</vPIS></PISAliq></PIS><COFINS><COFINSAliq><vCOFINS>3.42</vCOFINS></COFINSAliq></COFINS></imposto></det>
+      <total><ICMSTot><vProd>65.00</vProd><vDesc>1.00</vDesc><vFrete>5.00</vFrete><vNF>69.00</vNF></ICMSTot></total>
+      <cobr><fat><nFat>12345</nFat><vOrig>69.00</vOrig></fat></cobr>
+      <pag><detPag><tPag>15</tPag><vPag>69.00</vPag></detPag></pag>
+      <infAdic><infAdFisco>Info fisco</infAdFisco><infCpl>Info contribuinte</infCpl></infAdic>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><tpAmb>1</tpAmb><chNFe>{chave}</chNFe><dhRecbto>2026-09-03T08:01:00-03:00</dhRecbto><nProt>135260000000001</nProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe>
+</nfeProc>"""
+
+
 class Response:
     def __init__(self, status_code=200, data=None, invalid_json=False):
         self.status_code = status_code
@@ -149,6 +169,20 @@ class ParserTests(unittest.TestCase):
             parse_nfe_file(self._write("<root />"))
         with self.assertRaises(NFeParseError):
             parse_nfe_file(self._write(nfe_xml("123")))
+
+    def test_xml_nfe_extrai_payload_fiscal_estruturado_sem_xml_bruto(self):
+        data = parse_nfe_file(self._write(nfe_xml_fiscal()))
+        self.assertEqual(data["dados_fiscais"]["natureza_operacao"], "Compra")
+        self.assertEqual(data["dados_fiscais"]["emitente"]["ie"], "123456789")
+        self.assertEqual(data["dados_fiscais"]["totais_fiscais"]["vProd"], "65.00")
+        self.assertEqual(data["dados_fiscais"]["pagamentos_fiscais"][0]["tPag"], "15")
+        self.assertEqual(data["dados_fiscais"]["protocolo_autorizacao"], "135260000000001")
+        self.assertEqual(len(data["itens_fiscais"]), 2)
+        self.assertEqual(data["itens_fiscais"][0]["gtin_ean"], "7891234567895")
+        self.assertEqual(data["itens_fiscais"][0]["impostos_fiscais"]["ICMS"]["ICMS00"]["vICMS"], "3.60")
+        payload_json = json.dumps(data)
+        self.assertNotIn("<NFe", payload_json)
+        self.assertNotIn("nfeProc", payload_json)
 
 
 class ApiTests(unittest.TestCase):

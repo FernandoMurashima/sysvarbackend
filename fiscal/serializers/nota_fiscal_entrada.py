@@ -355,6 +355,8 @@ class AgenteLocalConfiguracaoSerializer(serializers.ModelSerializer):
 
 class AgenteLocalXmlDetectadoSerializer(XmlFornecedorRecebidoSerializer):
     configuracao_id = serializers.IntegerField(write_only=True)
+    dados_fiscais = serializers.DictField(required=False)
+    itens_fiscais = serializers.ListField(required=False)
 
     class Meta(XmlFornecedorRecebidoSerializer.Meta):
         fields = (
@@ -362,7 +364,7 @@ class AgenteLocalXmlDetectadoSerializer(XmlFornecedorRecebidoSerializer):
             "emitente_documento", "emitente_nome", "destinatario_documento", "destinatario_nome", "valor_total",
             "quantidade_total_faturada", "unidade_comercial",
             "situacao_fiscal", "status_operacional", "caminho_origem_local", "identificador_agente", "detectado_em",
-            "atualizado_em",
+            "atualizado_em", "dados_fiscais", "itens_fiscais",
         )
         read_only_fields = ("id", "loja", "fornecedor", "status_operacional", "identificador_agente", "detectado_em", "atualizado_em")
         extra_kwargs = {"chave_acesso": {"validators": []}}
@@ -383,6 +385,18 @@ class AgenteLocalXmlDetectadoSerializer(XmlFornecedorRecebidoSerializer):
         quantidade_total = attrs.get("quantidade_total_faturada")
         if quantidade_total is not None and Decimal(quantidade_total) < 0:
             raise serializers.ValidationError({"quantidade_total_faturada": "Informe quantidade maior ou igual a zero."})
+        dados_fiscais = attrs.get("dados_fiscais")
+        if dados_fiscais is not None and not isinstance(dados_fiscais, dict):
+            raise serializers.ValidationError({"dados_fiscais": "Dados fiscais devem ser um objeto."})
+        itens_fiscais = attrs.get("itens_fiscais")
+        if itens_fiscais is not None:
+            if not isinstance(itens_fiscais, list):
+                raise serializers.ValidationError({"itens_fiscais": "Itens fiscais devem ser uma lista."})
+            for index, item in enumerate(itens_fiscais, start=1):
+                if not isinstance(item, dict):
+                    raise serializers.ValidationError({"itens_fiscais": f"Item fiscal {index} deve ser um objeto."})
+                if "numero_item" in item and item["numero_item"] in ("", None):
+                    raise serializers.ValidationError({"itens_fiscais": f"Item fiscal {index} possui número inválido."})
         return attrs
 
 
