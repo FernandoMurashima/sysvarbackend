@@ -495,6 +495,76 @@ class XmlFornecedorRecebidoTests(TestCase):
         data.update(extras)
         return data
 
+    def dados_fiscais_detectados(self, chave="35260822345678000195550010000001234567890121", numero="123"):
+        return {
+            "modelo": "55",
+            "serie": "1",
+            "numero": numero,
+            "chave_acesso": chave,
+            "dt_emissao": "2026-09-02",
+            "dh_emissao": "2026-09-02T10:00:00-03:00",
+            "dh_saida_entrada": "2026-09-02T11:00:00-03:00",
+            "natureza_operacao": "Compra uso consumo",
+            "tipo_operacao": "1",
+            "identificador_destino": "1",
+            "municipio_fato_gerador": "3550308",
+            "tipo_impressao": "1",
+            "tipo_emissao": "1",
+            "digito_verificador": "1",
+            "ambiente": "1",
+            "finalidade_nfe": "1",
+            "consumidor_final": "0",
+            "presenca_comprador": "9",
+            "intermediador": "",
+            "processo_emissao": "0",
+            "versao_processo": "SYSVAR",
+            "versao_leiaute": "4.00",
+            "emitente": {"documento": "21222333000181", "nome": "Fornecedor XML Detectado", "ie": "123456789"},
+            "destinatario": {"documento": "11222333000181", "nome": "Loja XML Detectado"},
+            "protocolo_autorizacao": "135260000000001",
+            "protocolo_chave_acesso": chave,
+            "protocolo_recebido_em": "2026-09-02T10:01:00-03:00",
+            "protocolo_cstat": "100",
+            "protocolo_motivo": "Autorizado o uso da NF-e",
+            "situacao_fiscal": XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+            "valor_produtos": "65.00",
+            "valor_desconto": "1.00",
+            "valor_frete": "5.00",
+            "valor_total": "69.00",
+            "totais_fiscais": {"vProd": "65.00", "vDesc": "1.00", "vFrete": "5.00", "vNF": "69.00"},
+            "cobranca_fiscal": {"fat": {"nFat": numero, "vOrig": "69.00"}},
+            "pagamentos_fiscais": [{"tPag": "15", "vPag": "69.00"}],
+            "documentos_referenciados": [],
+            "informacoes_complementares_fisco": "Info fisco",
+            "informacoes_complementares_contribuinte": "Info contribuinte",
+        }
+
+    def itens_fiscais_detectados(self):
+        return [
+            {"numero_item": 1, "codigo_produto_fornecedor": "ABC", "descricao_produto": "Produto A", "gtin_ean": "7891234567895", "ncm": "61091000", "cfop": "5102", "unidade_comercial": "UN", "quantidade_comercial": "2.0000", "valor_unitario_comercial": "10.0000", "valor_produto": "20.00", "valor_desconto": "1.00", "informacoes_adicionais": "Lote A", "impostos_fiscais": {"ICMS": {"ICMS00": {"vICMS": "3.60"}}}},
+            {"numero_item": 2, "codigo_produto_fornecedor": "DEF", "descricao_produto": "Produto B", "gtin_ean": "7899876543210", "ncm": "62052000", "cfop": "5102", "unidade_comercial": "UN", "quantidade_comercial": "3.0000", "valor_unitario_comercial": "15.0000", "valor_produto": "45.00", "valor_desconto": "0.00", "informacoes_adicionais": "", "impostos_fiscais": {"PIS": {"PISAliq": {"vPIS": "0.74"}}}},
+        ]
+
+    def xml_materializavel(self, tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO, chave="35260822345678000195550010000001234567890121", **extras):
+        numero = extras.pop("numero", "123")
+        dados = self.dados_fiscais_detectados(chave=chave, numero=numero)
+        itens = self.itens_fiscais_detectados()
+        dados = extras.pop("dados_fiscais", dados)
+        itens = extras.pop("itens_fiscais", itens)
+        payload = self.payload(
+            chave=chave,
+            numero=dados.get("numero") or numero,
+            tipo_tratamento=tipo,
+            dados_fiscais=dados,
+            itens_fiscais=itens,
+            valor_total="69.00",
+            **extras,
+        )
+        payload["empresa_id"] = payload.pop("empresa")
+        payload["loja_id"] = payload.pop("loja")
+        payload["fornecedor_id"] = payload.pop("fornecedor")
+        return XmlFornecedorRecebido.objects.create(**payload)
+
     def post_xml(self, payload=None, status_code=201):
         resp = self.client.post("/api/fiscal/xmls-fornecedor-recebidos/", payload or self.payload(), format="json")
         self.assertEqual(resp.status_code, status_code, resp.data)
@@ -847,6 +917,89 @@ class XmlFornecedorRecebidoTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_encaminhar_fiscal_materializa_uso_consumo_com_campos_itens_e_sem_efeitos(self):
+        xml = self.xml_materializavel(XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        nota = NotaFiscalEntrada.objects.get(pk=resp.data["id"])
+        self.assertEqual(nota.xml_fornecedor, xml)
+        self.assertIsNone(nota.pedido_compra)
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertTrue(nota.xml_importado)
+        self.assertEqual(nota.xml_original, "")
+        self.assertEqual(nota.natureza_operacao, "Compra uso consumo")
+        self.assertEqual(nota.emitente_ie, "123456789")
+        self.assertEqual(nota.valor_produtos, Decimal("65.00"))
+        self.assertEqual(nota.valor_desconto, Decimal("1.00"))
+        self.assertEqual(nota.valor_frete, Decimal("5.00"))
+        self.assertEqual(nota.valor_total, Decimal("69.00"))
+        self.assertEqual(nota.totais_fiscais["vNF"], "69.00")
+        self.assertEqual(nota.pagamentos_fiscais[0]["tPag"], "15")
+        itens = list(nota.itens_xml.order_by("numero_item"))
+        self.assertEqual(len(itens), 2)
+        self.assertEqual(itens[0].codigo_produto_fornecedor, "ABC")
+        self.assertEqual(itens[0].gtin_ean, "7891234567895")
+        self.assertEqual(itens[0].quantidade_comercial, Decimal("2.000000"))
+        self.assertEqual(itens[0].impostos_fiscais["ICMS"]["ICMS00"]["vICMS"], "3.60")
+        self.assertFalse(EstoqueMovimentacao.objects.exists())
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.exists())
+        self.assertFalse(Pagar.objects.exists())
+        self.assertFalse(MovimentacaoFinanceira.objects.exists())
+        self.assertFalse(RecebimentoMercadoriaEstoque.objects.exists())
+
+    def test_encaminhar_fiscal_materializa_insumo_e_fiscal_sem_estoque(self):
+        casos = (
+            (XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO, "35260822345678000195550010000001234567891004"),
+            (XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE, "35260822345678000195550010000001234567891012"),
+        )
+        for tipo, chave in casos:
+            xml = self.xml_materializavel(tipo, chave=chave, numero=chave[-3:])
+            resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+            self.assertEqual(resp.status_code, 201, resp.data)
+            self.assertEqual(NotaFiscalEntrada.objects.get(xml_fornecedor=xml).itens_xml.count(), 2)
+
+    def test_encaminhar_fiscal_bloqueia_tratamentos_e_payload_incompleto(self):
+        casos = (
+            (XmlFornecedorRecebido.TipoTratamento.ESTOQUE, "35260822345678000195550010000001234567891004", "estoque"),
+            (XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO, "35260822345678000195550010000001234567891012", "tratamento"),
+        )
+        for tipo, chave, trecho in casos:
+            xml = self.xml_materializavel(tipo, chave=chave, numero=chave[-3:])
+            resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+            self.assertEqual(resp.status_code, 400, resp.data)
+            self.assertIn(trecho, str(resp.data).lower())
+        sem_dados = self.xml_materializavel(chave="35260822345678000195550010000001234567891020", numero="158", dados_fiscais={})
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{sem_dados.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        sem_itens = self.xml_materializavel(chave="35260822345678000195550010000001234567891039", numero="185", itens_fiscais=[])
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{sem_itens.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertFalse(NotaFiscalEntrada.objects.exists())
+
+    def test_encaminhar_fiscal_bloqueia_fornecedor_nao_identificado_e_tenant(self):
+        xml = self.xml_materializavel(emitente_documento="99999999999999")
+        xml.dados_fiscais["emitente"]["documento"] = "99999999999999"
+        xml.save(update_fields=["dados_fiscais"])
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("fornecedor", str(resp.data).lower())
+        xml.dados_fiscais["emitente"]["documento"] = self.fornecedor.documento
+        xml.emitente_documento = self.fornecedor.documento
+        xml.save(update_fields=["dados_fiscais", "emitente_documento"])
+        self.client.force_authenticate(self.user_b)
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_encaminhar_fiscal_idempotente_nao_duplica(self):
+        xml = self.xml_materializavel()
+        primeiro = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+        segundo = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.id}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(primeiro.status_code, 201, primeiro.data)
+        self.assertEqual(segundo.status_code, 200, segundo.data)
+        self.assertEqual(primeiro.data["id"], segundo.data["id"])
+        self.assertEqual(NotaFiscalEntrada.objects.count(), 1)
+        self.assertEqual(NotaFiscalEntradaItemXml.objects.count(), 2)
 
         self.client.force_authenticate(self.user_b)
         resp = self.client.post(

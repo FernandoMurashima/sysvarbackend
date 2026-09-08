@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -36,6 +36,7 @@ from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_dive
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_identidade import validation_error_from_integrity_error, validar_duplicidade_nota_entrada
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
+from fiscal.validators import normalizar_chave_acesso_nfe
 from fiscal.serializers import (
     ConfiguracaoXmlFornecedorSerializer,
     AgenteLocalConfiguracaoSerializer,
@@ -2280,7 +2281,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
 class XmlFornecedorRecebidoViewSet(BaseViewSet):
     required_modules = ["fiscal", "compras"]
-    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "destroy", "definir_tratamento"}
+    action_required_modules_any = {"list", "retrieve", "create", "update", "partial_update", "destroy", "definir_tratamento", "encaminhar_fiscal"}
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     queryset = (
         XmlFornecedorRecebido.objects
@@ -2389,6 +2390,189 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
         xml.tipo_tratamento = tipo
         xml.save(update_fields=["tipo_tratamento", "atualizado_em"])
         return Response(self.get_serializer(xml).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="encaminhar-fiscal")
+    @transaction.atomic
+    def encaminhar_fiscal(self, request, pk=None):
+        xml = self.get_queryset().select_for_update().filter(pk=pk).first()
+        if not xml:
+            return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        self._validar_empresa_usuario(xml.empresa)
+        existente = getattr(xml, "nota_fiscal_entrada", None)
+        if existente:
+            return Response(NotaFiscalEntradaSerializer(existente).data, status=status.HTTP_200_OK)
+        self._validar_materializacao_fiscal(xml)
+        try:
+            nota = self._criar_nota_fiscal_entrada_de_xml_detectado(xml, request)
+        except IntegrityError as exc:
+            existente = NotaFiscalEntrada.objects.select_for_update().filter(xml_fornecedor=xml).first()
+            if existente:
+                return Response(NotaFiscalEntradaSerializer(existente).data, status=status.HTTP_200_OK)
+            raise validation_error_from_integrity_error(exc) from exc
+        return Response(NotaFiscalEntradaSerializer(nota).data, status=status.HTTP_201_CREATED)
+
+    def _validar_materializacao_fiscal(self, xml):
+        permitidos = {
+            XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO,
+            XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO,
+            XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+        }
+        if xml.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO:
+            raise ValidationError({"tipo_tratamento": "Defina o tratamento fiscal antes de encaminhar a NF-e."})
+        if xml.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.ESTOQUE:
+            raise ValidationError({"tipo_tratamento": "NF-e de estoque deve seguir pelo recebimento de mercadoria nesta etapa."})
+        if xml.tipo_tratamento not in permitidos:
+            raise ValidationError({"tipo_tratamento": "Tipo de tratamento não permite encaminhamento fiscal."})
+        if not isinstance(xml.dados_fiscais, dict) or not xml.dados_fiscais:
+            raise ValidationError({"dados_fiscais": "Dados fiscais estruturados ausentes para encaminhamento."})
+        if not isinstance(xml.itens_fiscais, list) or not xml.itens_fiscais:
+            raise ValidationError({"itens_fiscais": "Itens fiscais estruturados ausentes para encaminhamento."})
+        chave = normalizar_chave_acesso_nfe(xml.dados_fiscais.get("chave_acesso") or xml.chave_acesso)
+        if chave != xml.chave_acesso:
+            raise ValidationError({"chave_acesso": "Chave de acesso dos dados fiscais incompatível com o XML detectado."})
+        if xml.loja_id and xml.loja.empresa_id != xml.empresa_id:
+            raise ValidationError({"loja": "Loja do XML detectado pertence a outra empresa."})
+        emitente = xml.dados_fiscais.get("emitente") or {}
+        fornecedor = self._identificar_fornecedor(xml.empresa_id, emitente.get("documento") or xml.emitente_documento)
+        if xml.fornecedor_id and xml.fornecedor_id != fornecedor.id:
+            raise ValidationError({"fornecedor": "Fornecedor identificado é incompatível com o XML detectado."})
+        destinatario = xml.dados_fiscais.get("destinatario") or {}
+        loja = xml.loja or self._identificar_loja(xml.empresa_id, destinatario.get("documento") or xml.destinatario_documento)
+        doc_dest = only_digits(destinatario.get("documento") or xml.destinatario_documento)
+        if doc_dest and only_digits(loja.cnpj or "") != doc_dest:
+            raise ValidationError({"loja": "Destinatário da NF-e incompatível com a loja detectada."})
+
+    def _criar_nota_fiscal_entrada_de_xml_detectado(self, xml, request):
+        dados = xml.dados_fiscais
+        emitente = dados.get("emitente") or {}
+        destinatario = dados.get("destinatario") or {}
+        fornecedor = self._identificar_fornecedor(xml.empresa_id, emitente.get("documento") or xml.emitente_documento)
+        loja = xml.loja or self._identificar_loja(xml.empresa_id, destinatario.get("documento") or xml.destinatario_documento)
+        chave = normalizar_chave_acesso_nfe(dados.get("chave_acesso") or xml.chave_acesso)
+        validar_duplicidade_nota_entrada(
+            {
+                "empresa_id": xml.empresa_id,
+                "fornecedor_id": fornecedor.id,
+                "modelo": str(dados.get("modelo") or xml.modelo or "55"),
+                "serie": str(dados.get("serie") or xml.serie or ""),
+                "numero": str(dados.get("numero") or xml.numero or ""),
+                "chave_acesso": chave,
+            },
+            bloquear_linha=True,
+            validar_chave=False,
+        )
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=xml.empresa,
+            loja=loja,
+            fornecedor=fornecedor,
+            pedido_compra=None,
+            xml_fornecedor=xml,
+            modelo=str(dados.get("modelo") or xml.modelo or "55"),
+            serie=str(dados.get("serie") or xml.serie or ""),
+            numero=str(dados.get("numero") or xml.numero or ""),
+            chave_acesso=chave,
+            dt_emissao=self._data_emissao_fiscal(dados),
+            dt_entrada=self._data_emissao_fiscal(dados),
+            valor_produtos=_money(dados.get("valor_produtos") or 0),
+            valor_desconto=_money(dados.get("valor_desconto") or 0),
+            valor_frete=_money(dados.get("valor_frete") or 0),
+            valor_total=_money(dados.get("valor_total") or xml.valor_total or 0),
+            xml_original="",
+            xml_importado=True,
+            natureza_operacao=str(dados.get("natureza_operacao") or "")[:120],
+            emitente_documento=only_digits(emitente.get("documento") or xml.emitente_documento),
+            emitente_nome=str(emitente.get("nome") or xml.emitente_nome or "")[:120],
+            emitente_ie=str(emitente.get("ie") or emitente.get("IE") or "")[:20],
+            destinatario_documento=only_digits(destinatario.get("documento") or xml.destinatario_documento),
+            destinatario_nome=str(destinatario.get("nome") or xml.destinatario_nome or "")[:120],
+            protocolo_autorizacao=str(dados.get("protocolo_autorizacao") or "")[:30],
+            situacao_fiscal=str(dados.get("situacao_fiscal") or xml.situacao_fiscal or NotaFiscalEntrada.SituacaoFiscal.DESCONHECIDA),
+            versao_leiaute=str(dados.get("versao_leiaute") or "")[:10],
+            nfe_id_xml=str(dados.get("nfe_id_xml") or "")[:47],
+            codigo_uf=str(dados.get("codigo_uf") or "")[:2],
+            codigo_numerico=str(dados.get("codigo_numerico") or "")[:8],
+            dh_emissao=self._datetime_fiscal(dados.get("dh_emissao")),
+            dh_saida_entrada=self._datetime_fiscal(dados.get("dh_saida_entrada")),
+            tipo_operacao=str(dados.get("tipo_operacao") or "")[:1],
+            identificador_destino=str(dados.get("identificador_destino") or "")[:1],
+            municipio_fato_gerador=str(dados.get("municipio_fato_gerador") or "")[:7],
+            tipo_impressao=str(dados.get("tipo_impressao") or "")[:1],
+            tipo_emissao=str(dados.get("tipo_emissao") or "")[:1],
+            digito_verificador=str(dados.get("digito_verificador") or "")[:1],
+            ambiente=str(dados.get("ambiente") or "")[:1],
+            finalidade_nfe=str(dados.get("finalidade_nfe") or "")[:1],
+            consumidor_final=str(dados.get("consumidor_final") or "")[:1],
+            presenca_comprador=str(dados.get("presenca_comprador") or "")[:1],
+            intermediador=str(dados.get("intermediador") or "")[:1],
+            processo_emissao=str(dados.get("processo_emissao") or "")[:1],
+            versao_processo=str(dados.get("versao_processo") or "")[:20],
+            protocolo_chave_acesso=only_digits(dados.get("protocolo_chave_acesso") or "")[:44],
+            protocolo_recebido_em=self._datetime_fiscal(dados.get("protocolo_recebido_em")),
+            protocolo_cstat=str(dados.get("protocolo_cstat") or "")[:4],
+            protocolo_motivo=str(dados.get("protocolo_motivo") or "")[:255],
+            totais_fiscais=dados.get("totais_fiscais") if isinstance(dados.get("totais_fiscais"), dict) else {},
+            cobranca_fiscal=dados.get("cobranca_fiscal") if isinstance(dados.get("cobranca_fiscal"), dict) else {},
+            pagamentos_fiscais=dados.get("pagamentos_fiscais") if isinstance(dados.get("pagamentos_fiscais"), list) else [],
+            documentos_referenciados=dados.get("documentos_referenciados") if isinstance(dados.get("documentos_referenciados"), list) else [],
+            informacoes_complementares_fisco=str(dados.get("informacoes_complementares_fisco") or ""),
+            informacoes_complementares_contribuinte=str(dados.get("informacoes_complementares_contribuinte") or ""),
+            criado_por=request.user if request.user.is_authenticated else None,
+        )
+        NotaFiscalEntradaItemXml.objects.bulk_create([self._item_xml_de_item_fiscal(nota, item, idx) for idx, item in enumerate(xml.itens_fiscais, start=1)])
+        return nota
+
+    def _item_xml_de_item_fiscal(self, nota, item, idx):
+        if not isinstance(item, dict):
+            raise ValidationError({"itens_fiscais": f"Item fiscal {idx} deve ser um objeto."})
+        return NotaFiscalEntradaItemXml(
+            nota=nota,
+            numero_item=int(item.get("numero_item") or idx),
+            codigo_produto_fornecedor=str(item.get("codigo_produto_fornecedor") or "")[:80],
+            descricao_produto=str(item.get("descricao_produto") or "")[:255],
+            gtin_ean=only_digits(item.get("gtin_ean") or "")[:14],
+            ncm=str(item.get("ncm") or "")[:10],
+            cfop=str(item.get("cfop") or "")[:4],
+            unidade_comercial=str(item.get("unidade_comercial") or "")[:20],
+            quantidade_comercial=Decimal(str(item.get("quantidade_comercial") or 0)),
+            valor_unitario_comercial=Decimal(str(item.get("valor_unitario_comercial") or 0)),
+            valor_produto=_money(item.get("valor_produto") or 0),
+            valor_desconto=_money(item.get("valor_desconto") or 0),
+            informacoes_adicionais=str(item.get("informacoes_adicionais") or ""),
+            impostos_fiscais=item.get("impostos_fiscais") if isinstance(item.get("impostos_fiscais"), dict) else {},
+        )
+
+    def _data_emissao_fiscal(self, dados):
+        valor = str(dados.get("dt_emissao") or dados.get("dh_emissao") or "").strip()
+        data = parse_date(valor[:10])
+        if not data:
+            raise ValidationError({"dt_emissao": "Data de emissão fiscal ausente ou inválida."})
+        return data
+
+    def _datetime_fiscal(self, valor):
+        if not valor:
+            return None
+        parsed = parse_datetime(str(valor))
+        if parsed and timezone.is_naive(parsed):
+            return timezone.make_aware(parsed)
+        return parsed
+
+    def _identificar_fornecedor(self, empresa_id, documento):
+        doc = only_digits(documento or "")
+        if not doc:
+            raise ValidationError({"fornecedor": "Documento do emitente ausente nos dados fiscais."})
+        fornecedor = Fornecedor.objects.filter(empresa_id=empresa_id, documento=doc).first()
+        if not fornecedor:
+            raise ValidationError({"fornecedor": "Fornecedor do emitente não identificado na empresa."})
+        return fornecedor
+
+    def _identificar_loja(self, empresa_id, documento):
+        doc = only_digits(documento or "")
+        if not doc:
+            raise ValidationError({"loja": "Documento do destinatário ausente nos dados fiscais."})
+        loja = Loja.objects.filter(empresa_id=empresa_id, cnpj=doc).first()
+        if not loja:
+            raise ValidationError({"loja": "Loja destinatária não identificada na empresa."})
+        return loja
 
     def _validar_empresa_usuario(self, empresa):
         user_empresa_id = self._empresa_id_usuario()

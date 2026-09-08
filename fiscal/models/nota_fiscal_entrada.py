@@ -160,6 +160,13 @@ class NotaFiscalEntrada(models.Model):
         blank=True,
         db_index=True,
     )
+    xml_fornecedor = models.OneToOneField(
+        "fiscal.XmlFornecedorRecebido",
+        on_delete=models.PROTECT,
+        related_name="nota_fiscal_entrada",
+        null=True,
+        blank=True,
+    )
 
     # dados básicos da NF
     modelo = models.CharField(max_length=2, default="55")  # 55 = NFe (MVP)
