@@ -3113,6 +3113,29 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto).saldo, Decimal("0.000"))
         self.assertTrue(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", quantidade=Decimal("3.000")).exists())
 
+    def test_cancelamento_agente_insumo_estorna_quantidade_recebida(self):
+        insumo = Produto.objects.create(empresa=self.empresa, tipo_produto="4", descricao="Insumo Cancelamento", unidade=self.unidade)
+        codigo = f"29{int(insumo.pk) % 100000000000:011d}"
+        Estoque.objects.create(CodigodeBarra=codigo, Idloja=self.loja, referencia=insumo.referencia or "", Estoque=Decimal("7.000"), reserva=Decimal("0"))
+        xml = self.criar_xml_detectado(numero="991010", tipo=XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO)
+        nota = self.criar_nota_xml_manual(
+            numero="991010",
+            xml_fornecedor=xml,
+            itens=[{"produto": insumo, "codigo": "INS-CANC", "quantidade": "5", "quantidade_recebida": "3"}],
+        )
+
+        self.fechar_xml(nota)
+
+        item = nota.itens_xml.get()
+        self.assertEqual(item.quantidade_comercial, Decimal("5.000000"))
+        self.assertEqual(item.quantidade_interna_efetivada, Decimal("3.000000"))
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=codigo).Estoque, Decimal("10.000"))
+
+        self.cancelar_xml(nota)
+
+        self.assertEqual(Estoque.objects.get(Idloja=self.loja, CodigodeBarra=codigo).Estoque, Decimal("7.000"))
+        self.assertTrue(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL", CodigodeBarra=codigo, quantidade=Decimal("3.000")).exists())
+
     def test_cancelamento_agente_fiscal_sem_estoque_cancela_financeiro_sem_estoque(self):
         xml = self.criar_xml_detectado(numero="991008", tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
         nota = NotaFiscalEntrada.objects.create(
@@ -3142,6 +3165,69 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 0)
         self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:CANCEL").exists())
         self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
+
+    def test_agente_fiscal_sem_estoque_conciliado_nao_altera_custos_ao_fechar_ou_cancelar(self):
+        produto = self.produto
+        produto.custo_original = Decimal("11.1111")
+        produto.custo_ultima_compra = Decimal("22.2222")
+        produto.custo_medio = Decimal("33.3333")
+        produto.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+        xml = self.criar_xml_detectado(numero="991011", tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
+        nota = self.criar_nota_xml_manual(
+            numero="991011",
+            xml_fornecedor=xml,
+            itens=[{"produto": produto, "codigo": "FISC-CONC", "quantidade": "5", "quantidade_recebida": "3"}],
+        )
+
+        self.fechar_xml(nota)
+        produto.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertEqual((produto.custo_original, produto.custo_ultima_compra, produto.custo_medio), (Decimal("11.1111"), Decimal("22.2222"), Decimal("33.3333")))
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+
+        resp = self.cancelar_xml(nota)
+
+        produto.refresh_from_db()
+        item.refresh_from_db()
+        xml.refresh_from_db()
+        self.assertEqual(resp.data["custos"], {"skus_atualizados": 0, "produtos_atualizados": 0})
+        self.assertEqual((produto.custo_original, produto.custo_ultima_compra, produto.custo_medio), (Decimal("11.1111"), Decimal("22.2222"), Decimal("33.3333")))
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento__in=[f"NFE:{nota.pk}:ENTRADA", f"NFE:{nota.pk}:CANCEL"]).exists())
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento__in=[f"NFE:{nota.pk}:ENTRADA", f"NFE:{nota.pk}:CANCEL"]).exists())
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.PROCESSADO)
+
+    def test_agente_fechamento_faz_rollback_de_estoque_custo_xml_e_snapshot(self):
+        produto = self.produto
+        produto.custo_original = Decimal("1.1111")
+        produto.custo_ultima_compra = Decimal("2.2222")
+        produto.custo_medio = Decimal("3.3333")
+        produto.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+        xml = self.criar_xml_detectado(numero="991012", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991012",
+            xml_fornecedor=xml,
+            itens=[{"produto": produto, "codigo": "USO-ROLL", "quantidade": "5", "quantidade_recebida": "3"}],
+        )
+
+        with patch("fiscal.views.nota_fiscal_entrada.NotaFiscalEntradaViewSet._vincular_financeiro_xml", side_effect=ValueError("Falha financeira controlada")):
+            resp = self.fechar_xml(nota, status_code=400)
+
+        nota.refresh_from_db()
+        xml.refresh_from_db()
+        produto.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertIn("Falha financeira controlada", resp.data["detail"])
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertFalse(ProdutoUsoConsumoMovimentacao.objects.filter(documento=f"NFE:{nota.pk}:ENTRADA").exists())
+        self.assertFalse(ProdutoUsoConsumoEstoque.objects.filter(empresa=self.empresa, loja=self.loja, produto=produto).exists())
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertIsNone(item.efetivado_em)
+        self.assertEqual((produto.custo_original, produto.custo_ultima_compra, produto.custo_medio), (Decimal("1.1111"), Decimal("2.2222"), Decimal("3.3333")))
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])

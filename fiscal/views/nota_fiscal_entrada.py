@@ -1912,6 +1912,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _recalcular_custos_apos_cancelamento(self, nota):
         if nota.xml_importado:
+            if nota.xml_fornecedor_id and nota.xml_fornecedor.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE:
+                return {"skus_atualizados": 0, "produtos_atualizados": 0}
             return self._recalcular_custos_xml_apos_cancelamento(nota)
         produtos = set()
         skus = set()
