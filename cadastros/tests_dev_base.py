@@ -13,7 +13,7 @@ from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, Fornecedo
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
 from financeiro.models import CashbackConfig, ConfigFinanceira, MovimentacaoFinanceira, Pagar, Receber
-from fiscal.models.nota_fiscal_entrada import NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
+from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
 from fiscal.models.venda_pdv import VendaPdv
 from produto.models import ConfigEan, Estoque, EstoqueMovimentacao, FichaTecnica, FichaTecnicaItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Promocao
@@ -58,8 +58,53 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(first, second)
         self.assertEqual(ConfigFinanceira.objects.count(), 1)
         self.assertEqual(CashbackConfig.objects.count(), 1)
-        for model in [EstoqueMovimentacao, ProdutoUsoConsumoMovimentacao, Requisicao, Cotacao, PedidoCompra, Distribuicao, MercadoriaTransito, MovimentacaoFinanceira, Pagar, Receber, XmlFornecedorRecebido, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaTermo, RecebimentoMercadoriaEfetivacaoEstoque, NotaFiscalEntrada, NotaFiscalSaida, VendaPdv]:
+        for model in [EstoqueMovimentacao, ProdutoUsoConsumoMovimentacao, Requisicao, Cotacao, PedidoCompra, Distribuicao, MercadoriaTransito, MovimentacaoFinanceira, Pagar, Receber, AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, XmlFornecedorRecebido, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaTermo, RecebimentoMercadoriaEfetivacaoEstoque, NotaFiscalEntrada, NotaFiscalSaida, VendaPdv]:
             self.assertFalse(model.objects.exists(), model.__name__)
+
+    def test_reset_remove_registros_runtime_de_agente_e_configuracao_xml(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+        loja = Loja.objects.filter(empresa=empresa).order_by("id").first()
+        usuario = get_user_model().objects.filter(empresa=empresa).order_by("id").first()
+        agente = AgenteLocalSysvar.objects.create(
+            empresa=empresa,
+            identificador="AGENTE-TESTE-RESET",
+            nome="Agente teste reset",
+            token_hash="b" * 64,
+            token_prefixo="TOKENRESET",
+            hostname="dev-machine",
+        )
+        AtivacaoAgenteLocalSysvar.objects.create(
+            empresa=empresa,
+            codigo_hash="c" * 64,
+            codigo_prefixo="TST1",
+            criado_por=usuario,
+            expira_em=timezone.now(),
+            agente=agente,
+        )
+        ConfiguracaoXmlFornecedor.objects.create(
+            empresa=empresa,
+            loja=loja,
+            caminho_local=r"C:\SysvarXML",
+            identificador_agente=agente.identificador,
+        )
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        self.assertFalse(AgenteLocalSysvar.objects.exists())
+        self.assertFalse(AtivacaoAgenteLocalSysvar.objects.exists())
+        self.assertFalse(ConfiguracaoXmlFornecedor.objects.exists())
+        self.assertEqual(Empresa.objects.count(), 1)
+        self.assertEqual(Loja.objects.count(), 4)
+        self.assertEqual(ConfigFinanceira.objects.count(), 1)
+        self.assertEqual(CashbackConfig.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.count(), 0)
+        self.assertFalse(SysvarDevBaseService().forbidden())
+        report = SysvarDevBaseService().validate()
+        self.assertTrue(report.valid, report.problems)
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        self.assertTrue(SysvarDevBaseService().validate().valid)
 
     def test_reset_remove_recebimento_operacional_com_conferencia_termo_e_efetivacao(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
