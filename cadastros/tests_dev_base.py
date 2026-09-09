@@ -1,13 +1,15 @@
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.core.exceptions import ValidationError
 from django.test import TransactionTestCase, override_settings
 from django.db.models import Count
 
+from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import MovimentacaoFinanceira, Pagar, Receber
+from financeiro.models import CashbackConfig, ConfigFinanceira, MovimentacaoFinanceira, Pagar, Receber
 from fiscal.models.nota_fiscal_entrada import NotaFiscalEntrada
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
 from fiscal.models.venda_pdv import VendaPdv
@@ -33,6 +35,8 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(FornecedorCategoria.objects.count(), 45)
         self.assertEqual(FornecedorContato.objects.count(), 65)
         self.assertEqual(FornecedorEndereco.objects.count(), 65)
+        self.assertEqual(ConfigFinanceira.objects.count(), 1)
+        self.assertEqual(CashbackConfig.objects.count(), 1)
         self.assertEqual(Produto.objects.count(), 271)
         self.assertEqual(ProdutoDetalhe.objects.count(), 1480)
         self.assertEqual(Estoque.objects.count(), ProdutoDetalhe.objects.count() * Loja.objects.count())
@@ -41,6 +45,7 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(FichaTecnica.objects.count(), 45)
         self.assertEqual(FichaTecnicaItem.objects.count(), 167)
         self.assertEqual(Promocao.objects.count(), 0)
+        self.assertEqual(AuditLog.objects.count(), 0)
 
     def test_reset_idempotente_e_sem_operacional(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
@@ -48,6 +53,8 @@ class SysvarDevBaseTests(TransactionTestCase):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
         second = SysvarDevBaseService().validate().created
         self.assertEqual(first, second)
+        self.assertEqual(ConfigFinanceira.objects.count(), 1)
+        self.assertEqual(CashbackConfig.objects.count(), 1)
         for model in [EstoqueMovimentacao, ProdutoUsoConsumoMovimentacao, Requisicao, Cotacao, PedidoCompra, Distribuicao, MercadoriaTransito, MovimentacaoFinanceira, Pagar, Receber, NotaFiscalEntrada, NotaFiscalSaida, VendaPdv]:
             self.assertFalse(model.objects.exists(), model.__name__)
 
@@ -101,6 +108,73 @@ class SysvarDevBaseTests(TransactionTestCase):
 
         por_produto = ProdutoUsoConsumoEstoque.objects.values("produto").annotate(lojas=Count("loja", distinct=True), linhas=Count("id"))
         self.assertEqual(por_produto.filter(lojas=lojas_count, linhas=lojas_count).count(), uso_count)
+
+    def test_reset_recria_config_financeira_a_partir_do_seed(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+        config = ConfigFinanceira.objects.get(empresa=empresa)
+
+        self.assertEqual(config.natureza_juros_pagos.codigo, "3505")
+        self.assertEqual(config.natureza_juros_recebidos.codigo, "4301")
+        self.assertEqual(config.natureza_tarifas_pagas.codigo, "3503")
+        self.assertEqual(config.natureza_multas_pagas.codigo, "3506")
+        self.assertEqual(config.natureza_multas_recebidas.codigo, "4302")
+        self.assertEqual(config.natureza_descontos_concedidos.codigo, "2102")
+        self.assertEqual(config.natureza_descontos_obtidos.codigo, "4303")
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        empresa = Empresa.objects.get(documento="42000001000186")
+        self.assertEqual(ConfigFinanceira.objects.filter(empresa=empresa).count(), 1)
+
+    def test_reset_recria_cashback_config_a_partir_do_seed(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+        config = CashbackConfig.objects.get(empresa=empresa)
+
+        self.assertEqual(config.nome, "Cashback Padrão Base Dev")
+        self.assertTrue(config.ativo)
+        self.assertEqual(str(config.percentual), "5.0000")
+        self.assertEqual(config.validade_dias, 180)
+        self.assertEqual(str(config.valor_minimo_geracao), "100.00")
+        self.assertEqual(str(config.valor_minimo_uso), "20.00")
+        self.assertEqual(str(config.limite_uso_percentual), "50.0000")
+        self.assertFalse(config.consumidor_final_participa)
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        empresa = Empresa.objects.get(documento="42000001000186")
+        self.assertEqual(CashbackConfig.objects.filter(empresa=empresa).count(), 1)
+
+    def test_reset_remove_auditlog_existente_e_termina_sem_auditoria(self):
+        AuditLog.objects.internal_create(
+            action=AuditAction.LEGACY_EVENT,
+            app_label="cadastros",
+            model="empresa",
+            object_id="base-antiga",
+        )
+        self.assertEqual(AuditLog.objects.count(), 1)
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        self.assertEqual(AuditLog.objects.count(), 0)
+        report = SysvarDevBaseService().validate()
+        self.assertTrue(report.valid, report.problems)
+
+    def test_imutabilidade_normal_do_auditlog_permanece_ativa(self):
+        log = AuditLog.objects.internal_create(
+            action=AuditAction.LEGACY_EVENT,
+            app_label="cadastros",
+            model="empresa",
+            object_id="imutavel",
+        )
+
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.filter(pk=log.pk).update(action=AuditAction.OBJECT_UPDATED)
+        with self.assertRaises(ValidationError):
+            AuditLog.objects.filter(pk=log.pk).delete()
+        with self.assertRaises(ValidationError):
+            log.delete()
 
     def test_create_sem_reset_materializa_estoque_sem_duplicar(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)

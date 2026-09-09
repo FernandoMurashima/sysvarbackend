@@ -10,8 +10,11 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import CommandError
 from django.db import transaction
 from django.db.models import Count
+from django.db.models.signals import post_save, pre_delete, pre_save
 from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, SessaoUsuario, SessionToken, UserFieldPermission, UserModulePermission
 from accounts.services.effective_access import sync_legacy_license_flags
+from auditoria.models import AuditLog
+from auditoria import signals as audit_signals
 from cadastros.models import *
 from compras.models import *
 from distribuicao.models import *
@@ -39,11 +42,14 @@ class SysvarDevBaseService:
             if not any(t in n for t in {'test','teste','dev','development','varejo_db'}): raise CommandError('Operação destrutiva bloqueada: ambiente não parece ser desenvolvimento.')
     def reset(self): return self.rebuild()
     def create(self,seed_globals=True):
-        with transaction.atomic(): self.load_all()
+        with self.audit_signals_disabled():
+            with transaction.atomic(): self.load_all()
         return self.validate()
     def rebuild(self):
         self.assert_not_production(True)
-        with transaction.atomic(): self.delete_all(); self.load_all()
+        with self.audit_signals_disabled():
+            with transaction.atomic(): self.delete_all(); self.load_all()
+        self.clear_audit_logs()
         return self.validate()
     def seed(self,f):
         with (SEED_DIR/f).open(encoding='utf-8') as h: return json.load(h)
@@ -153,6 +159,24 @@ class SysvarDevBaseService:
             d=dict(f); d['empresa']=self.emp(d.pop('empresa_codigo')); d['idloja']=self.i['loja'][d.pop('loja_codigo')]; Caixa.objects.update_or_create(empresa=d['empresa'],codigo=d['codigo'],defaults=self.clean(Caixa,d))
         for f in self.seed('tipos_despesa_pdv.json'):
             d=dict(f); d['empresa']=self.emp(d.pop('empresa_codigo')); d['Idnatureza']=self.i['nat'][d.pop('natureza_codigo')]; TipoDespesaPdv.objects.update_or_create(empresa=d['empresa'],codigo=d['codigo'],defaults=self.clean(TipoDespesaPdv,d))
+        self.config_financeira()
+        self.cashback_config()
+    def config_financeira(self):
+        d=dict(self.seed('config_financeira.json')); emp=self.emp(d.pop('empresa_codigo'))
+        for field in [
+            'natureza_juros_pagos',
+            'natureza_juros_recebidos',
+            'natureza_tarifas_pagas',
+            'natureza_multas_pagas',
+            'natureza_multas_recebidas',
+            'natureza_descontos_concedidos',
+            'natureza_descontos_obtidos',
+        ]:
+            d[field]=self.i['nat'][d.pop(f'{field}_codigo')]
+        ConfigFinanceira.objects.update_or_create(empresa=emp,defaults=self.clean(ConfigFinanceira,d))
+    def cashback_config(self):
+        d=dict(self.seed('cashback_config.json')); emp=self.emp(d.pop('empresa_codigo'))
+        CashbackConfig.objects.update_or_create(empresa=emp,nome=d['nome'],defaults=self.clean(CashbackConfig,d))
     def prod_base(self):
         emp=self.emp(); self.i.update({'un':{},'grade':{},'tam':{},'cor':{},'mat':{},'grupo':{},'sub':{},'col':{},'tab':{},'ncm':{}})
         for f in self.seed('unidades_medida.json'):
@@ -264,13 +288,13 @@ class SysvarDevBaseService:
         sku_refs={sku.ean13:(sku.produto.referencia or '') for sku in ProdutoDetalhe.objects.select_related('produto').filter(produto__empresa=emp)}
         eans_validos=set(sku_refs)
         estoque_refs_ok=all((e.referencia or '') == sku_refs.get(e.CodigodeBarra, '') for e in estoque_qs.only('CodigodeBarra','referencia'))
-        checks=[(Empresa.objects.count()==e['empresas'],'Empresas divergem dos JSONs.'),(Loja.objects.count()==e['lojas'],'Lojas divergem dos JSONs.'),(get_user_model().objects.count()==e['usuarios'],'Usuários divergem dos JSONs.'),(Fornecedor.objects.count()==e['fornecedores'],'Fornecedores divergem.'),(FornecedorCategoria.objects.count()==e['fornecedores_categorias'],'Categorias de fornecedores divergem.'),(FornecedorContato.objects.count()==e['fornecedores_contatos'],'Contatos divergem.'),(FornecedorEndereco.objects.count()==e['fornecedores_enderecos'],'Endereços divergem.'),(Produto.objects.count()==e['produtos']+e['produtos_uso_consumo']+e['insumos_producao'],'Produtos divergem.'),(ProdutoDetalhe.objects.count()==e['produto_detalhes'],'SKUs divergem.'),(ProdutoFornecedor.objects.count()==e['produtos_fornecedores'],'ProdutoFornecedor diverge.'),(FichaTecnica.objects.count()==e['fichas_tecnicas'],'Fichas divergem.'),(FichaTecnicaItem.objects.count()==e['fichas_tecnicas_itens'],'Itens de fichas divergem.'),(Promocao.objects.count()==e['promocoes'],'Promoções devem respeitar JSON vazio.'),(ProdutoDetalhe.objects.exclude(ean13='').count()==ProdutoDetalhe.objects.count(),'Há SKU sem EAN.'),(ProdutoDetalhe.objects.values('ean13').annotate(c=Count('ean13')).filter(c__gt=1).count()==0,'Há EAN duplicado.'),(ConfigEan.objects.first() and ConfigEan.objects.first().next_itemref==ProdutoDetalhe.objects.count()+1,'Sequência EAN não avançou corretamente.'),(estoque_qs.count()==skus_count*lojas_count,'Estoque estrutural SKU × loja diverge.'),(sku_counts==skus_count,'Nem todo SKU possui uma linha por loja.'),(not estoque_dup,'Há estoque duplicado por EAN × loja.'),(not estoque_qs.exclude(CodigodeBarra__in=eans_validos).exists(),'Há estoque com EAN inexistente em ProdutoDetalhe.'),(estoque_refs_ok,'Há estoque com referência diferente do produto do SKU.'),(not estoque_qs.exclude(Estoque=0).exists(),'Há estoque estrutural com saldo diferente de zero.'),(not estoque_qs.exclude(reserva=0).exists(),'Há estoque estrutural com reserva diferente de zero.'),(uso_estoque_qs.count()==uso_count*lojas_count,'ProdutoUsoConsumoEstoque produto × loja diverge.'),(not uso_dup,'Há ProdutoUsoConsumoEstoque duplicado por produto × loja.'),(not uso_estoque_qs.exclude(produto__tipo_produto='2').exists(),'ProdutoUsoConsumoEstoque contém produto que não é Uso/Consumo.'),(not uso_estoque_qs.exclude(saldo=0).exists(),'Há ProdutoUsoConsumoEstoque com saldo diferente de zero.'),(not self.forbidden(),f"Movimentos operacionais proibidos encontrados: {', '.join(self.forbidden())}.")]
+        checks=[(Empresa.objects.count()==e['empresas'],'Empresas divergem dos JSONs.'),(Loja.objects.count()==e['lojas'],'Lojas divergem dos JSONs.'),(get_user_model().objects.count()==e['usuarios'],'Usuários divergem dos JSONs.'),(Fornecedor.objects.count()==e['fornecedores'],'Fornecedores divergem.'),(FornecedorCategoria.objects.count()==e['fornecedores_categorias'],'Categorias de fornecedores divergem.'),(FornecedorContato.objects.count()==e['fornecedores_contatos'],'Contatos divergem.'),(FornecedorEndereco.objects.count()==e['fornecedores_enderecos'],'Endereços divergem.'),(ConfigFinanceira.objects.filter(empresa=emp).count()==1,'ConfigFinanceira oficial não foi recriada corretamente.'),(CashbackConfig.objects.filter(empresa=emp).count()==1,'CashbackConfig oficial não foi recriada corretamente.'),(Produto.objects.count()==e['produtos']+e['produtos_uso_consumo']+e['insumos_producao'],'Produtos divergem.'),(ProdutoDetalhe.objects.count()==e['produto_detalhes'],'SKUs divergem.'),(ProdutoFornecedor.objects.count()==e['produtos_fornecedores'],'ProdutoFornecedor diverge.'),(FichaTecnica.objects.count()==e['fichas_tecnicas'],'Fichas divergem.'),(FichaTecnicaItem.objects.count()==e['fichas_tecnicas_itens'],'Itens de fichas divergem.'),(Promocao.objects.count()==e['promocoes'],'Promoções devem respeitar JSON vazio.'),(ProdutoDetalhe.objects.exclude(ean13='').count()==ProdutoDetalhe.objects.count(),'Há SKU sem EAN.'),(ProdutoDetalhe.objects.values('ean13').annotate(c=Count('ean13')).filter(c__gt=1).count()==0,'Há EAN duplicado.'),(ConfigEan.objects.first() and ConfigEan.objects.first().next_itemref==ProdutoDetalhe.objects.count()+1,'Sequência EAN não avançou corretamente.'),(estoque_qs.count()==skus_count*lojas_count,'Estoque estrutural SKU × loja diverge.'),(sku_counts==skus_count,'Nem todo SKU possui uma linha por loja.'),(not estoque_dup,'Há estoque duplicado por EAN × loja.'),(not estoque_qs.exclude(CodigodeBarra__in=eans_validos).exists(),'Há estoque com EAN inexistente em ProdutoDetalhe.'),(estoque_refs_ok,'Há estoque com referência diferente do produto do SKU.'),(not estoque_qs.exclude(Estoque=0).exists(),'Há estoque estrutural com saldo diferente de zero.'),(not estoque_qs.exclude(reserva=0).exists(),'Há estoque estrutural com reserva diferente de zero.'),(uso_estoque_qs.count()==uso_count*lojas_count,'ProdutoUsoConsumoEstoque produto × loja diverge.'),(not uso_dup,'Há ProdutoUsoConsumoEstoque duplicado por produto × loja.'),(not uso_estoque_qs.exclude(produto__tipo_produto='2').exists(),'ProdutoUsoConsumoEstoque contém produto que não é Uso/Consumo.'),(not uso_estoque_qs.exclude(saldo=0).exists(),'Há ProdutoUsoConsumoEstoque com saldo diferente de zero.'),(AuditLog.objects.count()==0,'AuditLog deve estar vazio após reconstrução da Base de Desenvolvimento.'),(not self.forbidden(),f"Movimentos operacionais proibidos encontrados: {', '.join(self.forbidden())}.")]
         for ok,msg in checks:
             if not ok: r.problems.append(msg)
         return r
     def count(self,r=None):
         r=r or self.report
-        m={'seeds processados':len(self.seed_files),'empresas':Empresa.objects.count(),'lojas':Loja.objects.count(),'usuários':get_user_model().objects.count(),'fornecedores':Fornecedor.objects.count(),'clientes':Cliente.objects.count(),'centros de custo':CentroCusto.objects.count(),'setores':RequisicaoSetor.objects.count(),'produtos':Produto.objects.count(),'SKUs':ProdutoDetalhe.objects.count(),'EANs':ProdutoDetalhe.objects.exclude(ean13='').count(),'estoque estrutural SKU × loja':Estoque.objects.count(),'estoque uso/consumo produto × loja':ProdutoUsoConsumoEstoque.objects.count(),'produtos-fornecedores':ProdutoFornecedor.objects.count(),'fichas técnicas':FichaTecnica.objects.count(),'itens ficha técnica':FichaTecnicaItem.objects.count(),'formas pagamento':FormaPagamento.objects.count(),'parcelas formas':FormaPagamentoParcela.objects.count(),'prazos':PrazoPagamento.objects.count(),'parcelas prazos':PrazoPagamentoParcela.objects.count(),'perfis distribuição':PerfilDistribuicao.objects.count(),'itens perfis distribuição':PerfilDistribuicaoItem.objects.count(),'promoções':Promocao.objects.count(),'tabelas operacionais com dados':len(self.forbidden())}
+        m={'seeds processados':len(self.seed_files),'empresas':Empresa.objects.count(),'lojas':Loja.objects.count(),'usuários':get_user_model().objects.count(),'fornecedores':Fornecedor.objects.count(),'clientes':Cliente.objects.count(),'centros de custo':CentroCusto.objects.count(),'setores':RequisicaoSetor.objects.count(),'produtos':Produto.objects.count(),'SKUs':ProdutoDetalhe.objects.count(),'EANs':ProdutoDetalhe.objects.exclude(ean13='').count(),'estoque estrutural SKU × loja':Estoque.objects.count(),'estoque uso/consumo produto × loja':ProdutoUsoConsumoEstoque.objects.count(),'produtos-fornecedores':ProdutoFornecedor.objects.count(),'fichas técnicas':FichaTecnica.objects.count(),'itens ficha técnica':FichaTecnicaItem.objects.count(),'formas pagamento':FormaPagamento.objects.count(),'parcelas formas':FormaPagamentoParcela.objects.count(),'prazos':PrazoPagamento.objects.count(),'parcelas prazos':PrazoPagamentoParcela.objects.count(),'configuração financeira':ConfigFinanceira.objects.count(),'configurações cashback':CashbackConfig.objects.count(),'perfis distribuição':PerfilDistribuicao.objects.count(),'itens perfis distribuição':PerfilDistribuicaoItem.objects.count(),'promoções':Promocao.objects.count(),'audit logs':AuditLog.objects.count(),'tabelas operacionais com dados':len(self.forbidden())}
         for k,v in m.items(): r.set(k,v)
     def forbidden(self):
         labels=[]
@@ -292,3 +316,16 @@ class SysvarDevBaseService:
         get_user_model().objects.all().delete(); self.delm([Loja,Empresa])
     def delm(self,models):
         for m in models: m.objects.all().delete()
+    def clear_audit_logs(self):
+        AuditLog.objects.all().hard_delete_for_retention()
+    def audit_signals_disabled(self):
+        class Disabled:
+            def __enter__(inner_self):
+                pre_save.disconnect(audit_signals.audit_presave_snapshot)
+                post_save.disconnect(audit_signals.audit_postsave)
+                pre_delete.disconnect(audit_signals.audit_predelete)
+            def __exit__(inner_self, exc_type, exc, tb):
+                pre_save.connect(audit_signals.audit_presave_snapshot)
+                post_save.connect(audit_signals.audit_postsave)
+                pre_delete.connect(audit_signals.audit_predelete)
+        return Disabled()
