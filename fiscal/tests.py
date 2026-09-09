@@ -1630,6 +1630,23 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual(resp.status_code, 200, resp.data)
         return RecebimentoMercadoriaTermo.objects.get(recebimento=self.recebimento)
 
+    def novo_recebimento_para_pedido(self, pedido, empresa=None, loja=None, fornecedor=None):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(
+            empresa=empresa or self.empresa,
+            loja=loja or self.loja,
+            fornecedor=fornecedor or self.fornecedor,
+            criado_por=self.user,
+        )
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
+        return recebimento
+
+    def gerar_sucessivo_para_pedido(self, pedido):
+        recebimento = self.novo_recebimento_para_pedido(pedido)
+        self.recebimento = recebimento
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        return recebimento, list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).order_by("quantidade_esperada", "tamanho_id"))
+
     def test_concluido_termo_fisico_efetiva_com_quantidade_do_snapshot_e_movimento_recebimento(self):
         termo = self.concluir(["1.000", "3.000"])
         estoque = Estoque.objects.create(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja, referencia=self.produto.referencia, Estoque=Decimal("5.000"), reserva=Decimal("2.000"))
@@ -1663,6 +1680,74 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual(self.sku_p.custo_medio, sku_custo)
         self.xml.refresh_from_db()
         self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.RECEBIDO)
+
+    def test_primeiro_recebimento_sem_historico_gera_quantidade_original_por_sku(self):
+        self.pedido_com_item()
+        resp = self.gerar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("2.000"), Decimal("4.000")])
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("6.000"))
+
+    def test_recebimento_sucessivo_gera_saldo_pendente_por_sku_e_resumo(self):
+        self.concluir(["1.000", "3.000"])
+        pedido = self.recebimento.pedidos_vinculados.get().pedido
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+        recebimento2, linhas = self.gerar_sucessivo_para_pedido(pedido)
+
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("1.000"), Decimal("1.000")])
+        detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/")
+        self.assertEqual(Decimal(detalhe.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("2.000"))
+
+    def test_sku_totalmente_atendido_ou_com_sobra_anterior_fica_zero(self):
+        self.concluir(["3.000", "4.000"])
+        pedido = self.recebimento.pedidos_vinculados.get().pedido
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+        _, linhas = self.gerar_sucessivo_para_pedido(pedido)
+
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("0.000"), Decimal("0.000")])
+
+    def test_recebimentos_sem_efetivacao_nao_reduzem_saldo_esperado(self):
+        pedido, _ = self.pedido_com_item()
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "1.000"}, {"id": linhas[1].id, "quantidade_recebida": "1.000"}]},
+            format="json",
+        )
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": "sem efetivar"}, format="json")
+        aberto = self.novo_recebimento_para_pedido(pedido)
+        aberto.status = RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA
+        aberto.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
+        RecebimentoMercadoriaConferenciaItem.objects.create(recebimento=aberto, pedido=pedido, pedido_item=pedido.itens.get(), produto=self.produto, cor=self.cor_azul, tamanho=self.tam_p, produto_detalhe=self.sku_p, quantidade_esperada=Decimal("2.000"), quantidade_recebida=Decimal("2.000"))
+
+        _, novas_linhas = self.gerar_sucessivo_para_pedido(pedido)
+
+        self.assertEqual([linha.quantidade_esperada for linha in novas_linhas], [Decimal("2.000"), Decimal("4.000")])
+
+    def test_historico_de_outro_pedido_ou_empresa_nao_interfere_no_saldo(self):
+        self.concluir(["2.000", "4.000"])
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        pedido_alvo, _ = self.pedido_com_item()
+
+        empresa_b = self.empresa_b
+        fornecedor_b = Fornecedor.objects.create(empresa=empresa_b, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="91222333000910", cnpj="91222333000910", nome_fornecedor="Fornecedor Conferencia B", categoria="OUTROS")
+        pedido_b = PedidoCompra.objects.create(empresa=empresa_b, tipo="1", loja=self.loja_b, fornecedor=fornecedor_b, status="AP", total_pedido=Decimal("10.00"))
+        item_b = PedidoCompraItem.objects.create(pedido=pedido_b, produto=self.produto, cor=self.cor_azul, pack=self.pack, n_packs=2, qtd=Decimal("6.000"), preco_unit=Decimal("1.00"), total_item=Decimal("6.00"))
+        receb_b = RecebimentoMercadoriaEstoque.objects.create(empresa=empresa_b, loja=self.loja_b, fornecedor=fornecedor_b, criado_por=self.user_b)
+        RecebimentoMercadoriaConferenciaItem.objects.create(recebimento=receb_b, pedido=pedido_b, pedido_item=item_b, produto=self.produto, cor=self.cor_azul, tamanho=self.tam_p, produto_detalhe=self.sku_p, quantidade_esperada=Decimal("2.000"), quantidade_recebida=Decimal("2.000"))
+        termo_b = RecebimentoMercadoriaTermo.objects.create(recebimento=receb_b, empresa=empresa_b, encerrado_por=self.user_b, encerrado_em=timezone.now(), snapshot={}, hash_sha256="b" * 64)
+        RecebimentoMercadoriaEfetivacaoEstoque.objects.create(recebimento=receb_b, termo=termo_b, empresa=empresa_b, loja=self.loja_b, efetivado_por=self.user_b, efetivado_em=timezone.now(), quantidade_total=Decimal("2.000"), quantidade_skus=1, hash_termo=termo_b.hash_sha256)
+
+        _, linhas = self.gerar_sucessivo_para_pedido(pedido_alvo)
+
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("2.000"), Decimal("4.000")])
 
     def test_quantidade_zero_bloqueia_e_linha_zero_nao_movimenta(self):
         self.concluir(["0.000", "0.000"])

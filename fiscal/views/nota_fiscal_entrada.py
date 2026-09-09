@@ -2874,6 +2874,10 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             .filter(pedido_id__in=vinculos)
             .order_by("produto__referencia", "cor__Descricao", "id")
         )
+        itens = list(itens)
+        from compras.services_recebimento import quantidades_fisicas_efetivadas_por_sku
+
+        efetivados_por_sku = quantidades_fisicas_efetivadas_por_sku(itens, recebimento.empresa_id, excluir_recebimento_id=recebimento.id)
         for item in itens:
             if not (item.produto_id and item.cor_id and item.pack_id and item.n_packs):
                 continue
@@ -2898,7 +2902,10 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                     cor_id=item.cor_id,
                     tamanho_id=pack_item.tamanho_id,
                     produto_detalhe=sku,
-                    quantidade_esperada=Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0),
+                    quantidade_esperada=max(
+                        Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0) - efetivados_por_sku.get((item.pk, sku.pk), Decimal("0")),
+                        Decimal("0"),
+                    ),
                 )
         if not RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).exists():
             return Response({"detail": "Nenhum item de revenda com produto, cor e pack foi encontrado nos pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
