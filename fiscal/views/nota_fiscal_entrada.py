@@ -783,6 +783,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
     def _fechar_xml_detectado(self, nota, request):
         xml = XmlFornecedorRecebido.objects.select_for_update().get(pk=nota.xml_fornecedor_id)
+        if xml.situacao_fiscal == XmlFornecedorRecebido.SituacaoFiscal.CANCELADA:
+            raise ValueError("XML fiscalmente cancelado não permite fechamento operacional.")
         tratamento = xml.tipo_tratamento
         if tratamento == XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO:
             raise ValueError("Defina o tratamento fiscal do XML antes de fechar a NF-e.")
@@ -915,7 +917,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_ENTRADA).exists()
             or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_ENTRADA).exists()
         ):
-            return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+            efetivado = nota.itens_xml.filter(quantidade_interna_efetivada__isnull=False).exists()
+            if not nota.xml_importado or efetivado:
+                return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
         movimentos = 0
         for item in nota.itens_xml.select_related("produto", "produto__unidade", "produto_fornecedor").order_by("numero_item"):
             quantidade_base = item.quantidade_recebida if usar_quantidade_recebida else item.quantidade_comercial
@@ -1184,6 +1188,20 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @transaction.atomic
     def cancelar(self, request, pk=None):
         nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        return self._cancelar_nota_entrada(request, nota, cancelamento_fiscal=True)
+
+    @action(detail=True, methods=["post"], url_path="cancelar-entrada")
+    @transaction.atomic
+    def cancelar_entrada(self, request, pk=None):
+        nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        if not nota.xml_fornecedor_id:
+            return Response(
+                {"detail": "Cancelamento da entrada operacional está disponível apenas para NF-e originada de XML detectado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._cancelar_nota_entrada(request, nota, cancelamento_fiscal=False)
+
+    def _cancelar_nota_entrada(self, request, nota, cancelamento_fiscal):
         motivo = str(request.data.get("motivo") or "").strip()
         if not motivo:
             return Response({"motivo": "Informe o motivo do cancelamento."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1216,12 +1234,42 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
 
         recebimento = self._atualizar_recebimento_pedido(nota, excluir_nota=nota)
         necessidades = self._recalcular_necessidades_vinculadas(nota)
-        nota.status = NotaFiscalEntrada.Status.CANCELADA
-        nota.motivo_cancelamento = motivo
-        nota.cancelado_por = request.user if getattr(request.user, "is_authenticated", False) else None
-        nota.cancelado_em = timezone.now()
-        nota.save(update_fields=["status", "motivo_cancelamento", "cancelado_por", "cancelado_em", "atualizado_em"])
-        self._auditar_cancelamento(nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise)
+        if cancelamento_fiscal:
+            nota.status = NotaFiscalEntrada.Status.CANCELADA
+            nota.situacao_fiscal = NotaFiscalEntrada.SituacaoFiscal.CANCELADA
+            nota.motivo_cancelamento = motivo
+            nota.cancelado_por = request.user if getattr(request.user, "is_authenticated", False) else None
+            nota.cancelado_em = timezone.now()
+            nota.save(update_fields=["status", "situacao_fiscal", "motivo_cancelamento", "cancelado_por", "cancelado_em", "atualizado_em"])
+            if nota.xml_fornecedor_id:
+                XmlFornecedorRecebido.objects.filter(pk=nota.xml_fornecedor_id).update(
+                    situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.CANCELADA,
+                    atualizado_em=timezone.now(),
+                )
+            legacy_action = "cancelar"
+        else:
+            nota.status = NotaFiscalEntrada.Status.ABERTA
+            nota.situacao_fiscal = NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA
+            nota.motivo_cancelamento = ""
+            nota.cancelado_por = None
+            nota.cancelado_em = None
+            nota.save(update_fields=["status", "situacao_fiscal", "motivo_cancelamento", "cancelado_por", "cancelado_em", "atualizado_em"])
+            nota.itens_xml.update(
+                unidade_fornecedor_efetivada="",
+                fator_conversao_efetivado=None,
+                quantidade_interna_efetivada=None,
+                efetivado_em=None,
+            )
+            XmlFornecedorRecebido.objects.filter(pk=nota.xml_fornecedor_id).update(
+                situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
+                status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+                atualizado_em=timezone.now(),
+            )
+            legacy_action = "cancelar_entrada"
+        self._auditar_cancelamento(
+            nota, request, before, motivo, financeiro, estoque, custos, recebimento,
+            necessidades, divergencias, analise, legacy_action=legacy_action
+        )
         data = self.get_serializer(nota).data
         data["estoque"] = estoque
         data["financeiro"] = financeiro
@@ -1595,7 +1643,9 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             EstoqueMovimentacao.objects.filter(documento=documento, tipo=EstoqueMovimentacao.TIPO_SAIDA).exists()
             or ProdutoUsoConsumoMovimentacao.objects.filter(documento=documento, tipo=ProdutoUsoConsumoMovimentacao.TIPO_AJUSTE_SAIDA).exists()
         ):
-            return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
+            pendente_estorno_xml = nota.xml_importado and nota.itens_xml.filter(quantidade_interna_efetivada__gt=0).exists()
+            if not pendente_estorno_xml:
+                return {"disponivel": True, "movimentos": 0, "ja_movimentada": True}
         if nota.xml_importado:
             return self._movimentar_estoque_cancelamento_xml(nota, motivo, request, documento)
 
@@ -2031,7 +2081,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         )
         return {"encerradas": atualizadas}
 
-    def _auditar_cancelamento(self, nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise):
+    def _auditar_cancelamento(self, nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise, legacy_action="cancelar"):
         AuditService.success(
             AuditAction.OBJECT_UPDATED,
             category=AuditCategory.FISCAL,
@@ -2058,7 +2108,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 "avisos": analise.get("avisos", []),
                 "status": nota.status,
             },
-            metadata={"legacy_action": "cancelar", "cancelamento_operacional": True},
+            metadata={"legacy_action": legacy_action, "cancelamento_operacional": True},
         )
 
     def _movimentar_item_estoque(self, nota, item_nf, tipo, documento, sinal):
@@ -2478,6 +2528,11 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
         if not xml:
             return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         self._validar_empresa_usuario(xml.empresa)
+        if xml.situacao_fiscal == XmlFornecedorRecebido.SituacaoFiscal.CANCELADA:
+            return Response(
+                {"situacao_fiscal": "XML fiscalmente cancelado não permite processamento."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         tipo = str(request.data.get("tipo_tratamento") or "").strip()
         valores_validos = {choice.value for choice in XmlFornecedorRecebido.TipoTratamento}
         if tipo not in valores_validos:
@@ -2502,6 +2557,11 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
         if not xml:
             return Response({"detail": "Não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         self._validar_empresa_usuario(xml.empresa)
+        if xml.situacao_fiscal == XmlFornecedorRecebido.SituacaoFiscal.CANCELADA:
+            return Response(
+                {"situacao_fiscal": "XML fiscalmente cancelado não permite encaminhamento fiscal."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         existente = getattr(xml, "nota_fiscal_entrada", None)
         if existente:
             return Response(NotaFiscalEntradaSerializer(existente).data, status=status.HTTP_200_OK)
@@ -2521,6 +2581,8 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
             XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO,
             XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
         }
+        if xml.situacao_fiscal == XmlFornecedorRecebido.SituacaoFiscal.CANCELADA:
+            raise ValidationError({"situacao_fiscal": "XML fiscalmente cancelado não permite encaminhamento fiscal."})
         if xml.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO:
             raise ValidationError({"tipo_tratamento": "Defina o tratamento fiscal antes de encaminhar a NF-e."})
         if xml.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.ESTOQUE:
@@ -2776,6 +2838,11 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         if not xml:
             return Response({"detail": "XML detectado não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         self._validar_empresa_usuario(xml.empresa)
+        if xml.situacao_fiscal == XmlFornecedorRecebido.SituacaoFiscal.CANCELADA:
+            return Response(
+                {"situacao_fiscal": "XML fiscalmente cancelado não permite iniciar recebimento físico."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if xml.tipo_tratamento != XmlFornecedorRecebido.TipoTratamento.ESTOQUE:
             return Response({"tipo_tratamento": "Somente XML com tratamento ESTOQUE pode iniciar recebimento físico."}, status=status.HTTP_400_BAD_REQUEST)
         existente = (

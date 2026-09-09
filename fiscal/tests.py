@@ -2529,13 +2529,13 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertIn("finalidade fiscal especial", resp.data["detail"])
 
-    def test_cancelamento_operacional_nao_altera_situacao_fiscal(self):
+    def test_cancelamento_fiscal_marca_nota_e_xml_como_cancelados(self):
         nota, _, _ = self.preparar_nf_xml_efetivavel(chave="35260822345678000195550010000001234567890202")
         self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/fechar/")
         self.client.post(f"/api/fiscal/notas-entrada/{nota.id}/cancelar/", {"motivo": "Cancelamento operacional", "confirmar_avisos": True}, format="json")
         nota.refresh_from_db()
         self.assertEqual(nota.status, NotaFiscalEntrada.Status.CANCELADA)
-        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA)
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.CANCELADA)
 
     def test_evento_fiscal_preserva_xml_e_cancelamento_fiscal_muda_situacao_fiscal(self):
         item = self.item_xml(chave="35260822345678000195550010000001234567890203")
@@ -3109,6 +3109,137 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
         self.assertEqual(resp.status_code, status_code, resp.data)
         nota.refresh_from_db()
         return resp
+
+    def cancelar_entrada_xml(self, nota, status_code=200):
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar-entrada/",
+            {"motivo": "Teste cancelamento entrada", "confirmar_avisos": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status_code, resp.data)
+        nota.refresh_from_db()
+        return resp
+
+    def test_cancelar_entrada_fiscal_sem_estoque_reabre_xml_e_permite_refechar_sem_duplicar_financeiro(self):
+        forma = self.forma_boleto()
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            codigo_tpag="15",
+            descricao_fiscal="Boleto bancário",
+            forma_pagamento=forma,
+        )
+        nota = self.preparar_nf_xml_sem_pedido_com_duplicatas(chave="35260822345678000195550010000001234567891201")
+        xml = self.criar_xml_detectado(
+            numero="991201",
+            tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+        )
+        xml.chave_acesso = nota.chave_acesso
+        xml.valor_total = nota.valor_total
+        xml.save(update_fields=["chave_acesso", "valor_total", "atualizado_em"])
+        nota.xml_fornecedor = xml
+        nota.save(update_fields=["xml_fornecedor", "atualizado_em"])
+
+        self.fechar_xml(nota)
+        self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 1)
+
+        self.cancelar_entrada_xml(nota)
+        xml.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.ABERTA)
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA)
+        self.assertEqual(xml.situacao_fiscal, XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA)
+        self.assertEqual(xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertFalse(Pagar.objects.filter(nfe_id=nota.pk).exists())
+
+        self.fechar_xml(nota)
+        self.assertEqual(Pagar.objects.filter(nfe_id=nota.pk).count(), 1)
+
+    def test_cancelar_entrada_uso_consumo_estorna_reseta_marcadores_e_reprocessa_estoque(self):
+        xml = self.criar_xml_detectado(numero="991202", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991202",
+            xml_fornecedor=xml,
+            itens=[{"produto": self.produto, "codigo": "UC-CANCEL", "quantidade": "3"}],
+        )
+
+        self.fechar_xml(nota)
+        estoque = ProdutoUsoConsumoEstoque.objects.get(empresa=self.empresa, loja=self.loja, produto=self.produto)
+        self.assertEqual(estoque.saldo, Decimal("3.000"))
+
+        self.cancelar_entrada_xml(nota)
+        estoque.refresh_from_db()
+        item = nota.itens_xml.get()
+        self.assertEqual(estoque.saldo, Decimal("0.000"))
+        self.assertIsNone(item.quantidade_interna_efetivada)
+        self.assertEqual(item.unidade_fornecedor_efetivada, "")
+        self.assertIsNone(item.fator_conversao_efetivado)
+        self.assertIsNone(item.efetivado_em)
+
+        self.fechar_xml(nota)
+        estoque.refresh_from_db()
+        self.assertEqual(estoque.saldo, Decimal("3.000"))
+
+    def test_cancelamento_fiscal_bloqueia_reuso_do_xml_cancelado(self):
+        xml = self.criar_xml_detectado(numero="991203", tipo=XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO)
+        nota = self.criar_nota_xml_manual(
+            numero="991203",
+            xml_fornecedor=xml,
+            itens=[{"produto": self.produto, "codigo": "UC-FISCAL", "quantidade": "2"}],
+        )
+        self.fechar_xml(nota)
+        self.cancelar_xml(nota)
+        xml.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscalEntrada.Status.CANCELADA)
+        self.assertEqual(nota.situacao_fiscal, NotaFiscalEntrada.SituacaoFiscal.CANCELADA)
+        self.assertEqual(xml.situacao_fiscal, XmlFornecedorRecebido.SituacaoFiscal.CANCELADA)
+
+        resp = self.client.post(
+            f"/api/fiscal/xmls-fornecedor-recebidos/{xml.pk}/definir-tratamento/",
+            {"tipo_tratamento": XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+        resp = self.client.post(f"/api/fiscal/xmls-fornecedor-recebidos/{xml.pk}/encaminhar-fiscal/", {}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+        xml_estoque = self.criar_xml_detectado(numero="991204", tipo=XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
+        xml_estoque.situacao_fiscal = XmlFornecedorRecebido.SituacaoFiscal.CANCELADA
+        xml_estoque.save(update_fields=["situacao_fiscal", "atualizado_em"])
+        resp = self.client.post(
+            "/api/fiscal/recebimentos-mercadoria/iniciar-por-xml/",
+            {"xml_fornecedor": xml_estoque.pk},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_cancelar_entrada_bloqueia_financeiro_baixado(self):
+        forma = self.forma_boleto()
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            codigo_tpag="15",
+            descricao_fiscal="Boleto bancário",
+            forma_pagamento=forma,
+        )
+        nota = self.preparar_nf_xml_sem_pedido_com_duplicatas(chave="35260822345678000195550010000001234567891205")
+        xml = self.criar_xml_detectado(numero="991205", tipo=XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE)
+        xml.chave_acesso = nota.chave_acesso
+        xml.valor_total = nota.valor_total
+        xml.save(update_fields=["chave_acesso", "valor_total", "atualizado_em"])
+        nota.xml_fornecedor = xml
+        nota.save(update_fields=["xml_fornecedor", "atualizado_em"])
+        self.fechar_xml(nota)
+        item = PagarItem.objects.filter(Idpagar__nfe_id=nota.pk).first()
+        item.status = PagarItem.STATUS_BAIXADO
+        item.valor_baixa = item.valor_parcela
+        item.data_baixa = date(2026, 9, 25)
+        item.save(update_fields=["status", "valor_baixa", "data_baixa"])
+
+        self.cancelar_entrada_xml(nota, status_code=400)
+        resp = self.client.post(
+            f"/api/fiscal/notas-entrada/{nota.pk}/cancelar/",
+            {"motivo": "Teste cancelamento fiscal", "confirmar_avisos": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
 
     def test_xml_revenda_mesma_referencia_dois_tamanhos_movimenta_skus_distintos(self):
         produto, skus = self.criar_revenda_com_skus(tamanhos=("34", "36"))
