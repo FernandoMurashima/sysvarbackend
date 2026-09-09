@@ -1701,6 +1701,24 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/")
         self.assertEqual(Decimal(detalhe.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("2.000"))
 
+    def test_recebimento_cancelado_com_efetivacao_nao_reduz_saldo_nem_atendimento(self):
+        self.concluir(["2.000", "4.000"])
+        pedido = self.recebimento.pedidos_vinculados.get().pedido
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.recebimento.status = RecebimentoMercadoriaEstoque.Status.CANCELADO
+        self.recebimento.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
+
+        recebimento2, linhas = self.gerar_sucessivo_para_pedido(pedido)
+        sincronizar_atendimento_pedido_compra(pedido)
+
+        entrega = PedidoCompraEntrega.objects.get(item=pedido.itens.get())
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("2.000"), Decimal("4.000")])
+        self.assertEqual(Decimal(self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/").data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("6.000"))
+        self.assertEqual(entrega.qtd_recebida, Decimal("0.000"))
+        self.assertEqual(entrega.status, "PREV")
+        self.assertIsNone(entrega.data_recebida)
+
     def test_sku_totalmente_atendido_ou_com_sobra_anterior_fica_zero(self):
         self.concluir(["3.000", "4.000"])
         pedido = self.recebimento.pedidos_vinculados.get().pedido

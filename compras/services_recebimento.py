@@ -4,7 +4,7 @@ from django.db.models import Max, Sum
 from django.utils import timezone
 
 from compras.models import PedidoCompraEntrega
-from fiscal.models import RecebimentoMercadoriaConferenciaItem
+from fiscal.models import RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque
 
 
 def quantidades_fisicas_efetivadas_por_sku(pedido_itens, empresa_id, excluir_recebimento_id=None):
@@ -12,7 +12,7 @@ def quantidades_fisicas_efetivadas_por_sku(pedido_itens, empresa_id, excluir_rec
         pedido_item__in=pedido_itens,
         recebimento__efetivacao_estoque__isnull=False,
         recebimento__empresa_id=empresa_id,
-    )
+    ).exclude(recebimento__status=RecebimentoMercadoriaEstoque.Status.CANCELADO)
     if excluir_recebimento_id:
         qs = qs.exclude(recebimento_id=excluir_recebimento_id)
     return {
@@ -42,6 +42,7 @@ def sincronizar_atendimento_pedido_compra(pedido):
                 recebimento__efetivacao_estoque__isnull=False,
                 recebimento__empresa_id=pedido.empresa_id,
             )
+            .exclude(recebimento__status=RecebimentoMercadoriaEstoque.Status.CANCELADO)
             .values("pedido_item_id")
             .annotate(ultimo_recebimento=Max("recebimento__efetivacao_estoque__efetivado_em"))
         )
