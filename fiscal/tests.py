@@ -1828,6 +1828,33 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual([linha.quantidade_esperada for linha in ausentes], [Decimal("0.000"), Decimal("0.000")])
         self.assertEqual(sum(linha.quantidade_esperada for linha in linhas), Decimal("3.000"))
 
+    def test_xml_estruturado_sku_do_pedido_sem_ean_fica_esperado_zero(self):
+        pedido, _ = self.pedido_com_item()
+        self.sku_m.ean13 = ""
+        self.sku_m.save(update_fields=["ean13"])
+        xml = self.xml_estoque_estruturado(137, [self.item_fiscal(self.sku_p.ean13, "2.000", 1)])
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=xml, criado_por=self.user)
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
+        self.recebimento = recebimento
+
+        resp = self.gerar()
+        linhas = {linha.produto_detalhe_id: linha for linha in RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento)}
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[self.sku_p.pk].id, "quantidade_recebida": "2.000"}, {"id": linhas[self.sku_m.pk].id, "quantidade_recebida": "0.000"}]},
+            format="json",
+        )
+        encerrado = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/encerrar-conferencia/", {}, format="json")
+        termo = RecebimentoMercadoriaTermo.objects.get(recebimento=recebimento)
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(linhas[self.sku_p.pk].quantidade_esperada, Decimal("2.000"))
+        self.assertEqual(linhas[self.sku_m.pk].quantidade_esperada, Decimal("0.000"))
+        self.assertEqual(encerrado.status_code, 200, encerrado.data)
+        self.assertFalse(termo.possui_divergencia)
+        self.assertEqual(termo.snapshot["divergencias"]["faltas"], [])
+        self.assertEqual(termo.snapshot["divergencias"]["sobras"], [])
+
     def test_recebimento_cancelado_com_efetivacao_nao_reduz_saldo_nem_atendimento(self):
         self.concluir(["2.000", "4.000"])
         pedido = self.recebimento.pedidos_vinculados.get().pedido

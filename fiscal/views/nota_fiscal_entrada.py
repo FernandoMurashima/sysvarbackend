@@ -2908,7 +2908,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                     "cor_id": item.cor_id,
                     "tamanho_id": pack_item.tamanho_id,
                     "produto_detalhe": sku,
-                    "quantidade_esperada": pendente,
+                    "quantidade_esperada": Decimal("0") if estruturado else pendente,
                 }
                 linhas_para_criar.append(linha)
                 candidatos_por_ean.setdefault(sku.ean13 or "", []).append(
