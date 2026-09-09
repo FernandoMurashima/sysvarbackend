@@ -436,7 +436,7 @@ class RecebimentoMercadoriaEstoque(models.Model):
     def save(self, *args, **kwargs):
         self.xml_fornecedor_ativo_key = (
             self.xml_fornecedor_id
-            if self.xml_fornecedor_id and self.status in {self.Status.ABERTO, self.Status.EM_CONFERENCIA}
+            if self.xml_fornecedor_id and self.status in {self.Status.ABERTO, self.Status.EM_CONFERENCIA, self.Status.CONCLUIDO}
             else None
         )
         super().save(*args, **kwargs)

@@ -1147,7 +1147,7 @@ class RecebimentoMercadoriaEstoqueTests(TestCase):
         self.fornecedor = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="61222333000181", cnpj="61222333000181", nome_fornecedor="Fornecedor Recebimento", categoria="OUTROS")
         self.fornecedor_outro = Fornecedor.objects.create(empresa=self.empresa, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="71222333000181", cnpj="71222333000181", nome_fornecedor="Fornecedor Outro", categoria="OUTROS")
         self.fornecedor_b = Fornecedor.objects.create(empresa=self.empresa_b, tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA, documento="81222333000181", cnpj="81222333000181", nome_fornecedor="Fornecedor B", categoria="OUTROS")
-        self.xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso="35260822345678000195550010000001234567890121", modelo="55", serie="1", numero="123")
+        self.xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso="35260822345678000195550010000001234567890121", modelo="55", serie="1", numero="123", tipo_tratamento=XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
         self.xml_b = XmlFornecedorRecebido.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, chave_acesso="35260822345678000195550010000001234567890130", modelo="55", serie="1", numero="124")
         self.client.force_authenticate(self.user)
 
@@ -1169,7 +1169,7 @@ class RecebimentoMercadoriaEstoqueTests(TestCase):
         self.assertEqual(recebimento.fornecedor, self.fornecedor)
         self.assertEqual(recebimento.status, RecebimentoMercadoriaEstoque.Status.ABERTO)
         self.xml.refresh_from_db()
-        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.DETECTADO)
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
 
     def test_impede_duplicacao_para_mesmo_xml(self):
         primeiro = self.iniciar()
@@ -1178,6 +1178,54 @@ class RecebimentoMercadoriaEstoqueTests(TestCase):
         self.assertEqual(segundo.status_code, 200, segundo.data)
         self.assertEqual(primeiro.data["id"], segundo.data["id"])
         self.assertEqual(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=self.xml).count(), 1)
+
+    def test_iniciar_por_xml_retorna_concluido_sem_duplicar(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, status=RecebimentoMercadoriaEstoque.Status.CONCLUIDO, criado_por=self.user)
+        resp = self.iniciar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["id"], recebimento.id)
+        self.assertEqual(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=self.xml).count(), 1)
+
+    def test_iniciar_por_xml_terminal_com_recebimento_existente_retorna_mesmo_recurso(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, status=RecebimentoMercadoriaEstoque.Status.CONCLUIDO, criado_por=self.user)
+        for estado in (XmlFornecedorRecebido.StatusOperacional.RECEBIDO, XmlFornecedorRecebido.StatusOperacional.PROCESSADO):
+            self.xml.status_operacional = estado
+            self.xml.save(update_fields=["status_operacional", "atualizado_em"])
+            resp = self.iniciar()
+            self.assertEqual(resp.status_code, 200, resp.data)
+            self.assertEqual(resp.data["id"], recebimento.id)
+            self.assertEqual(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=self.xml).count(), 1)
+
+    def test_iniciar_por_xml_terminal_sem_recebimento_retorna_erro(self):
+        self.xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.RECEBIDO
+        self.xml.save(update_fields=["status_operacional", "atualizado_em"])
+        resp = self.iniciar()
+        self.assertEqual(resp.status_code, 409, resp.data)
+        self.assertFalse(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=self.xml).exists())
+
+    def test_iniciar_por_xml_bloqueia_tratamentos_sem_estoque(self):
+        for idx, tipo in enumerate((
+            XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO,
+            XmlFornecedorRecebido.TipoTratamento.USO_CONSUMO,
+            XmlFornecedorRecebido.TipoTratamento.INSUMO_PRODUCAO,
+            XmlFornecedorRecebido.TipoTratamento.FISCAL_SEM_ESTOQUE,
+        ), start=40):
+            xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso=f"35260822345678000195550010000001234567890{idx:02d}", modelo="55", serie="1", numero=str(idx), tipo_tratamento=tipo)
+            resp = self.iniciar(xml)
+            self.assertEqual(resp.status_code, 400, resp.data)
+            self.assertFalse(RecebimentoMercadoriaEstoque.objects.filter(xml_fornecedor=xml).exists())
+
+    def test_iniciar_por_xml_preserva_estado_e_tratamento_em_retry_em_recebimento(self):
+        self.xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
+        self.xml.tipo_tratamento = XmlFornecedorRecebido.TipoTratamento.ESTOQUE
+        self.xml.save(update_fields=["status_operacional", "tipo_tratamento", "atualizado_em"])
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
+        resp = self.iniciar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["id"], recebimento.id)
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+        self.assertEqual(self.xml.tipo_tratamento, XmlFornecedorRecebido.TipoTratamento.ESTOQUE)
 
     def test_isolamento_multiempresa(self):
         recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, xml_fornecedor=self.xml_b, criado_por=self.user_b)
@@ -1280,7 +1328,17 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.sku_m = ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor_azul, idtamanho=self.tam_m)
         ProdutoDetalhe.objects.create(produto=self.produto2, idcor=self.cor_preta, idtamanho=self.tam_p)
         ProdutoDetalhe.objects.create(produto=self.produto2, idcor=self.cor_preta, idtamanho=self.tam_m)
-        self.xml = XmlFornecedorRecebido.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, chave_acesso="35260822345678000195550010000001234567890185", modelo="55", serie="1", numero="900")
+        self.xml = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567890185",
+            modelo="55",
+            serie="1",
+            numero="900",
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO,
+            tipo_tratamento=XmlFornecedorRecebido.TipoTratamento.ESTOQUE,
+        )
         self.recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=self.xml, criado_por=self.user)
         self.client.force_authenticate(self.user)
 
@@ -1489,6 +1547,8 @@ class RecebimentoMercadoriaConferenciaTests(TestCase):
         self.assertEqual(EstoqueMovimentacao.objects.count(), mov_count)
         self.assertIn("termo_encerramento", resp.data)
         self.assertFalse(resp.data["pode_encerrar_conferencia"])
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
 
     def test_encerramento_com_divergencia_exige_justificativa_e_registra_faltas_sobras(self):
         self.xml.quantidade_total_faturada = Decimal("7.000")
@@ -1601,6 +1661,8 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.sku_p.refresh_from_db()
         self.assertEqual(self.produto.custo_medio, produto_custo)
         self.assertEqual(self.sku_p.custo_medio, sku_custo)
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.RECEBIDO)
 
     def test_quantidade_zero_bloqueia_e_linha_zero_nao_movimenta(self):
         self.concluir(["0.000", "0.000"])
@@ -1642,6 +1704,27 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertFalse(RecebimentoMercadoriaEfetivacaoEstoque.objects.exists())
         self.assertFalse(EstoqueMovimentacao.objects.exists())
         self.assertFalse(Estoque.objects.filter(CodigodeBarra=self.sku_p.ean13).exists())
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+
+    def test_efetivacao_com_falha_de_sync_nao_marca_xml_recebido(self):
+        self.concluir(["1.000", "2.000"])
+        self.client.raise_request_exception = False
+        with patch("compras.services_recebimento.sincronizar_atendimento_pedido_compra", side_effect=RuntimeError("falha sync")):
+            resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.client.raise_request_exception = True
+        self.assertEqual(resp.status_code, 500)
+        self.xml.refresh_from_db()
+        self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO)
+        self.assertFalse(RecebimentoMercadoriaEfetivacaoEstoque.objects.filter(recebimento=self.recebimento).exists())
+        self.assertFalse(EstoqueMovimentacao.objects.filter(documento=f"RECEB-{self.recebimento.id}").exists())
+
+    def test_recebimento_sem_xml_continua_efetivando_estoque(self):
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=None, criado_por=self.user)
+        self.concluir(["1.000", "0.000"], recebimento=recebimento)
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/efetivar-estoque/", {}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(RecebimentoMercadoriaEfetivacaoEstoque.objects.filter(recebimento=recebimento).count(), 1)
 
     def test_idempotencia_status_termo_e_destino_dos_pedidos(self):
         self.concluir(["1.000", "0.000"])

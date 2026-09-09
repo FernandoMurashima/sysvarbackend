@@ -2769,15 +2769,38 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         if not xml:
             return Response({"detail": "XML detectado não encontrado."}, status=status.HTTP_404_NOT_FOUND)
         self._validar_empresa_usuario(xml.empresa)
+        if xml.tipo_tratamento != XmlFornecedorRecebido.TipoTratamento.ESTOQUE:
+            return Response({"tipo_tratamento": "Somente XML com tratamento ESTOQUE pode iniciar recebimento físico."}, status=status.HTTP_400_BAD_REQUEST)
         existente = (
             RecebimentoMercadoriaEstoque.objects
+            .select_for_update()
             .select_related("empresa", "loja", "fornecedor", "xml_fornecedor", "criado_por")
             .prefetch_related("pedidos_vinculados__pedido", "pedidos_vinculados__pedido__itens")
-            .filter(xml_fornecedor=xml, status__in=[RecebimentoMercadoriaEstoque.Status.ABERTO, RecebimentoMercadoriaEstoque.Status.EM_CONFERENCIA])
+            .filter(xml_fornecedor=xml)
+            .exclude(status=RecebimentoMercadoriaEstoque.Status.CANCELADO)
             .first()
         )
         if existente:
+            if xml.status_operacional in {
+                XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+                XmlFornecedorRecebido.StatusOperacional.AGUARDANDO_RECEBIMENTO,
+            }:
+                xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
+                xml.save(update_fields=["status_operacional", "atualizado_em"])
             return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+        if xml.status_operacional in {
+            XmlFornecedorRecebido.StatusOperacional.RECEBIDO,
+            XmlFornecedorRecebido.StatusOperacional.PROCESSADO,
+        }:
+            return Response({"detail": "XML em estado terminal sem recebimento físico correspondente."}, status=status.HTTP_409_CONFLICT)
+        if xml.status_operacional == XmlFornecedorRecebido.StatusOperacional.IGNORADO:
+            return Response({"status_operacional": "XML ignorado não pode iniciar recebimento físico."}, status=status.HTTP_400_BAD_REQUEST)
+        if xml.status_operacional not in {
+            XmlFornecedorRecebido.StatusOperacional.DETECTADO,
+            XmlFornecedorRecebido.StatusOperacional.AGUARDANDO_RECEBIMENTO,
+            XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO,
+        }:
+            return Response({"status_operacional": "XML não permite iniciar recebimento físico neste estado."}, status=status.HTTP_400_BAD_REQUEST)
         recebimento = RecebimentoMercadoriaEstoque.objects.create(
             empresa=xml.empresa,
             loja=xml.loja,
@@ -2786,6 +2809,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             status=RecebimentoMercadoriaEstoque.Status.ABERTO,
             criado_por=request.user,
         )
+        xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO
+        xml.save(update_fields=["status_operacional", "atualizado_em"])
         return Response(self.get_serializer(recebimento).data, status=status.HTTP_201_CREATED)
 
     def _pedidos_elegiveis_qs(self, recebimento):
@@ -3048,6 +3073,10 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         pedidos = {v.pedido for v in recebimento.pedidos_vinculados.select_related("pedido").all()}
         for pedido in pedidos:
             sincronizar_atendimento_pedido_compra(pedido)
+        if recebimento.xml_fornecedor_id:
+            xml = XmlFornecedorRecebido.objects.select_for_update().get(pk=recebimento.xml_fornecedor_id)
+            xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.RECEBIDO
+            xml.save(update_fields=["status_operacional", "atualizado_em"])
         return Response(RecebimentoMercadoriaEfetivacaoEstoqueSerializer(efetivacao).data, status=status.HTTP_201_CREATED)
 
     def _loja_destino_estoque(self, recebimento):
