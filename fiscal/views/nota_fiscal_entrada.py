@@ -410,6 +410,13 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
     @transaction.atomic
     def recusar_xml(self, request, pk=None):
         nota = self.filter_queryset(self.get_queryset()).select_for_update().get(pk=pk)
+        if nota.xml_fornecedor_id:
+            return self._cancelar_nota_entrada(
+                request,
+                nota,
+                cancelamento_fiscal=False,
+                motivo_default="Recusa da entrada",
+            )
         if nota.status != NotaFiscalEntrada.Status.ABERTA:
             return Response({"detail": "Somente NF-e aberta e não efetivada pode ser recusada."}, status=status.HTTP_400_BAD_REQUEST)
         if not nota.xml_importado:
@@ -1201,8 +1208,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
             )
         return self._cancelar_nota_entrada(request, nota, cancelamento_fiscal=False)
 
-    def _cancelar_nota_entrada(self, request, nota, cancelamento_fiscal):
-        motivo = str(request.data.get("motivo") or "").strip()
+    def _cancelar_nota_entrada(self, request, nota, cancelamento_fiscal, motivo_default=""):
+        motivo = str(request.data.get("motivo") or motivo_default or "").strip()
         if not motivo:
             return Response({"motivo": "Informe o motivo do cancelamento."}, status=status.HTTP_400_BAD_REQUEST)
         if nota.status == NotaFiscalEntrada.Status.CANCELADA:
@@ -1248,24 +1255,32 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 )
             legacy_action = "cancelar"
         else:
-            nota.status = NotaFiscalEntrada.Status.ABERTA
-            nota.situacao_fiscal = NotaFiscalEntrada.SituacaoFiscal.AUTORIZADA
-            nota.motivo_cancelamento = ""
-            nota.cancelado_por = None
-            nota.cancelado_em = None
-            nota.save(update_fields=["status", "situacao_fiscal", "motivo_cancelamento", "cancelado_por", "cancelado_em", "atualizado_em"])
-            nota.itens_xml.update(
-                unidade_fornecedor_efetivada="",
-                fator_conversao_efetivado=None,
-                quantidade_interna_efetivada=None,
-                efetivado_em=None,
+            xml = XmlFornecedorRecebido.objects.select_for_update().get(pk=nota.xml_fornecedor_id)
+            tratamento_anterior = xml.tipo_tratamento
+            self._auditar_cancelamento(
+                nota, request, before, motivo, financeiro, estoque, custos, recebimento,
+                necessidades, divergencias, analise, legacy_action="cancelar_entrada",
+                tratamento_anterior=tratamento_anterior
             )
-            XmlFornecedorRecebido.objects.filter(pk=nota.xml_fornecedor_id).update(
-                situacao_fiscal=XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA,
-                status_operacional=XmlFornecedorRecebido.StatusOperacional.DETECTADO,
-                atualizado_em=timezone.now(),
+            xml.situacao_fiscal = XmlFornecedorRecebido.SituacaoFiscal.AUTORIZADA
+            xml.status_operacional = XmlFornecedorRecebido.StatusOperacional.DETECTADO
+            xml.tipo_tratamento = XmlFornecedorRecebido.TipoTratamento.NAO_DEFINIDO
+            xml.save(update_fields=["situacao_fiscal", "status_operacional", "tipo_tratamento", "atualizado_em"])
+            nota_id = nota.pk
+            chave = nota.chave_acesso
+            nota.delete()
+            return Response(
+                {
+                    "detail": "Entrada cancelada. NF-e disponível para novo tratamento.",
+                    "id": nota_id,
+                    "xml_fornecedor_id": xml.pk,
+                    "chave_acesso": chave,
+                    "status_operacional": xml.status_operacional,
+                    "tipo_tratamento": xml.tipo_tratamento,
+                    "situacao_fiscal": xml.situacao_fiscal,
+                },
+                status=status.HTTP_200_OK,
             )
-            legacy_action = "cancelar_entrada"
         self._auditar_cancelamento(
             nota, request, before, motivo, financeiro, estoque, custos, recebimento,
             necessidades, divergencias, analise, legacy_action=legacy_action
@@ -2081,7 +2096,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         )
         return {"encerradas": atualizadas}
 
-    def _auditar_cancelamento(self, nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise, legacy_action="cancelar"):
+    def _auditar_cancelamento(self, nota, request, before, motivo, financeiro, estoque, custos, recebimento, necessidades, divergencias, analise, legacy_action="cancelar", tratamento_anterior=None):
         AuditService.success(
             AuditAction.OBJECT_UPDATED,
             category=AuditCategory.FISCAL,
@@ -2096,6 +2111,8 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
                 "loja": nota.loja_id,
                 "fornecedor": nota.fornecedor_id,
                 "pedido_compra": nota.pedido_compra_id,
+                "xml_fornecedor_id": nota.xml_fornecedor_id,
+                "tratamento_anterior": tratamento_anterior or getattr(getattr(nota, "xml_fornecedor", None), "tipo_tratamento", None),
                 "motivo": motivo,
                 "cancelado_por": getattr(nota, "cancelado_por_id", None),
                 "cancelado_em": nota.cancelado_em.isoformat() if nota.cancelado_em else None,
