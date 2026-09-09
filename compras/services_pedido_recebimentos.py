@@ -1,9 +1,9 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Prefetch, Q, Sum
+from django.db.models import Count, Prefetch, Sum
 
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
-from fiscal.models import NotaFiscalEntrada, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido
+from fiscal.models import NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido
 
 
 QTD_ZERO = Decimal("0.000")
@@ -118,7 +118,7 @@ def montar_resumo_recebimentos_pedido(pedido: PedidoCompra):
 
     documentos = {}
     ordem = []
-    recebimentos = (
+    recebimentos = list(
         RecebimentoMercadoriaPedido.objects
         .select_related(
             "recebimento",
@@ -127,22 +127,41 @@ def montar_resumo_recebimentos_pedido(pedido: PedidoCompra):
             "recebimento__xml_fornecedor__nota_fiscal_entrada",
         )
         .filter(pedido=pedido, recebimento__xml_fornecedor__isnull=False)
-        .annotate(quantidade_fisica_pedido=Sum("recebimento__conferencia_itens__quantidade_recebida", filter=Q(recebimento__conferencia_itens__pedido=pedido)))
         .order_by("recebimento__criado_em", "recebimento_id")
     )
+    recebimento_ids = [vinculo.recebimento_id for vinculo in recebimentos]
+    quantidades_fisicas = {
+        row["recebimento_id"]: row["total"] or QTD_ZERO
+        for row in (
+            RecebimentoMercadoriaConferenciaItem.objects
+            .filter(recebimento_id__in=recebimento_ids, pedido=pedido)
+            .values("recebimento_id")
+            .annotate(total=Sum("quantidade_recebida"))
+            .values("recebimento_id", "total")
+        )
+    }
+    pedidos_por_recebimento = {
+        row["recebimento_id"]: row["total"]
+        for row in (
+            RecebimentoMercadoriaPedido.objects
+            .filter(recebimento_id__in=recebimento_ids)
+            .values("recebimento_id")
+            .annotate(total=Count("pedido_id", distinct=True))
+        )
+    }
     for vinculo in recebimentos:
         recebimento = vinculo.recebimento
         xml = recebimento.xml_fornecedor
         nota = getattr(xml, "nota_fiscal_entrada", None)
         efetivacao = getattr(recebimento, "efetivacao_estoque", None)
-        quantidade_fisica = _qtd(vinculo.quantidade_fisica_pedido)
-        if quantidade_fisica == QTD_ZERO and efetivacao:
+        quantidade_fisica = _qtd(quantidades_fisicas.get(recebimento.pk))
+        if quantidade_fisica == QTD_ZERO and efetivacao and pedidos_por_recebimento.get(recebimento.pk) == 1:
             quantidade_fisica = _qtd(efetivacao.quantidade_total)
         dados = {
             "origem": "RECEBIMENTO_FISICO",
             "recebimento_id": recebimento.pk,
             "quantidade_fisica": quantidade_fisica,
-            "status_operacional": recebimento.status,
+            "status_recebimento": recebimento.status,
             "tipo_tratamento": getattr(xml, "tipo_tratamento", ""),
             "estoque_efetivado": efetivacao is not None and recebimento.status != RecebimentoMercadoriaEstoque.Status.CANCELADO,
             "nota_entrada_id": getattr(nota, "pk", None),
@@ -167,6 +186,7 @@ def montar_resumo_recebimentos_pedido(pedido: PedidoCompra):
             "origem": "NOTA_FISCAL",
             "recebimento_id": None,
             "quantidade_fisica": None,
+            "status_recebimento": None,
             "status_operacional": None,
             "tipo_tratamento": getattr(getattr(nota, "xml_fornecedor", None), "tipo_tratamento", None),
             "estoque_efetivado": False,

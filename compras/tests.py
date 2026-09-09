@@ -1373,7 +1373,7 @@ class PedidoCompraUnificadoTests(TestCase):
         self.prod_revenda.save(update_fields=["descricao_reduzida"])
         pack_unico = Pack.objects.create(empresa=self.empresa, nome="Pack P", grade=self.grade)
         PackItem.objects.create(pack=pack_unico, tamanho=self.tam_p, qtd=1)
-        sku = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        sku, _ = ProdutoDetalhe.objects.get_or_create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
         pedido = self.criar_pedido()
         item = self.incluir_item(self.payload_revenda(pedido, pack=pack_unico.id))
 
@@ -3426,7 +3426,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
             criado_por=self.user,
         )
         RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
-        sku = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        sku, _ = ProdutoDetalhe.objects.get_or_create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
         RecebimentoMercadoriaConferenciaItem.objects.create(
             recebimento=recebimento,
             pedido=pedido,
@@ -3535,7 +3535,8 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(doc_132["nota_entrada_id"], nota_xml.id)
         self.assertEqual(Decimal(doc_132["quantidade_fisica"]), Decimal("19.000"))
         self.assertTrue(doc_132["estoque_efetivado"])
-        self.assertEqual(doc_132["status_operacional"], RecebimentoMercadoriaEstoque.Status.CONCLUIDO)
+        self.assertEqual(doc_132["status_recebimento"], RecebimentoMercadoriaEstoque.Status.CONCLUIDO)
+        self.assertEqual(doc_132["status_operacional"], XmlFornecedorRecebido.StatusOperacional.RECEBIDO)
         self.assertEqual(doc_132["status_fiscal"], NotaFiscalEntrada.Status.FECHADA)
         self.assertEqual(sum(1 for doc in docs if doc.get("xml_fornecedor_id") == xml_132.id), 1)
         self.assertTrue(any(doc.get("xml_fornecedor_id") == xml_123.id for doc in docs))
@@ -3546,9 +3547,44 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
 
     def test_recebimentos_resumo_isola_empresa(self):
         pedido_b = PedidoCompra.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, observacoes="Pedido B")
-        user_bloqueado = get_user_model().objects.create_user("compras-a", "compras-a@sysvar.test", "test", empresa=self.empresa, loja=self.loja)
-        self.client.force_authenticate(user_bloqueado)
+        self.client.force_authenticate(self.solicitante)
 
         resp = self.client.get(f"/api/compras/pedidos/{pedido_b.id}/recebimentos-resumo/")
 
         self.assertEqual(resp.status_code, 404)
+
+    def test_recebimentos_resumo_quantidade_fisica_respeita_parcela_do_pedido_em_recebimento_multipedido(self):
+        pedido_a, item_a = self._criar_pedido_com_item_direto("10.000")
+        pedido_b, item_b = self._criar_pedido_com_item_direto("10.000")
+        xml, recebimento = self._criar_xml_recebimento(
+            pedido_a,
+            item_a,
+            "7.000",
+            numero="555",
+            chave="35132600000000000000000000000000000000000555",
+        )
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido_b)
+        sku_b, _ = ProdutoDetalhe.objects.get_or_create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_m)
+        RecebimentoMercadoriaConferenciaItem.objects.create(
+            recebimento=recebimento,
+            pedido=pedido_b,
+            pedido_item=item_b,
+            produto=self.prod_revenda,
+            cor=self.cor,
+            tamanho=self.tam_m,
+            produto_detalhe=sku_b,
+            quantidade_esperada=Decimal("0.000"),
+            quantidade_recebida=Decimal("0.000"),
+        )
+
+        resp_a = self.client.get(f"/api/compras/pedidos/{pedido_a.id}/recebimentos-resumo/")
+        resp_b = self.client.get(f"/api/compras/pedidos/{pedido_b.id}/recebimentos-resumo/")
+
+        self.assertEqual(resp_a.status_code, 200, resp_a.data)
+        self.assertEqual(resp_b.status_code, 200, resp_b.data)
+        doc_a = next(doc for doc in resp_a.data["documentos"] if doc.get("xml_fornecedor_id") == xml.id)
+        doc_b = next(doc for doc in resp_b.data["documentos"] if doc.get("xml_fornecedor_id") == xml.id)
+        self.assertEqual(Decimal(doc_a["quantidade_fisica"]), Decimal("7.000"))
+        self.assertEqual(Decimal(doc_b["quantidade_fisica"]), Decimal("0.000"))
+        self.assertEqual(doc_a["chave_acesso"], xml.chave_acesso)
+        self.assertEqual(doc_b["chave_acesso"], xml.chave_acesso)
