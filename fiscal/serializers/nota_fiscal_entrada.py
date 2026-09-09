@@ -117,11 +117,24 @@ class XmlFornecedorRecebidoSerializer(serializers.ModelSerializer):
     loja_nome = serializers.CharField(source="loja.nome_loja", read_only=True)
     fornecedor_nome = serializers.CharField(source="fornecedor.nome_fornecedor", read_only=True)
     tipo_tratamento_display = serializers.CharField(source="get_tipo_tratamento_display", read_only=True)
+    nota_entrada_id = serializers.SerializerMethodField()
+    recebimento_id = serializers.SerializerMethodField()
 
     class Meta:
         model = XmlFornecedorRecebido
         fields = "__all__"
-        read_only_fields = ("detectado_em", "atualizado_em", "tipo_tratamento", "tipo_tratamento_display")
+        read_only_fields = ("detectado_em", "atualizado_em", "tipo_tratamento", "tipo_tratamento_display", "nota_entrada_id", "recebimento_id")
+
+    def get_nota_entrada_id(self, obj):
+        nota = getattr(obj, "nota_fiscal_entrada", None)
+        return getattr(nota, "pk", None)
+
+    def get_recebimento_id(self, obj):
+        recebimentos = getattr(obj, "recebimentos_nao_cancelados", None)
+        if recebimentos is not None:
+            return recebimentos[0].pk if recebimentos else None
+        recebimento = obj.recebimentos_mercadoria.exclude(status=RecebimentoMercadoriaEstoque.Status.CANCELADO).order_by("-criado_em", "-id").first()
+        return getattr(recebimento, "pk", None)
 
     def validate(self, attrs):
         empresa = attrs.get("empresa") or getattr(self.instance, "empresa", None)

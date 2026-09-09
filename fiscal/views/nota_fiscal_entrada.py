@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from rest_framework import parsers, permissions, status, viewsets
@@ -2382,7 +2382,14 @@ class XmlFornecedorRecebidoViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "Auxiliar", "AssistentePagar"]
     queryset = (
         XmlFornecedorRecebido.objects
-        .select_related("empresa", "loja", "fornecedor")
+        .select_related("empresa", "loja", "fornecedor", "nota_fiscal_entrada")
+        .prefetch_related(
+            Prefetch(
+                "recebimentos_mercadoria",
+                queryset=RecebimentoMercadoriaEstoque.objects.exclude(status=RecebimentoMercadoriaEstoque.Status.CANCELADO).order_by("-criado_em", "-id"),
+                to_attr="recebimentos_nao_cancelados",
+            )
+        )
         .all()
         .order_by("-detectado_em", "-id")
     )

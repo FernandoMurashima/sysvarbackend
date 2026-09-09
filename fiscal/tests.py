@@ -694,6 +694,75 @@ class XmlFornecedorRecebidoTests(TestCase):
         rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
         self.assertNotIn(other.id, [row["id"] for row in rows])
 
+    def test_xml_fornecedor_expoe_vinculos_de_nota_e_recebimento_sem_vazar_empresa(self):
+        xml_com_vinculos = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567891063",
+            modelo="55",
+            serie="1",
+            numero="163",
+        )
+        xml_sem_vinculo = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso="35260822345678000195550010000001234567891071",
+            modelo="55",
+            serie="1",
+            numero="171",
+        )
+        xml_outra_empresa = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa_b,
+            loja=self.loja_b,
+            fornecedor=self.fornecedor_b,
+            chave_acesso="35260822345678000195550010000001234567891089",
+            modelo="55",
+            serie="1",
+            numero="189",
+        )
+        nota = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml_com_vinculos,
+            modelo="55",
+            serie="1",
+            numero="163",
+            chave_acesso=xml_com_vinculos.chave_acesso,
+            dt_emissao=date(2026, 9, 9),
+            dt_entrada=date(2026, 9, 9),
+            criado_por=self.user,
+        )
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml_com_vinculos,
+            status=RecebimentoMercadoriaEstoque.Status.CONCLUIDO,
+            criado_por=self.user,
+        )
+        RecebimentoMercadoriaEstoque.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml_sem_vinculo,
+            status=RecebimentoMercadoriaEstoque.Status.CANCELADO,
+            criado_por=self.user,
+        )
+
+        resp = self.client.get("/api/fiscal/xmls-fornecedor-recebidos/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data.get("results", resp.data) if isinstance(resp.data, dict) else resp.data
+        por_id = {row["id"]: row for row in rows}
+        self.assertEqual(por_id[xml_com_vinculos.id]["nota_entrada_id"], nota.id)
+        self.assertEqual(por_id[xml_com_vinculos.id]["recebimento_id"], recebimento.id)
+        self.assertIsNone(por_id[xml_sem_vinculo.id]["nota_entrada_id"])
+        self.assertIsNone(por_id[xml_sem_vinculo.id]["recebimento_id"])
+        self.assertNotIn(xml_outra_empresa.id, por_id)
+
     def test_perfis_operacionais_podem_consultar_xmls_detectados(self):
         from fiscal.views.nota_fiscal_entrada import XmlFornecedorRecebidoViewSet
 
