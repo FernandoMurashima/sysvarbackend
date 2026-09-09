@@ -2875,9 +2875,13 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             .order_by("produto__referencia", "cor__Descricao", "id")
         )
         itens = list(itens)
-        from compras.services_recebimento import quantidades_fisicas_efetivadas_por_sku
+        from compras.services_recebimento import saldos_pedido_por_sku
 
-        efetivados_por_sku = quantidades_fisicas_efetivadas_por_sku(itens, recebimento.empresa_id, excluir_recebimento_id=recebimento.id)
+        saldos_por_sku = saldos_pedido_por_sku(itens, recebimento.empresa_id, excluir_recebimento_id=recebimento.id)
+        nfe_por_ean = self._quantidades_nfe_por_ean(recebimento)
+        estruturado = nfe_por_ean is not None
+        candidatos_por_ean = {}
+        linhas_para_criar = []
         for item in itens:
             if not (item.produto_id and item.cor_id and item.pack_id and item.n_packs):
                 continue
@@ -2894,19 +2898,43 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                 sku = ProdutoDetalhe.objects.filter(produto_id=item.produto_id, idcor_id=item.cor_id, idtamanho_id=pack_item.tamanho_id).first()
                 if not sku:
                     return Response({"detail": f"SKU não encontrado para pedido {item.pedido_id}, item {item.id}, tamanho {pack_item.tamanho_id}."}, status=status.HTTP_400_BAD_REQUEST)
-                RecebimentoMercadoriaConferenciaItem.objects.create(
-                    recebimento=recebimento,
-                    pedido=item.pedido,
-                    pedido_item=item,
-                    produto_id=item.produto_id,
-                    cor_id=item.cor_id,
-                    tamanho_id=pack_item.tamanho_id,
-                    produto_detalhe=sku,
-                    quantidade_esperada=max(
-                        Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0) - efetivados_por_sku.get((item.pk, sku.pk), Decimal("0")),
-                        Decimal("0"),
-                    ),
+                saldo = saldos_por_sku.get((item.pk, sku.pk), {})
+                pendente = Decimal(saldo.get("quantidade_pendente") or 0)
+                linha = {
+                    "recebimento": recebimento,
+                    "pedido": item.pedido,
+                    "pedido_item": item,
+                    "produto_id": item.produto_id,
+                    "cor_id": item.cor_id,
+                    "tamanho_id": pack_item.tamanho_id,
+                    "produto_detalhe": sku,
+                    "quantidade_esperada": pendente,
+                }
+                linhas_para_criar.append(linha)
+                candidatos_por_ean.setdefault(sku.ean13 or "", []).append(
+                    {"linha": linha, "pendente": pendente, "ordem": (item.pedido.emissao or date.min, item.pedido_id, item.pk)}
                 )
+        if estruturado:
+            eans_pedido = {ean for ean in candidatos_por_ean if ean}
+            for ean, quantidade in nfe_por_ean.items():
+                if quantidade <= 0:
+                    continue
+                if ean not in eans_pedido:
+                    return Response({"detail": f"EAN/GTIN {ean} da NF-e não pertence aos SKUs dos pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
+                restante = quantidade
+                for candidato in sorted(candidatos_por_ean[ean], key=lambda row: row["ordem"]):
+                    alocada = min(restante, candidato["pendente"])
+                    candidato["linha"]["quantidade_esperada"] = alocada
+                    restante -= alocada
+                    if restante <= 0:
+                        break
+                if restante > 0:
+                    return Response({"detail": f"Quantidade da NF-e para EAN/GTIN {ean} excede o saldo pendente dos pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
+            for ean in eans_pedido - set(nfe_por_ean):
+                for candidato in candidatos_por_ean[ean]:
+                    candidato["linha"]["quantidade_esperada"] = Decimal("0")
+        for linha in linhas_para_criar:
+            RecebimentoMercadoriaConferenciaItem.objects.create(**linha)
         if not RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).exists():
             return Response({"detail": "Nenhum item de revenda com produto, cor e pack foi encontrado nos pedidos vinculados."}, status=status.HTTP_400_BAD_REQUEST)
         if recebimento.status == RecebimentoMercadoriaEstoque.Status.ABERTO:
@@ -2914,6 +2942,26 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             recebimento.save(update_fields=["status", "xml_fornecedor_ativo_key", "atualizado_em"])
         recebimento = self.get_queryset().get(pk=recebimento.pk)
         return Response(self.get_serializer(recebimento).data, status=status.HTTP_200_OK)
+
+    def _quantidades_nfe_por_ean(self, recebimento):
+        xml = recebimento.xml_fornecedor
+        if not (
+            xml
+            and xml.tipo_tratamento == XmlFornecedorRecebido.TipoTratamento.ESTOQUE
+            and isinstance(xml.itens_fiscais, list)
+            and xml.itens_fiscais
+        ):
+            return None
+        totais = {}
+        for idx, item in enumerate(xml.itens_fiscais, start=1):
+            quantidade = Decimal(str((item or {}).get("quantidade_comercial") or 0))
+            if quantidade <= 0:
+                continue
+            ean = only_digits((item or {}).get("gtin_ean") or "")
+            if not ean:
+                raise ValidationError({"itens_fiscais": f"Item fiscal {idx} sem GTIN/EAN utilizável."})
+            totais[ean] = totais.get(ean, Decimal("0")) + quantidade
+        return totais
 
     @action(detail=True, methods=["post"], url_path="salvar-conferencia")
     @transaction.atomic
@@ -3107,9 +3155,17 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         xml = recebimento.xml_fornecedor
         pedidos_vinculados = list(recebimento.pedidos_vinculados.select_related("pedido", "pedido__fornecedor", "pedido__loja").prefetch_related("pedido__itens"))
         itens = list(recebimento.conferencia_itens.select_related("pedido", "pedido_item", "produto", "cor", "tamanho", "produto_detalhe").order_by("produto__referencia", "cor__Descricao", "tamanho__Tamanho", "id"))
-        pedido_total = sum((item.qtd or 0) for vinculo in pedidos_vinculados for item in vinculo.pedido.itens.all())
+        pedido_itens = [item for vinculo in pedidos_vinculados for item in vinculo.pedido.itens.all()]
+        pedido_original_total = sum((item.qtd or 0) for item in pedido_itens)
+        from compras.services_recebimento import saldos_pedido_por_sku
+
+        pedido_pendente_total = sum(
+            saldo["quantidade_pendente"]
+            for saldo in saldos_pedido_por_sku(pedido_itens, recebimento.empresa_id, excluir_recebimento_id=recebimento.id).values()
+        )
         fisico_total = sum((item.quantidade_recebida or 0) for item in itens)
         nfe_total = xml.quantidade_total_faturada if xml else None
+        estruturado = self._quantidades_nfe_por_ean(recebimento) is not None
         linhas = []
         faltas = []
         sobras = []
@@ -3130,6 +3186,9 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                 "recebido": str(item.quantidade_recebida),
                 "diferenca": str(diferenca),
                 "situacao": situacao,
+                "quantidade_pedido_pendente": str(
+                    (saldos_pedido_por_sku([item.pedido_item], recebimento.empresa_id, excluir_recebimento_id=recebimento.id).get((item.pedido_item_id, item.produto_detalhe_id), {}) or {}).get("quantidade_pendente", Decimal("0"))
+                ),
             }
             linhas.append(linha)
             if item.quantidade_recebida and item.quantidade_recebida > 0:
@@ -3140,9 +3199,9 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             elif diferenca > 0:
                 sobras.append(linha)
         possui_divergencia = (
-            fisico_total != pedido_total
-            or (nfe_total is not None and fisico_total != nfe_total)
-            or any(item.diferenca != 0 for item in itens)
+            ((nfe_total is not None and fisico_total != nfe_total) or any(item.diferenca != 0 for item in itens))
+            if estruturado
+            else (fisico_total != pedido_original_total or (nfe_total is not None and fisico_total != nfe_total) or any(item.diferenca != 0 for item in itens))
         )
         snapshot = {
             "recebimento": {
@@ -3174,17 +3233,25 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                     "fornecedor": getattr(vinculo.pedido.fornecedor, "nome_fornecedor", "") or "",
                     "estabelecimento": getattr(vinculo.pedido.loja, "nome_loja", "") or "",
                     "quantidade_total": str(sum((item.qtd or 0) for item in vinculo.pedido.itens.all())),
+                    "quantidade_pendente": str(
+                        sum(
+                            saldo["quantidade_pendente"]
+                            for saldo in saldos_pedido_por_sku(list(vinculo.pedido.itens.all()), recebimento.empresa_id, excluir_recebimento_id=recebimento.id).values()
+                        )
+                    ),
                     "valor_total": str(vinculo.pedido.total_pedido or 0),
                 }
                 for vinculo in pedidos_vinculados
             ],
             "totais": {
-                "quantidade_pedido_total": str(pedido_total),
+                "quantidade_pedido_total": str(pedido_pendente_total if estruturado else pedido_original_total),
+                "quantidade_pedido_original_total": str(pedido_original_total),
+                "quantidade_pedido_pendente_total": str(pedido_pendente_total),
                 "quantidade_nfe_total": str(nfe_total) if nfe_total is not None else None,
                 "quantidade_fisica_total": str(fisico_total),
-                "diferenca_nfe_pedido": str(nfe_total - pedido_total) if nfe_total is not None else None,
+                "diferenca_nfe_pedido": str(nfe_total - (pedido_pendente_total if estruturado else pedido_original_total)) if nfe_total is not None else None,
                 "diferenca_fisico_nfe": str(fisico_total - nfe_total) if nfe_total is not None else None,
-                "diferenca_fisico_pedido": str(fisico_total - pedido_total),
+                "diferenca_fisico_pedido": str(fisico_total - (pedido_pendente_total if estruturado else pedido_original_total)),
             },
             "contagem_operacional": {
                 "quantidade_pedidos_vinculados": len(pedidos_vinculados),

@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from compras.models import PedidoCompraEntrega
 from fiscal.models import RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEstoque
+from produto.models import PackItem, ProdutoDetalhe
 
 
 def quantidades_fisicas_efetivadas_por_sku(pedido_itens, empresa_id, excluir_recebimento_id=None):
@@ -19,6 +20,26 @@ def quantidades_fisicas_efetivadas_por_sku(pedido_itens, empresa_id, excluir_rec
         (row["pedido_item_id"], row["produto_detalhe_id"]): Decimal(row["total"] or 0)
         for row in qs.values("pedido_item_id", "produto_detalhe_id").annotate(total=Sum("quantidade_recebida"))
     }
+
+
+def saldos_pedido_por_sku(pedido_itens, empresa_id, excluir_recebimento_id=None):
+    itens = [item for item in pedido_itens if item.produto_id and item.cor_id and item.pack_id and item.n_packs]
+    efetivados = quantidades_fisicas_efetivadas_por_sku(itens, empresa_id, excluir_recebimento_id=excluir_recebimento_id)
+    saldos = {}
+    for item in itens:
+        pack_itens = PackItem.objects.filter(pack_id=item.pack_id).select_related("tamanho").order_by("tamanho__idgrade_id", "tamanho__Idtamanho")
+        for pack_item in pack_itens:
+            sku = ProdutoDetalhe.objects.filter(produto_id=item.produto_id, idcor_id=item.cor_id, idtamanho_id=pack_item.tamanho_id).first()
+            if not sku:
+                continue
+            original = Decimal(pack_item.qtd or 0) * Decimal(item.n_packs or 0)
+            efetivado = efetivados.get((item.pk, sku.pk), Decimal("0"))
+            saldos[(item.pk, sku.pk)] = {
+                "quantidade_original": original,
+                "quantidade_efetivada_anterior": efetivado,
+                "quantidade_pendente": max(original - efetivado, Decimal("0")),
+            }
+    return saldos
 
 
 def sincronizar_atendimento_pedido_compra(pedido):

@@ -261,11 +261,15 @@ class RecebimentoMercadoriaEstoqueSerializer(serializers.ModelSerializer):
         itens = list(obj.conferencia_itens.all())
         esperado = sum((item.quantidade_esperada or 0) for item in itens)
         recebido = sum((item.quantidade_recebida or 0) for item in itens)
-        pedido_total = esperado if itens else sum(
-            (item.qtd or 0)
-            for vinculo in obj.pedidos_vinculados.all()
-            for item in vinculo.pedido.itens.all()
-        )
+        pedido_itens = [item for vinculo in obj.pedidos_vinculados.all() for item in vinculo.pedido.itens.all()]
+        pedido_total = sum((item.qtd or 0) for item in pedido_itens)
+        if itens:
+            from compras.services_recebimento import saldos_pedido_por_sku
+
+            pedido_total = sum(
+                saldo["quantidade_pendente"]
+                for saldo in saldos_pedido_por_sku(pedido_itens, obj.empresa_id, excluir_recebimento_id=obj.id).values()
+            )
         nfe_total = obj.xml_fornecedor.quantidade_total_faturada if obj.xml_fornecedor_id else None
         divergentes = sum(1 for item in itens if item.diferenca != 0)
         return {

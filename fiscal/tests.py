@@ -1647,6 +1647,35 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual(resp.status_code, 200, resp.data)
         return recebimento, list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).order_by("quantidade_esperada", "tamanho_id"))
 
+    def xml_estoque_estruturado(self, numero, itens, quantidade_total=None):
+        quantidade_total = quantidade_total if quantidade_total is not None else sum(Decimal(str(item.get("quantidade_comercial") or 0)) for item in itens)
+        return XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso=f"3526082234567800019555001000000123456789{int(numero):04d}",
+            modelo="55",
+            serie="1",
+            numero=str(numero),
+            quantidade_total_faturada=Decimal(str(quantidade_total)),
+            unidade_comercial="UN",
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.EM_RECEBIMENTO,
+            tipo_tratamento=XmlFornecedorRecebido.TipoTratamento.ESTOQUE,
+            itens_fiscais=itens,
+        )
+
+    def item_fiscal(self, ean, quantidade, numero=1):
+        return {
+            "numero_item": numero,
+            "codigo_produto_fornecedor": f"SKU-{numero}",
+            "descricao_produto": f"Produto {numero}",
+            "gtin_ean": ean,
+            "unidade_comercial": "UN",
+            "quantidade_comercial": str(quantidade),
+            "valor_unitario_comercial": "1.0000",
+            "valor_produto": str(quantidade),
+        }
+
     def test_concluido_termo_fisico_efetiva_com_quantidade_do_snapshot_e_movimento_recebimento(self):
         termo = self.concluir(["1.000", "3.000"])
         estoque = Estoque.objects.create(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja, referencia=self.produto.referencia, Estoque=Decimal("5.000"), reserva=Decimal("2.000"))
@@ -1700,6 +1729,104 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("1.000"), Decimal("1.000")])
         detalhe = self.client.get(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/")
         self.assertEqual(Decimal(detalhe.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("2.000"))
+
+    def test_xml_estruturado_usa_nfe_como_esperado_e_pedido_pendente_como_informativo(self):
+        pedido, _ = self.pedido_com_item(n_packs=232, qtd=Decimal("696.000"))
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "100.000"}, {"id": linhas[1].id, "quantidade_recebida": "106.000"}]},
+            format="json",
+        )
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": "parcial"}, format="json")
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+        xml = self.xml_estoque_estruturado(
+            132,
+            [self.item_fiscal(self.sku_p.ean13, "5.000", 1), self.item_fiscal(self.sku_m.ean13, "14.000", 2)],
+            quantidade_total="19.000",
+        )
+        recebimento2 = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=xml, criado_por=self.user)
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento2, pedido=pedido)
+        self.recebimento = recebimento2
+
+        resp = self.gerar()
+        linhas = {linha.produto_detalhe_id: linha for linha in RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento2)}
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(linhas[self.sku_p.pk].quantidade_esperada, Decimal("5.000"))
+        self.assertEqual(linhas[self.sku_m.pk].quantidade_esperada, Decimal("14.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_esperada_total"]), Decimal("19.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["quantidade_pedido_total"]), Decimal("490.000"))
+        self.assertEqual(Decimal(resp.data["conferencia_resumo"]["diferenca_nfe_pedido"]), Decimal("-471.000"))
+
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[self.sku_p.pk].id, "quantidade_recebida": "5.000"}, {"id": linhas[self.sku_m.pk].id, "quantidade_recebida": "14.000"}]},
+            format="json",
+        )
+        encerrado = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/encerrar-conferencia/", {}, format="json")
+        termo = RecebimentoMercadoriaTermo.objects.get(recebimento=recebimento2)
+        self.assertEqual(encerrado.status_code, 200, encerrado.data)
+        self.assertFalse(termo.possui_divergencia)
+        self.assertEqual(termo.snapshot["divergencias"]["faltas"], [])
+        self.assertEqual(termo.snapshot["divergencias"]["sobras"], [])
+        self.assertEqual(Decimal(termo.snapshot["totais"]["quantidade_pedido_pendente_total"]), Decimal("490.000"))
+        self.assertEqual(Decimal(termo.snapshot["totais"]["quantidade_nfe_total"]), Decimal("19.000"))
+        self.assertEqual(Decimal(termo.snapshot["totais"]["quantidade_fisica_total"]), Decimal("19.000"))
+        self.assertEqual(Decimal(termo.snapshot["totais"]["diferenca_fisico_pedido"]), Decimal("-471.000"))
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento2.id}/efetivar-estoque/", {}, format="json")
+        sincronizar_atendimento_pedido_compra(pedido)
+        entrega = PedidoCompraEntrega.objects.get(item=pedido.itens.get())
+        self.assertEqual(entrega.qtd_recebida, Decimal("225.000"))
+        self.assertEqual(entrega.qtd_prevista - entrega.qtd_recebida, Decimal("471.000"))
+
+    def test_xml_estruturado_exige_justificativa_quando_fisico_diverge_da_nfe(self):
+        pedido, _ = self.pedido_com_item()
+        xml = self.xml_estoque_estruturado(133, [self.item_fiscal(self.sku_p.ean13, "2.000", 1), self.item_fiscal(self.sku_m.ean13, "4.000", 2)])
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=xml, criado_por=self.user)
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
+        self.recebimento = recebimento
+        self.gerar()
+        linha = RecebimentoMercadoriaConferenciaItem.objects.get(recebimento=recebimento, produto_detalhe=self.sku_p)
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/salvar-conferencia/", {"itens": [{"id": linha.id, "quantidade_recebida": "1.000"}]}, format="json")
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{recebimento.id}/encerrar-conferencia/", {}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("justificativa", resp.data["observacao_divergencia"])
+
+    def test_xml_estruturado_bloqueia_ean_ausente_ou_fora_dos_pedidos_sem_linhas(self):
+        pedido, _ = self.pedido_com_item()
+        for numero, item in (
+            (134, self.item_fiscal("7899999999999", "1.000", 1)),
+            (135, self.item_fiscal("", "1.000", 1)),
+        ):
+            xml = self.xml_estoque_estruturado(numero, [item])
+            recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=xml, criado_por=self.user)
+            RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
+            self.recebimento = recebimento
+            resp = self.gerar()
+            self.assertEqual(resp.status_code, 400, resp.data)
+            self.assertFalse(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento).exists())
+
+    def test_xml_estruturado_distribui_mesmo_ean_entre_multiplos_pedidos_sem_duplicar(self):
+        pedido1, _ = self.pedido_com_item()
+        recebimento2 = self.novo_recebimento_para_pedido(pedido1)
+        self.recebimento = recebimento2
+        pedido2, _ = self.pedido_com_item()
+        xml = self.xml_estoque_estruturado(136, [self.item_fiscal(self.sku_p.ean13, "3.000", 1)])
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, xml_fornecedor=xml, criado_por=self.user)
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido1)
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido2)
+        self.recebimento = recebimento
+
+        resp = self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento, produto_detalhe=self.sku_p).order_by("pedido__emissao", "pedido_id", "pedido_item_id"))
+        ausentes = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=recebimento, produto_detalhe=self.sku_m))
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual([linha.quantidade_esperada for linha in linhas], [Decimal("2.000"), Decimal("1.000")])
+        self.assertEqual([linha.quantidade_esperada for linha in ausentes], [Decimal("0.000"), Decimal("0.000")])
+        self.assertEqual(sum(linha.quantidade_esperada for linha in linhas), Decimal("3.000"))
 
     def test_recebimento_cancelado_com_efetivacao_nao_reduz_saldo_nem_atendimento(self):
         self.concluir(["2.000", "4.000"])
