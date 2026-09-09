@@ -65,6 +65,7 @@ from .services_requisicao import (
     resolver_responsabilidade_requisicao,
     sincronizar_requisicao_com_ordem_servico,
 )
+from .services_pedido_recebimentos import montar_resumo_recebimentos_pedido
 
 # Integração Financeiro
 FIN_OK = True
@@ -1304,6 +1305,11 @@ class PedidoCompraViewSet(BaseViewSet):
         if instance.cotacao_origem_id:
             raise ValidationError({"detail": "Pedido originado de cotação aprovada não pode ser excluído por edição comercial."})
         instance.delete()
+
+    @action(detail=True, methods=["get"], url_path="recebimentos-resumo")
+    def recebimentos_resumo(self, request, pk=None):
+        pedido = self.get_object()
+        return Response(montar_resumo_recebimentos_pedido(pedido), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
     @transaction.atomic

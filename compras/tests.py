@@ -15,7 +15,7 @@ from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoPropo
 from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
-from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from produto.models import Colecao, ConfigEan, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
 
@@ -3391,3 +3391,164 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         self.assertEqual(resp.status_code, 201, resp.data)
         resp = self.client.patch(f"/api/compras/entregas/{resp.data['id']}/", {"qtd_recebida": "10.000", "status": "RECB"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
+
+    def _criar_pedido_com_item_direto(self, quantidade):
+        pedido = PedidoCompra.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, observacoes="Resumo recebimentos")
+        item = PedidoCompraItem.objects.create(
+            pedido=pedido,
+            produto=self.prod_uso,
+            qtd=Decimal(quantidade),
+            preco_unit=Decimal("10.00"),
+            total_item=Decimal(quantidade) * Decimal("10.00"),
+        )
+        return pedido, item
+
+    def _criar_xml_recebimento(self, pedido, item, quantidade, numero="132", status_recebimento=RecebimentoMercadoriaEstoque.Status.CONCLUIDO, chave=None):
+        chave = chave or f"35{int(numero):042d}"[-44:]
+        xml = XmlFornecedorRecebido.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            chave_acesso=chave,
+            serie="1",
+            numero=numero,
+            dh_emissao=timezone.now(),
+            valor_total=Decimal("100.00"),
+            status_operacional=XmlFornecedorRecebido.StatusOperacional.RECEBIDO,
+            tipo_tratamento=XmlFornecedorRecebido.TipoTratamento.ESTOQUE,
+        )
+        recebimento = RecebimentoMercadoriaEstoque.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            xml_fornecedor=xml,
+            status=status_recebimento,
+            criado_por=self.user,
+        )
+        RecebimentoMercadoriaPedido.objects.create(recebimento=recebimento, pedido=pedido)
+        sku = ProdutoDetalhe.objects.create(produto=self.prod_revenda, idcor=self.cor, idtamanho=self.tam_p)
+        RecebimentoMercadoriaConferenciaItem.objects.create(
+            recebimento=recebimento,
+            pedido=pedido,
+            pedido_item=item,
+            produto=self.prod_revenda,
+            cor=self.cor,
+            tamanho=self.tam_p,
+            produto_detalhe=sku,
+            quantidade_esperada=Decimal(quantidade),
+            quantidade_recebida=Decimal(quantidade),
+        )
+        termo = RecebimentoMercadoriaTermo.objects.create(
+            recebimento=recebimento,
+            empresa=self.empresa,
+            encerrado_por=self.user,
+            encerrado_em=timezone.now(),
+            snapshot={},
+            hash_sha256=("a" if status_recebimento != RecebimentoMercadoriaEstoque.Status.CANCELADO else "b") * 64,
+        )
+        RecebimentoMercadoriaEfetivacaoEstoque.objects.create(
+            recebimento=recebimento,
+            termo=termo,
+            empresa=self.empresa,
+            loja=self.loja,
+            efetivado_por=self.user,
+            efetivado_em=timezone.now(),
+            quantidade_total=Decimal(quantidade),
+            quantidade_skus=1,
+            hash_termo=termo.hash_sha256,
+        )
+        return xml, recebimento
+
+    def test_recebimentos_resumo_pedido_sem_recebimento(self):
+        pedido, _ = self._criar_pedido_com_item_direto("10.000")
+
+        resp = self.client.get(f"/api/compras/pedidos/{pedido.id}/recebimentos-resumo/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(resp.data["resumo"]["quantidade_pedida_total"]), Decimal("10.000"))
+        self.assertEqual(Decimal(resp.data["resumo"]["quantidade_recebida_total"]), Decimal("0.000"))
+        self.assertEqual(Decimal(resp.data["resumo"]["saldo_total"]), Decimal("10.000"))
+        self.assertEqual(resp.data["resumo"]["situacao"], "PENDENTE")
+
+    def test_recebimentos_resumo_parcial_itens_e_cenario_homologado(self):
+        pedido, item = self._criar_pedido_com_item_direto("696.000")
+        PedidoCompraEntrega.objects.create(item=item, qtd_prevista=Decimal("696.000"), qtd_recebida=Decimal("225.000"), status="PARC")
+
+        resp = self.client.get(f"/api/compras/pedidos/{pedido.id}/recebimentos-resumo/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(resp.data["resumo"]["quantidade_pedida_total"]), Decimal("696.000"))
+        self.assertEqual(Decimal(resp.data["resumo"]["quantidade_recebida_total"]), Decimal("225.000"))
+        self.assertEqual(Decimal(resp.data["resumo"]["saldo_total"]), Decimal("471.000"))
+        self.assertEqual(resp.data["resumo"]["situacao"], "PARCIAL")
+        linha = resp.data["itens"][0]
+        self.assertEqual(Decimal(linha["quantidade_pedida"]), Decimal("696.000"))
+        self.assertEqual(Decimal(linha["quantidade_recebida"]), Decimal("225.000"))
+        self.assertEqual(Decimal(linha["saldo"]), Decimal("471.000"))
+        self.assertEqual(linha["situacao"], "PARCIAL")
+
+    def test_recebimentos_resumo_documentos_fisicos_legacy_dedup_e_cancelado(self):
+        pedido, item = self._criar_pedido_com_item_direto("50.000")
+        PedidoCompraEntrega.objects.create(item=item, qtd_prevista=Decimal("50.000"), qtd_recebida=Decimal("19.000"), status="PARC")
+        xml_132, receb_132 = self._criar_xml_recebimento(pedido, item, "19.000", numero="132", chave="35132600000000000000000000000000000000000132")
+        xml_123, _ = self._criar_xml_recebimento(pedido, item, "6.000", numero="123", chave="35132600000000000000000000000000000000000123")
+        self._criar_xml_recebimento(pedido, item, "9.000", numero="999", status_recebimento=RecebimentoMercadoriaEstoque.Status.CANCELADO, chave="35132600000000000000000000000000000000000999")
+        nota_legacy = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            pedido_compra=pedido,
+            modelo="55",
+            serie="7",
+            numero="777",
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+            valor_total=Decimal("77.00"),
+            status=NotaFiscalEntrada.Status.ABERTA,
+        )
+        nota_xml = NotaFiscalEntrada.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            pedido_compra=pedido,
+            xml_fornecedor=xml_132,
+            modelo="55",
+            serie="1",
+            numero="132",
+            chave_acesso=xml_132.chave_acesso,
+            dt_emissao=timezone.localdate(),
+            dt_entrada=timezone.localdate(),
+            valor_total=Decimal("100.00"),
+            status=NotaFiscalEntrada.Status.FECHADA,
+        )
+
+        resp = self.client.get(f"/api/compras/pedidos/{pedido.id}/recebimentos-resumo/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Decimal(resp.data["resumo"]["quantidade_recebida_total"]), Decimal("19.000"))
+        docs = resp.data["documentos"]
+        self.assertEqual(len(docs), 4)
+        doc_132 = next(doc for doc in docs if doc["numero"] == "132")
+        self.assertEqual(doc_132["recebimento_id"], receb_132.id)
+        self.assertEqual(doc_132["origem"], "NOTA_FISCAL+RECEBIMENTO_FISICO")
+        self.assertEqual(doc_132["xml_fornecedor_id"], xml_132.id)
+        self.assertEqual(doc_132["nota_entrada_id"], nota_xml.id)
+        self.assertEqual(Decimal(doc_132["quantidade_fisica"]), Decimal("19.000"))
+        self.assertTrue(doc_132["estoque_efetivado"])
+        self.assertEqual(doc_132["status_operacional"], RecebimentoMercadoriaEstoque.Status.CONCLUIDO)
+        self.assertEqual(doc_132["status_fiscal"], NotaFiscalEntrada.Status.FECHADA)
+        self.assertEqual(sum(1 for doc in docs if doc.get("xml_fornecedor_id") == xml_132.id), 1)
+        self.assertTrue(any(doc.get("xml_fornecedor_id") == xml_123.id for doc in docs))
+        self.assertTrue(any(doc.get("nota_entrada_id") == nota_legacy.id for doc in docs))
+        doc_cancelado = next(doc for doc in docs if doc["numero"] == "999")
+        self.assertTrue(doc_cancelado["recebimento_cancelado"])
+        self.assertEqual(Decimal(doc_cancelado["quantidade_fisica"]), Decimal("9.000"))
+
+    def test_recebimentos_resumo_isola_empresa(self):
+        pedido_b = PedidoCompra.objects.create(empresa=self.empresa_b, loja=self.loja_b, fornecedor=self.fornecedor_b, observacoes="Pedido B")
+        user_bloqueado = get_user_model().objects.create_user("compras-a", "compras-a@sysvar.test", "test", empresa=self.empresa, loja=self.loja)
+        self.client.force_authenticate(user_bloqueado)
+
+        resp = self.client.get(f"/api/compras/pedidos/{pedido_b.id}/recebimentos-resumo/")
+
+        self.assertEqual(resp.status_code, 404)
