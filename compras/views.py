@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import parsers, viewsets, status
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import action
@@ -6,9 +6,11 @@ from rest_framework.response import Response
 from django.db import transaction
 from django.db.models import Avg, Max, Prefetch, Q, Sum
 from django.shortcuts import get_object_or_404
+from django.http import HttpResponse
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from io import BytesIO
 from accounts.permissions import HasModuleRole
 from accounts.services.effective_access import EDIT, VIEW, EffectiveAccessService
 
@@ -66,6 +68,7 @@ from .services_requisicao import (
     sincronizar_requisicao_com_ordem_servico,
 )
 from .services_pedido_recebimentos import montar_resumo_recebimentos_pedido
+from .services_pedido_importacao import PedidoCompraImportacaoError, PedidoCompraImportacaoService
 
 # Integração Financeiro
 FIN_OK = True
@@ -1310,6 +1313,78 @@ class PedidoCompraViewSet(BaseViewSet):
     def recebimentos_resumo(self, request, pk=None):
         pedido = self.get_object()
         return Response(montar_resumo_recebimentos_pedido(pedido), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="importar-planilha-preview", parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def importar_planilha_preview(self, request, pk=None):
+        pedido = self.get_object()
+        arquivo = request.FILES.get("arquivo") or request.FILES.get("file")
+        if not arquivo:
+            return Response({"detail": "Selecione um arquivo XLSX."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            preview = PedidoCompraImportacaoService(pedido, request).preview_from_file(arquivo)
+        except PedidoCompraImportacaoError as exc:
+            return Response({"detail": str(exc), "errors": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+        http_status = status.HTTP_200_OK if preview["valid"] else status.HTTP_400_BAD_REQUEST
+        return Response(preview, status=http_status)
+
+    @action(detail=True, methods=["post"], url_path="importar-planilha-confirmar")
+    def importar_planilha_confirmar(self, request, pk=None):
+        pedido = self.get_object()
+        linhas = request.data.get("linhas") or []
+        if not linhas:
+            return Response({"detail": "Não há linhas válidas para importar."}, status=status.HTTP_400_BAD_REQUEST)
+        service = PedidoCompraImportacaoService(pedido, request)
+        resultado = service.confirm(linhas)
+        pedido_atualizado = resultado.pop("pedido")
+        _sincronizar_parcelas_planejadas(pedido_atualizado, request, motivo="importacao_planilha")
+        _audit(
+            "pedidocompra",
+            pedido_atualizado.pk,
+            {
+                "itens_importados": resultado["itens_criados"],
+                "referencias": resultado["referencias"],
+                "quantidade_total": resultado["quantidade_total"],
+                "total_importado": resultado["total_importado"],
+            },
+            request,
+            action="importar_planilha",
+        )
+        return Response({**resultado, "pedido": self.get_serializer(pedido_atualizado).data}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="modelo-importacao-revenda")
+    def modelo_importacao_revenda(self, request):
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            return Response({"detail": "Biblioteca openpyxl não instalada no backend."}, status=status.HTTP_400_BAD_REQUEST)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Itens"
+        ws.append([
+            "Codigo_Produto_Fornecedor",
+            "Produto",
+            "Grade",
+            "Cor",
+            "Pack",
+            "Nr_Packs",
+            "Preco_Unitario",
+            "Desconto",
+            "Observacoes",
+        ])
+        instrucoes = wb.create_sheet("Instrucoes")
+        instrucoes.append(["Campo", "Orientacao"])
+        instrucoes.append(["Cor", "Use o código/descrição da cor ou TODAS para expandir pelas cores reais do produto."])
+        instrucoes.append(["Pack", "Informe o nome de um pack ativo da mesma grade do produto."])
+        instrucoes.append(["Quantidade", "Não informe tamanhos nem quantidade total: o Sysvar calcula pelo Pack x Nr_Packs."])
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="modelo-pedido-compra-revenda.xlsx"'
+        return response
 
     @action(detail=True, methods=["post"], url_path="set-forma-pagamento")
     @transaction.atomic

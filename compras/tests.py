@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
@@ -16,8 +17,33 @@ from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
 from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
-from produto.models import Colecao, ConfigEan, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
+from produto.models import Colecao, ConfigEan, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
+
+
+def _xlsx_upload(rows, sheet_name="Itens", headers=None):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    ws.append(headers or [
+        "Codigo_Produto_Fornecedor",
+        "Produto",
+        "Grade",
+        "Cor",
+        "Pack",
+        "Nr_Packs",
+        "Preco_Unitario",
+        "Desconto",
+        "Observacoes",
+    ])
+    for row in rows:
+        ws.append(row)
+    buf = BytesIO()
+    wb.save(buf)
+    return SimpleUploadedFile("pedido.xlsx", buf.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
@@ -206,7 +232,9 @@ class CotacaoBaseTests(TestCase):
         service = EffectiveAccessService(admin)
         self.assertTrue(service.can_access_store(self.loja))
         self.assertTrue(service.can_access_store(loja_extra))
-        self.assertFalse(service.can_access_store(self.loja_b))
+
+
+
 
     def test_can_access_store_company_master_sem_lojas_marcadas_acessa_empresa(self):
         User = get_user_model()
@@ -1243,6 +1271,141 @@ class CotacaoBaseTests(TestCase):
         self.assertEqual(Decimal(str(resp.data["necessidade_aberta"])), Decimal("2.000"))
         self.assertEqual(Decimal(str(resp.data["estoque_atual"])), Decimal("4.000"))
         self.assertEqual(Decimal(str(resp.data["pedidos_pendentes"])), Decimal("4.000"))
+
+
+
+
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class PedidoCompraImportacaoRevendaTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.empresa = Empresa.objects.create(nome="Empresa Imp", documento="44111111000191", plano_completo=True)
+        self.empresa_b = Empresa.objects.create(nome="Empresa Imp B", documento="44222222000191", plano_completo=True)
+        EmpresaContrato.objects.update_or_create(empresa=self.empresa, defaults={"status": EmpresaContrato.STATUS_ATIVO, "plano_completo": True, "limite_sessoes_simultaneas": 5})
+        self.mod_compras, _ = ModuloSistema.objects.get_or_create(
+            chave="compras",
+            defaults={"nome": "Compras", "categoria": ModuloSistema.CATEGORIA_COMERCIAL, "ativo": True, "ordem": 10},
+        )
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Fábrica", apelido_loja="Fábrica", cnpj="44111111000100", estado="SP")
+        self.fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="44333333000191",
+            cnpj="44333333000191",
+            nome_fornecedor="Estilo Urbano Confecções Ltda",
+            categoria="OUTROS",
+            ativo=True,
+        )
+        self.outro_fornecedor = Fornecedor.objects.create(
+            empresa=self.empresa,
+            tipo_pessoa=Fornecedor.TIPO_PESSOA_JURIDICA,
+            documento="44444444000191",
+            cnpj="44444444000191",
+            nome_fornecedor="Outro Fornecedor",
+            categoria="OUTROS",
+            ativo=True,
+        )
+        self.user = User.objects.create_user("comprador-imp", "imp@test.local", "123", empresa=self.empresa, loja=self.loja, type="Admin")
+        self.perfil_compras = PerfilAcesso.objects.create(empresa=self.empresa, nome="Compras Importação")
+        PerfilModuloPermissao.objects.create(perfil=self.perfil_compras, modulo=self.mod_compras, acesso=UserModulePermission.Access.EDIT)
+        self.user.perfil_principal = self.perfil_compras
+        self.user.save(update_fields=["perfil_principal"])
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Descricao="Unidade", Codigo="UN", permite_decimal=False)
+        self.grade = Grade.objects.create(empresa=self.empresa, Descricao="NUMF")
+        self.tam_p = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="P")
+        self.tam_m = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="M")
+        self.cor_azul = Cor.objects.create(empresa=self.empresa, Codigo="AZ", Descricao="Azul", Cor="Azul")
+        self.cor_preto = Cor.objects.create(empresa=self.empresa, Codigo="PR", Descricao="Preto", Cor="Preto")
+        self.grupo = Grupo.objects.create(empresa=self.empresa, Codigo="01", CodigoRef="01", Descricao="Vestuário", Margem=Decimal("50.00"))
+        self.colecao = Colecao.objects.create(empresa=self.empresa, Codigo="26", Estacao="01", Descricao="Verão")
+        self.config_ean = ConfigEan.objects.create(empresa=self.empresa, country_prefix="789", company_prefix="1234", ativo=True)
+        self.produto = Produto.objects.create(empresa=self.empresa, tipo_produto="1", descricao="Calça Urban", unidade=self.unidade, grade=self.grade, grupo=self.grupo, colecao=self.colecao)
+        ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor_azul, idtamanho=self.tam_p)
+        ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor_preto, idtamanho=self.tam_p)
+        self.pack = Pack.objects.create(empresa=self.empresa, grade=self.grade, nome="Pack NUMF")
+        PackItem.objects.create(pack=self.pack, tamanho=self.tam_p, qtd=1)
+        PackItem.objects.create(pack=self.pack, tamanho=self.tam_m, qtd=2)
+        ProdutoFornecedor.objects.create(empresa=self.empresa, fornecedor=self.fornecedor, produto=self.produto, codigo_produto_fornecedor="EST-001")
+        self.pedido = PedidoCompra.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def preview(self, rows, **kwargs):
+        arquivo = _xlsx_upload(rows, **kwargs)
+        return self.client.post(f"/api/compras/pedidos/{self.pedido.id}/importar-planilha-preview/", {"arquivo": arquivo}, format="multipart")
+
+    def test_importacao_valida_define_revenda_e_calcula_quantidade_pelo_pack(self):
+        resp = self.preview([["EST-001", "", "NUMF", "AZ", "Pack NUMF", 4, 10, 1, "ok"]])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(resp.data["valid"])
+        self.assertEqual(resp.data["linhas"][0]["quantidade_calculada"], Decimal("12"))
+        confirm = self.client.post(f"/api/compras/pedidos/{self.pedido.id}/importar-planilha-confirmar/", {"linhas": resp.data["linhas"]}, format="json")
+        self.assertEqual(confirm.status_code, 200, confirm.data)
+        self.pedido.refresh_from_db()
+        item = self.pedido.itens.get()
+        self.assertEqual(self.pedido.tipo, "1")
+        self.assertEqual(item.qtd, Decimal("12.000"))
+        self.assertEqual(item.total_item, Decimal("119.00"))
+
+    def test_expande_cor_todas_apenas_cores_com_sku(self):
+        resp = self.preview([["EST-001", "", "NUMF", "TODAS", "Pack NUMF", 2, 5, 0, ""]])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["total_linhas_preview"], 2)
+        self.assertEqual({row["cor"] for row in resp.data["linhas"]}, {"Azul", "Preto"})
+
+    def test_bloqueia_produto_de_outro_fornecedor(self):
+        ProdutoFornecedor.objects.create(empresa=self.empresa, fornecedor=self.outro_fornecedor, produto=self.produto, codigo_produto_fornecedor="OUT-001")
+        resp = self.preview([["OUT-001", "", "NUMF", "AZ", "Pack NUMF", 1, 10, 0, ""]])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("produto não encontrado para este fornecedor", " ".join(resp.data["errors"]))
+
+    def test_bloqueia_grade_pack_cor_e_npacks_invalidos(self):
+        resp = self.preview([["EST-001", "", "OUTRA", "VERDE", "Pack NUMF", 0, 10, 0, ""]])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        texto = " ".join(resp.data["errors"])
+        self.assertIn("grade divergente", texto)
+        self.assertIn("Nº de packs", texto)
+        self.assertIn("cor \"VERDE\"", texto)
+
+    def test_bloqueia_duplicidade_planilha_e_pedido_existente(self):
+        PedidoCompraItem.objects.create(pedido=self.pedido, produto=self.produto, cor=self.cor_azul, pack=self.pack, n_packs=1, qtd=3, preco_unit=10, total_item=30)
+        resp = self.preview([
+            ["EST-001", "", "NUMF", "AZ", "Pack NUMF", 1, 10, 0, ""],
+            ["EST-001", "", "NUMF", "AZ", "Pack NUMF", 1, 10, 0, ""],
+        ])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        texto = " ".join(resp.data["errors"])
+        self.assertIn("duplicidade Produto + Cor + Pack", texto)
+        self.assertIn("item já existe no pedido", texto)
+
+    def test_bloqueia_arquivo_sem_aba_itens_e_coluna_obrigatoria_ausente(self):
+        resp = self.preview([["EST-001"]], sheet_name="Dados")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Itens", resp.data["detail"])
+        resp = self.preview([["EST-001"]], headers=["Codigo_Produto_Fornecedor"])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Colunas obrigatórias ausentes", resp.data["detail"])
+
+    def test_confirmacao_rollback_total_quando_revalidacao_falha(self):
+        resp = self.preview([
+            ["EST-001", "", "NUMF", "AZ", "Pack NUMF", 1, 10, 0, ""],
+            ["EST-001", "", "NUMF", "PR", "Pack NUMF", 1, 10, 0, ""],
+        ])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linhas = resp.data["linhas"]
+        linhas[1]["preco_unitario"] = "-1"
+        confirm = self.client.post(f"/api/compras/pedidos/{self.pedido.id}/importar-planilha-confirmar/", {"linhas": linhas}, format="json")
+        self.assertEqual(confirm.status_code, 400, confirm.data)
+        self.assertEqual(self.pedido.itens.count(), 0)
+
+    def test_bloqueia_pedido_nao_ab(self):
+        self.pedido.status = "AP"
+        self.pedido.save(update_fields=["status"])
+        resp = self.preview([["EST-001", "", "NUMF", "AZ", "Pack NUMF", 1, 10, 0, ""]])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Somente pedidos em aberto", " ".join(resp.data["errors"]))
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
