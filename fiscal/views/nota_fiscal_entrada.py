@@ -36,6 +36,7 @@ from fiscal.services.nfe_conferencia import registrar_conferencia, resolver_dive
 from fiscal.services.nfe_conciliacao import candidatos_item, conciliar_automaticamente, conciliar_manual, resumo_conciliacao
 from fiscal.services.nfe_identidade import validation_error_from_integrity_error, validar_duplicidade_nota_entrada
 from fiscal.services.nfe_xml import only_digits, parse_nfe_evento_xml, parse_nfe_xml
+from fiscal.services.recebimento_custos import atualizar_custo_medio_sku, custos_recebimento_por_ean
 from fiscal.validators import normalizar_chave_acesso_nfe
 from fiscal.serializers import (
     ConfiguracaoXmlFornecedorSerializer,
@@ -2216,25 +2217,7 @@ class NotaFiscalEntradaViewSet(BaseViewSet):
         return _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
 
     def _atualizar_custo_medio_sku(self, sku, saldo_anterior: int, quantidade: int, custo_entrada: Decimal) -> Decimal:
-        custo_entrada = _q4(custo_entrada)
-        custo_atual = _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
-        if custo_entrada <= 0:
-            return custo_atual
-
-        saldo_anterior_dec = Decimal(max(int(saldo_anterior or 0), 0))
-        quantidade_dec = Decimal(max(int(quantidade or 0), 0))
-        saldo_posterior = saldo_anterior_dec + quantidade_dec
-        if saldo_posterior <= 0:
-            custo_medio = custo_entrada
-        else:
-            custo_medio = ((saldo_anterior_dec * custo_atual) + (quantidade_dec * custo_entrada)) / saldo_posterior
-
-        sku.custo_ultima_compra = custo_entrada
-        if not Decimal(sku.custo_original or 0):
-            sku.custo_original = custo_entrada
-        sku.custo_medio = _q4(custo_medio)
-        sku.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
-        return sku.custo_medio
+        return atualizar_custo_medio_sku(sku, saldo_anterior, quantidade, custo_entrada)
 
     def _vincular_financeiro(self, nota):
         if not FIN_OK:
@@ -3167,6 +3150,7 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
         linhas = self._linhas_fisicas_termo(termo)
         if not linhas:
             return Response({"detail": "Não há quantidade física recebida para efetivar no estoque."}, status=status.HTTP_400_BAD_REQUEST)
+        custos_por_ean = custos_recebimento_por_ean(recebimento)
         skus = {}
         for linha in linhas:
             ean = linha["ean"]
@@ -3198,6 +3182,8 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
             )
             saldo_anterior = Decimal(estoque.Estoque or 0)
             saldo_posterior = saldo_anterior + linha["recebido"]
+            custo_unitario = custos_por_ean.get(linha["ean"], Decimal("0.0000"))
+            custo_medio_apos = atualizar_custo_medio_sku(sku, saldo_anterior, linha["recebido"], custo_unitario) if custo_unitario > 0 else _q4(sku.custo_medio or sku.custo_ultima_compra or sku.custo_original or 0)
             estoque.Estoque = saldo_posterior
             if not estoque.referencia:
                 estoque.referencia = sku.produto.referencia or ""
@@ -3208,6 +3194,9 @@ class RecebimentoMercadoriaEstoqueViewSet(BaseViewSet):
                 referencia=sku.produto.referencia or "",
                 tipo=EstoqueMovimentacao.TIPO_ENTRADA,
                 quantidade=linha["recebido"],
+                custo_unitario=custo_unitario,
+                custo_total=_money(linha["recebido"] * custo_unitario),
+                custo_medio_apos=custo_medio_apos,
                 saldo_anterior=saldo_anterior,
                 saldo_posterior=saldo_posterior,
                 origem=EstoqueMovimentacao.ORIGEM_RECEBIMENTO_MERCADORIA,

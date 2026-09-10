@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
@@ -14,6 +15,7 @@ from auditoria.models import AuditLog
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, Fornecedor, Loja, ModuloSistema, Nat_Lancamento
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
 from compras.services_recebimento import sincronizar_atendimento_pedido_compra
+from distribuicao.models import Distribuicao, DistribuicaoDestino, DistribuicaoItem, PerfilDistribuicao
 from fiscal.models import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaDivergenciaXml, NotaFiscalEntradaEvento, NotaFiscalEntradaItem, NotaFiscalEntradaItemXml, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.serializers.nota_fiscal_entrada import XmlFornecedorRecebidoSerializer
 from financeiro.models import FormaPagamento, MovimentacaoFinanceira, Pagar, PagarItem
@@ -1749,9 +1751,6 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
     def test_concluido_termo_fisico_efetiva_com_quantidade_do_snapshot_e_movimento_recebimento(self):
         termo = self.concluir(["1.000", "3.000"])
         estoque = Estoque.objects.create(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja, referencia=self.produto.referencia, Estoque=Decimal("5.000"), reserva=Decimal("2.000"))
-        produto_custo = self.produto.custo_medio
-        sku_custo = self.sku_p.custo_medio
-
         resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {"ean": "9999999999999", "quantidade": "99", "loja": self.loja_b.id}, format="json")
 
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -1775,10 +1774,93 @@ class RecebimentoMercadoriaEfetivacaoEstoqueTests(RecebimentoMercadoriaConferenc
         self.assertEqual({m.quantidade for m in movs}, {Decimal("1.000"), Decimal("3.000")})
         self.produto.refresh_from_db()
         self.sku_p.refresh_from_db()
-        self.assertEqual(self.produto.custo_medio, produto_custo)
-        self.assertEqual(self.sku_p.custo_medio, sku_custo)
+        self.assertEqual(self.sku_p.custo_original, Decimal("1.0000"))
+        self.assertEqual(self.sku_p.custo_ultima_compra, Decimal("1.0000"))
+        self.assertEqual(self.sku_p.custo_medio, Decimal("1.0000"))
+        self.assertEqual(self.produto.custo_medio, Decimal("1.0000"))
+        self.assertTrue(all(m.custo_unitario == Decimal("1.0000") for m in movs))
+        self.assertTrue(all(m.custo_total > 0 for m in movs))
+        self.assertTrue(all(m.custo_medio_apos == Decimal("1.0000") for m in movs))
         self.xml.refresh_from_db()
         self.assertEqual(self.xml.status_operacional, XmlFornecedorRecebido.StatusOperacional.RECEBIDO)
+
+    def test_efetivacao_usa_custo_da_nf_e_calcula_media_ponderada_por_sku(self):
+        self.sku_p.custo_original = Decimal("10.0000")
+        self.sku_p.custo_ultima_compra = Decimal("10.0000")
+        self.sku_p.custo_medio = Decimal("10.0000")
+        self.sku_p.save(update_fields=["custo_original", "custo_ultima_compra", "custo_medio"])
+        Estoque.objects.create(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja, referencia=self.produto.referencia, Estoque=Decimal("10.000"), reserva=Decimal("0.000"))
+        pedido, item = self.pedido_com_item()
+        nota = NotaFiscalEntrada.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, pedido_compra=pedido, xml_fornecedor=self.xml, numero="NF1", dt_emissao=date.today(), dt_entrada=date.today())
+        NotaFiscalEntradaItem.objects.create(nota=nota, pedido_item=item, qtd_recebida=Decimal("6.000"), preco_unit_nf=Decimal("20.0000"), total_item=Decimal("120.00"))
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "1.000"}, {"id": linhas[1].id, "quantidade_recebida": "0.000"}]},
+            format="json",
+        )
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": "ok"}, format="json")
+
+        resp = self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/efetivar-estoque/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.sku_p.refresh_from_db()
+        mov = EstoqueMovimentacao.objects.get(documento=f"RECEB-{self.recebimento.id}", CodigodeBarra=self.sku_p.ean13)
+        self.assertEqual(self.sku_p.custo_original, Decimal("10.0000"))
+        self.assertEqual(self.sku_p.custo_ultima_compra, Decimal("20.0000"))
+        self.assertEqual(self.sku_p.custo_medio, Decimal("10.9091"))
+        self.assertEqual(mov.quantidade, Decimal("1.000"))
+        self.assertEqual(mov.custo_unitario, Decimal("20.0000"))
+        self.assertEqual(mov.custo_total, Decimal("20.00"))
+        self.assertEqual(mov.custo_medio_apos, Decimal("10.9091"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"RECEB-{self.recebimento.id}").count(), 1)
+        self.assertEqual(Estoque.objects.get(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja).Estoque, Decimal("11.000"))
+
+    def test_reparacao_historica_corrige_custos_movimentos_e_distribuicao_editavel_sem_alterar_confirmada(self):
+        pedido, item = self.pedido_com_item()
+        nota = NotaFiscalEntrada.objects.create(empresa=self.empresa, loja=self.loja, fornecedor=self.fornecedor, pedido_compra=pedido, xml_fornecedor=self.xml, numero="NF2", dt_emissao=date.today(), dt_entrada=date.today())
+        NotaFiscalEntradaItem.objects.create(nota=nota, pedido_item=item, qtd_recebida=Decimal("6.000"), preco_unit_nf=Decimal("29.9000"), total_item=Decimal("179.40"))
+        self.gerar()
+        linhas = list(RecebimentoMercadoriaConferenciaItem.objects.filter(recebimento=self.recebimento).order_by("quantidade_esperada"))
+        self.client.post(
+            f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/salvar-conferencia/",
+            {"itens": [{"id": linhas[0].id, "quantidade_recebida": "2.000"}, {"id": linhas[1].id, "quantidade_recebida": "0.000"}]},
+            format="json",
+        )
+        self.client.post(f"/api/fiscal/recebimentos-mercadoria/{self.recebimento.id}/encerrar-conferencia/", {"observacao_divergencia": "ok"}, format="json")
+        termo = RecebimentoMercadoriaTermo.objects.get(recebimento=self.recebimento)
+        RecebimentoMercadoriaEfetivacaoEstoque.objects.create(recebimento=self.recebimento, termo=termo, empresa=self.empresa, loja=self.loja, efetivado_por=self.user, efetivado_em=timezone.now(), quantidade_total=Decimal("2.000"), quantidade_skus=1, hash_termo=termo.hash_sha256)
+        Estoque.objects.create(CodigodeBarra=self.sku_p.ean13, Idloja=self.loja, referencia=self.produto.referencia, Estoque=Decimal("2.000"), reserva=Decimal("0.000"))
+        mov = EstoqueMovimentacao.objects.create(Idloja=self.loja, CodigodeBarra=self.sku_p.ean13, referencia=self.produto.referencia, tipo=EstoqueMovimentacao.TIPO_ENTRADA, quantidade=Decimal("2.000"), saldo_anterior=Decimal("0.000"), saldo_posterior=Decimal("2.000"), origem=EstoqueMovimentacao.ORIGEM_RECEBIMENTO_MERCADORIA, documento=f"RECEB-{self.recebimento.id}")
+        dist = Distribuicao.objects.create(empresa=self.empresa, numero="DIST-T", unidade_origem=self.loja, tipo=PerfilDistribuicao.TIPO_MANUAL, status=Distribuicao.STATUS_CALCULADA, fator_preco=Decimal("0.2000"))
+        dist_item = DistribuicaoItem.objects.create(distribuicao=dist, produto=self.produto, sku=self.sku_p, referencia=self.produto.referencia, descricao=self.produto.descricao, ean13=self.sku_p.ean13, quantidade_selecionada=Decimal("2.000"), custo_unitario=Decimal("0.0000"), custo_total=Decimal("0.00"))
+        destino = DistribuicaoDestino.objects.create(distribuicao=dist, item=dist_item, loja_destino=self.loja_b, quantidade_sugerida=Decimal("2.000"), quantidade_ajustada=Decimal("2.000"))
+        dist_conf = Distribuicao.objects.create(empresa=self.empresa, numero="DIST-C", unidade_origem=self.loja, tipo=PerfilDistribuicao.TIPO_MANUAL, status=Distribuicao.STATUS_CONFIRMADA, fator_preco=Decimal("0.2000"))
+        dist_conf_item = DistribuicaoItem.objects.create(distribuicao=dist_conf, produto=self.produto, sku=self.sku_p, referencia=self.produto.referencia, descricao=self.produto.descricao, ean13=self.sku_p.ean13, quantidade_selecionada=Decimal("2.000"), custo_unitario=Decimal("0.0000"), custo_total=Decimal("0.00"))
+
+        call_command("reparar_custos_recebimentos_mercadoria")
+        call_command("reparar_custos_recebimentos_mercadoria")
+
+        self.sku_p.refresh_from_db()
+        mov.refresh_from_db()
+        dist_item.refresh_from_db()
+        dist.refresh_from_db()
+        destino.refresh_from_db()
+        dist_conf_item.refresh_from_db()
+        self.assertEqual(self.sku_p.custo_original, Decimal("29.9000"))
+        self.assertEqual(self.sku_p.custo_ultima_compra, Decimal("29.9000"))
+        self.assertEqual(self.sku_p.custo_medio, Decimal("29.9000"))
+        self.assertEqual(mov.custo_unitario, Decimal("29.9000"))
+        self.assertEqual(mov.custo_total, Decimal("59.80"))
+        self.assertEqual(mov.custo_medio_apos, Decimal("29.9000"))
+        self.assertEqual(dist_item.custo_unitario, Decimal("29.9000"))
+        self.assertEqual(dist_item.custo_total, Decimal("59.80"))
+        self.assertEqual(dist.valor_total_custo, Decimal("59.80"))
+        self.assertEqual(dist.valor_total_venda, Decimal("71.760000"))
+        self.assertEqual(destino.quantidade_ajustada, Decimal("2.000"))
+        self.assertEqual(dist_conf_item.custo_unitario, Decimal("0.0000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=f"RECEB-{self.recebimento.id}").count(), 1)
 
     def test_primeiro_recebimento_sem_historico_gera_quantidade_original_por_sku(self):
         self.pedido_com_item()
