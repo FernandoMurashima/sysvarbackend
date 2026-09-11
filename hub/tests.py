@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from cadastros.models import Empresa, Loja
+from financeiro.models import Caixa
 from hub.models import AtivacaoSysvarHub, SysvarHub
 
 
@@ -171,6 +172,20 @@ class SysvarHubApiTests(TestCase):
         payload.update(extras)
         return self.client.post("/api/hub/ativar/", payload, format="json", REMOTE_ADDR="10.0.0.10")
 
+    def _hub_autenticado(self, loja=None, hub_uuid="77777777-7777-4777-8777-777777777777", ativo=True, versao="1.2.3"):
+        hub = SysvarHub.objects.create(
+            loja=loja or self.loja,
+            hub_uuid=hub_uuid,
+            nome="Hub Bootstrap",
+            hostname="HOST-BOOT",
+            versao=versao,
+            ativo=ativo,
+        )
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub, token
+
     def test_usuario_autorizado_consegue_gerar_codigo_para_sua_loja(self):
         self._admin()
 
@@ -293,3 +308,136 @@ class SysvarHubApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertFalse(SysvarHub.objects.filter(loja=self.loja).exists())
+
+    def test_bootstrap_autenticado_retorna_identidade_canonica_do_hub(self):
+        hub, _token = self._hub_autenticado()
+
+        resp = self.client.get("/api/hub/bootstrap/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["bootstrap_versao"], 1)
+        self.assertIn("servidor_em", resp.data)
+        self.assertEqual(resp.data["hub"]["id"], hub.id)
+        self.assertEqual(resp.data["hub"]["hub_uuid"], str(hub.hub_uuid))
+        self.assertEqual(resp.data["hub"]["versao"], "1.2.3")
+        self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
+        self.assertEqual(resp.data["empresa"]["nome"], self.empresa.nome)
+        self.assertEqual(resp.data["loja"]["id"], self.loja.id)
+        self.assertEqual(resp.data["loja"]["nome_loja"], self.loja.nome_loja)
+        self.assertEqual(resp.data["loja"]["apelido_loja"], self.loja.apelido_loja)
+        self.assertEqual(resp.data["loja"]["cnpj"], self.loja.cnpj)
+        self.assertEqual(resp.data["loja"]["estado"], self.loja.estado)
+
+    def test_bootstrap_nao_cria_empresa_ou_loja(self):
+        empresas_antes = Empresa.objects.count()
+        lojas_antes = Loja.objects.count()
+        self._hub_autenticado()
+
+        resp = self.client.get("/api/hub/bootstrap/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(Empresa.objects.count(), empresas_antes)
+        self.assertEqual(Loja.objects.count(), lojas_antes)
+
+    def test_bootstrap_retorna_somente_caixas_ativos_da_loja_operacionais(self):
+        self._hub_autenticado()
+        caixa_b = Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="002",
+            descricao="Caixa B",
+            ativo=True,
+            saldo_inicial=100,
+            saldo_atual=150,
+            conta_contabil="1.1.1",
+        )
+        caixa_a = Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="001",
+            descricao="Caixa A",
+            ativo=True,
+        )
+        Caixa.objects.create(
+            empresa=self.outra_empresa,
+            idloja=self.outra_loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="003",
+            descricao="Caixa Outra Loja",
+            ativo=True,
+        )
+        Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="004",
+            descricao="Caixa Inativo",
+            ativo=False,
+        )
+        Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=None,
+            tipo_caixa=Caixa.TIPO_MASTER,
+            codigo="MASTER",
+            descricao="Caixa Master",
+            ativo=True,
+        )
+
+        resp = self.client.get("/api/hub/bootstrap/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(
+            resp.data["caixas"],
+            [
+                {"id": caixa_a.Idcaixa, "codigo": "001", "descricao": "Caixa A", "ativo": True},
+                {"id": caixa_b.Idcaixa, "codigo": "002", "descricao": "Caixa B", "ativo": True},
+            ],
+        )
+        self.assertNotIn("saldo_inicial", resp.data["caixas"][0])
+        self.assertNotIn("saldo_atual", resp.data["caixas"][0])
+        self.assertNotIn("conta_contabil", resp.data["caixas"][0])
+
+    def test_bootstrap_query_string_nao_altera_escopo_da_loja(self):
+        self._hub_autenticado()
+        caixa_loja = Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="001",
+            descricao="Caixa Loja Hub",
+            ativo=True,
+        )
+        Caixa.objects.create(
+            empresa=self.outra_empresa,
+            idloja=self.outra_loja,
+            tipo_caixa=Caixa.TIPO_LOJA,
+            codigo="999",
+            descricao="Caixa Outra Loja",
+            ativo=True,
+        )
+
+        resp = self.client.get(
+            f"/api/hub/bootstrap/?loja_id={self.outra_loja.id}&empresa_id={self.outra_empresa.id}"
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
+        self.assertEqual(resp.data["loja"]["id"], self.loja.id)
+        self.assertEqual([caixa["id"] for caixa in resp.data["caixas"]], [caixa_loja.Idcaixa])
+
+    def test_token_invalido_e_bootstrap_sem_autenticacao_sao_rejeitados(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+        self.assertIn(self.client.get("/api/hub/bootstrap/").status_code, (401, 403))
+
+        self.client.credentials(HTTP_AUTHORIZATION="Hub token-invalido")
+        self.assertIn(self.client.get("/api/hub/bootstrap/").status_code, (401, 403))
+
+    def test_hub_inativo_nao_acessa_bootstrap(self):
+        self._hub_autenticado(ativo=False)
+
+        resp = self.client.get("/api/hub/bootstrap/")
+
+        self.assertIn(resp.status_code, (401, 403))

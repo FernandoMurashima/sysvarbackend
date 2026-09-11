@@ -9,6 +9,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from cadastros.models import Loja
+from financeiro.models import Caixa
 from hub.authentication import HubTokenAuthentication
 from hub.models import AtivacaoSysvarHub, SysvarHub
 
@@ -168,6 +169,54 @@ class HubHeartbeatView(APIView):
                 "loja_id": hub.loja_id,
                 "empresa_id": hub.loja.empresa_id,
                 "servidor_em": timezone.now(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubBootstrapView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        caixas = (
+            Caixa.objects.filter(idloja=loja, ativo=True, tipo_caixa=Caixa.TIPO_LOJA)
+            .order_by("codigo", "Idcaixa")
+            .values("Idcaixa", "codigo", "descricao", "ativo")
+        )
+
+        return Response(
+            {
+                "bootstrap_versao": 1,
+                "servidor_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                    "versao": hub.versao,
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                    "nome": empresa.nome,
+                },
+                "loja": {
+                    "id": loja.pk,
+                    "nome_loja": loja.nome_loja,
+                    "apelido_loja": loja.apelido_loja,
+                    "cnpj": loja.cnpj,
+                    "estado": loja.estado,
+                },
+                "caixas": [
+                    {
+                        "id": caixa["Idcaixa"],
+                        "codigo": caixa["codigo"],
+                        "descricao": caixa["descricao"],
+                        "ativo": caixa["ativo"],
+                    }
+                    for caixa in caixas
+                ],
             },
             status=status.HTTP_200_OK,
         )
