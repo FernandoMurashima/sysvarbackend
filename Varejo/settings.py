@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'compras',
     'fiscal',
     'distribuicao',
+    "hub.apps.HubConfig",
 ]
 
 # -----------------------------------------------------------------------------
@@ -169,6 +170,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_THROTTLE_RATES': {
         'agente_local_ativacao': '20/min',
+        'hub_ativacao': '20/min',
     },
     'PAGE_SIZE': 25,
 }
