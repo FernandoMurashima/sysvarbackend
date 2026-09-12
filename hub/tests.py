@@ -476,9 +476,9 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.cor = Cor.objects.create(empresa=self.empresa, Descricao="AZUL", Codigo="AZ", Cor="Azul")
         self.tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="40", Descricao="40")
         self.config_ean = ConfigEan.objects.create(empresa=self.empresa, company_prefix="1234")
-        self.tabela_varejo = Tabelapreco.objects.create(
+        self.tabela_padrao = Tabelapreco.objects.create(
             empresa=self.empresa,
-            NomeTabela="VAREJO",
+            NomeTabela="Tabela Padrão",
             DataInicio=timezone.localdate(),
         )
 
@@ -531,7 +531,7 @@ class SysvarHubCatalogoApiTests(TestCase):
     def _preco(self, produto, tabela=None, preco="199.9000", promocional=None):
         return TabelaprecoProduto.objects.create(
             produto=produto,
-            tabela=tabela or self.tabela_varejo,
+            tabela=tabela or self.tabela_padrao,
             preco=Decimal(preco),
             preco_promocional=Decimal(promocional) if promocional is not None else None,
             DataInicio=timezone.localdate(),
@@ -567,8 +567,9 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.assertEqual(resp.data["loja"]["id"], self.loja.id)
         self.assertEqual(resp.data["loja"]["nome"], "Loja Catalogo")
         self.assertEqual(resp.data["loja"]["apelido"], "CAT")
-        self.assertEqual(resp.data["tabela_preco"]["codigo"], "VAREJO")
-        self.assertEqual(resp.data["tabela_preco"]["id"], self.tabela_varejo.pk)
+        self.assertEqual(resp.data["tabela_preco"]["codigo"], "PADRAO")
+        self.assertEqual(resp.data["tabela_preco"]["id"], self.tabela_padrao.pk)
+        self.assertEqual(resp.data["tabela_preco"]["nome"], "Tabela Padrão")
         self.assertEqual(resp.data["total_itens"], 1)
         item = resp.data["itens"][0]
         self.assertEqual(item["produto_id"], produto.pk)
@@ -702,13 +703,13 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.assertIsNone(itens[sku_sem_ean.pk]["ean13"])
         self.assertEqual(itens[sku_sem_ean.pk]["motivos_bloqueio"], ["SEM_ESTOQUE"])
 
-    def test_tabela_varejo_empresa_validade_promocional_e_ausencia_de_varejo(self):
+    def test_tabela_padrao_empresa_validade_promocional_e_ausencia_de_tabela_padrao(self):
         self._hub_autenticado()
         produto = self._produto(ref="26-01-03001")
         sku = self._sku(produto)
         outra_tabela = Tabelapreco.objects.create(empresa=self.empresa, NomeTabela="ATACADO", DataInicio=timezone.localdate())
         TabelaprecoProduto.objects.create(produto=produto, tabela=outra_tabela, preco=Decimal("399.9000"), DataInicio=timezone.localdate(), ativo=True)
-        tabela_outra_empresa = Tabelapreco.objects.create(empresa=self.outra_empresa, NomeTabela="VAREJO", DataInicio=timezone.localdate())
+        tabela_outra_empresa = Tabelapreco.objects.create(empresa=self.outra_empresa, NomeTabela="Tabela Padrão", DataInicio=timezone.localdate())
         TabelaprecoProduto.objects.create(produto=produto, tabela=tabela_outra_empresa, preco=Decimal("299.9000"), DataInicio=timezone.localdate(), ativo=True)
         self._preco(produto, preco="199.9000", promocional="149.9000")
         self._estoque(sku)
@@ -717,26 +718,28 @@ class SysvarHubCatalogoApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 200, resp.data)
         item = resp.data["itens"][0]
+        self.assertEqual(resp.data["tabela_preco"]["codigo"], "PADRAO")
+        self.assertEqual(resp.data["tabela_preco"]["nome"], "Tabela Padrão")
         self.assertEqual(item["preco"], Decimal("199.9000"))
         self.assertEqual(item["preco_promocional"], Decimal("149.9000"))
         self.assertEqual(item["preco_venda"], Decimal("149.9000"))
 
-        TabelaprecoProduto.objects.filter(tabela=self.tabela_varejo).delete()
-        self.tabela_varejo.delete()
-        resp_sem_varejo = self._catalogo()
+        TabelaprecoProduto.objects.filter(tabela=self.tabela_padrao).delete()
+        self.tabela_padrao.delete()
+        resp_sem_tabela_padrao = self._catalogo()
 
-        self.assertEqual(resp_sem_varejo.status_code, 200, resp_sem_varejo.data)
-        self.assertIsNone(resp_sem_varejo.data["tabela_preco"])
-        self.assertEqual(resp_sem_varejo.data["itens"][0]["motivos_bloqueio"], ["SEM_PRECO"])
+        self.assertEqual(resp_sem_tabela_padrao.status_code, 200, resp_sem_tabela_padrao.data)
+        self.assertIsNone(resp_sem_tabela_padrao.data["tabela_preco"])
+        self.assertEqual(resp_sem_tabela_padrao.data["itens"][0]["motivos_bloqueio"], ["SEM_PRECO"])
 
-    def test_multiplas_tabelas_varejo_validas_usa_mais_recente_e_deterministica(self):
+    def test_multiplas_tabelas_padrao_validas_usa_mais_recente_e_deterministica(self):
         self._hub_autenticado()
         produto = self._produto(ref="26-01-04001")
         sku = self._sku(produto)
-        antiga = self.tabela_varejo
+        antiga = self.tabela_padrao
         nova = Tabelapreco.objects.create(
             empresa=self.empresa,
-            NomeTabela="VAREJO",
+            NomeTabela="Tabela Padrão",
             DataInicio=timezone.localdate() + timedelta(days=0),
         )
         self._preco(produto, tabela=antiga, preco="100.0000")
@@ -748,6 +751,33 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["tabela_preco"]["id"], nova.pk)
         self.assertEqual(resp.data["itens"][0]["preco_venda"], Decimal("200.0000"))
+
+    def test_tabela_padrao_futura_ou_expirada_nao_e_utilizada(self):
+        self._hub_autenticado()
+        produto = self._produto(ref="26-01-04002")
+        sku = self._sku(produto)
+        futura = Tabelapreco.objects.create(
+            empresa=self.empresa,
+            NomeTabela="Tabela Padrão",
+            DataInicio=timezone.localdate() + timedelta(days=1),
+        )
+        expirada = Tabelapreco.objects.create(
+            empresa=self.empresa,
+            NomeTabela="Tabela Padrão",
+            DataInicio=timezone.localdate() - timedelta(days=10),
+            DataFim=timezone.localdate() - timedelta(days=1),
+        )
+        self._preco(produto, tabela=self.tabela_padrao, preco="120.0000")
+        self._preco(produto, tabela=futura, preco="220.0000")
+        self._preco(produto, tabela=expirada, preco="320.0000")
+        self._estoque(sku)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["tabela_preco"]["id"], self.tabela_padrao.pk)
+        self.assertEqual(resp.data["tabela_preco"]["codigo"], "PADRAO")
+        self.assertEqual(resp.data["itens"][0]["preco_venda"], Decimal("120.0000"))
 
     def test_catalogo_evitar_n_mais_um_em_cenario_controlado(self):
         self._hub_autenticado()

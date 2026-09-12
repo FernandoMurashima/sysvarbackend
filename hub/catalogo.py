@@ -6,7 +6,8 @@ from django.utils import timezone
 from produto.models import Estoque, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto
 
 CATALOGO_VERSAO = 1
-CATALOGO_TABELA_PRECO_V1 = "VAREJO"
+CATALOGO_TABELA_PRECO_CODIGO_V1 = "PADRAO"
+CATALOGO_TABELA_PRECO_NOME_V1 = "Tabela Padrão"
 MOTIVO_SEM_PRECO = "SEM_PRECO"
 MOTIVO_SEM_ESTOQUE = "SEM_ESTOQUE"
 TIPOS_PRODUTO_CATALOGO = ("1", "3")
@@ -17,7 +18,11 @@ ZERO_4 = Decimal("0.0000")
 def tabela_preco_catalogo_v1(empresa, hoje=None):
     hoje = hoje or timezone.localdate()
     return (
-        Tabelapreco.objects.filter(empresa=empresa, NomeTabela__iexact=CATALOGO_TABELA_PRECO_V1, DataInicio__lte=hoje)
+        Tabelapreco.objects.filter(
+            empresa=empresa,
+            NomeTabela__iexact=CATALOGO_TABELA_PRECO_NOME_V1,
+            DataInicio__lte=hoje,
+        )
         .filter(Q(DataFim__isnull=True) | Q(DataFim__gte=hoje))
         .order_by("-DataInicio", "-Idtabela")
         .first()
@@ -145,7 +150,7 @@ def gerar_catalogo_hub(hub):
         "empresa": {"id": empresa.pk, "nome": empresa.nome},
         "loja": {"id": loja.pk, "nome": loja.nome_loja, "apelido": loja.apelido_loja},
         "tabela_preco": (
-            {"codigo": CATALOGO_TABELA_PRECO_V1, "id": tabela.pk, "nome": tabela.NomeTabela} if tabela else None
+            {"codigo": CATALOGO_TABELA_PRECO_CODIGO_V1, "id": tabela.pk, "nome": tabela.NomeTabela} if tabela else None
         ),
         "total_itens": len(itens),
         "itens": itens,
