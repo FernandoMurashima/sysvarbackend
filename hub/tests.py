@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
@@ -9,6 +10,7 @@ from rest_framework.test import APIClient
 from cadastros.models import Empresa, Loja
 from financeiro.models import Caixa
 from hub.models import AtivacaoSysvarHub, SysvarHub
+from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
 
 class SysvarHubModelTests(TestCase):
@@ -441,3 +443,322 @@ class SysvarHubApiTests(TestCase):
         resp = self.client.get("/api/hub/bootstrap/")
 
         self.assertIn(resp.status_code, (401, 403))
+
+
+class SysvarHubCatalogoApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Catalogo Hub", documento="51222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Empresa Catalogo Hub", documento="61222333000181")
+        self.loja = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja Catalogo",
+            apelido_loja="CAT",
+            cnpj="51222333000181",
+            estado="SP",
+        )
+        self.outra_loja_mesma_empresa = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Outra Loja Mesma Empresa",
+            apelido_loja="OLM",
+            cnpj="51222333000182",
+            estado="SP",
+        )
+        self.loja_outra_empresa = Loja.objects.create(
+            empresa=self.outra_empresa,
+            nome_loja="Loja Outra Empresa",
+            apelido_loja="OE",
+            cnpj="61222333000181",
+            estado="SP",
+        )
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Codigo="UN", Descricao="UNIDADE")
+        self.grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade")
+        self.cor = Cor.objects.create(empresa=self.empresa, Descricao="AZUL", Codigo="AZ", Cor="Azul")
+        self.tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="40", Descricao="40")
+        self.config_ean = ConfigEan.objects.create(empresa=self.empresa, company_prefix="1234")
+        self.tabela_varejo = Tabelapreco.objects.create(
+            empresa=self.empresa,
+            NomeTabela="VAREJO",
+            DataInicio=timezone.localdate(),
+        )
+
+    def _hub_autenticado(self, loja=None, ativo=True):
+        hub = SysvarHub.objects.create(
+            loja=loja or self.loja,
+            hub_uuid="88888888-8888-4888-8888-888888888888" if loja != self.outra_loja_mesma_empresa else "99999999-9999-4999-8999-999999999999",
+            ativo=ativo,
+        )
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _produto(self, descricao="Produto Catalogo", tipo="1", empresa=None, ativo=True, bloqueado=False, ref="26-01-01001"):
+        return Produto.objects.create(
+            empresa=empresa or self.empresa,
+            tipo_produto=tipo,
+            referencia=ref,
+            descricao=descricao,
+            descricao_reduzida=descricao[:60],
+            unidade=self.unidade,
+            ativo=ativo,
+            bloqueado_venda=bloqueado,
+            ncm="6204.62.00",
+            origem_mercadoria=0,
+            cfop_venda_dentro="5102",
+            cfop_venda_fora="6102",
+            csosn_ou_cst_icms="102",
+            aliquota_icms=Decimal("12.00"),
+            cst_pis="01",
+            aliq_pis=Decimal("1.65"),
+            cst_cofins="01",
+            aliq_cofins=Decimal("7.60"),
+        )
+
+    def _sku(self, produto, ativo=True, bloqueado=False, ean=None):
+        sku = ProdutoDetalhe.objects.create(
+            produto=produto,
+            idcor=self.cor,
+            idtamanho=self.tamanho,
+            ativo=ativo,
+            bloqueado_venda=bloqueado,
+        )
+        if ean is not None:
+            ProdutoDetalhe.objects.filter(pk=sku.pk).update(ean13=ean)
+            sku.refresh_from_db()
+        return sku
+
+    def _preco(self, produto, tabela=None, preco="199.9000", promocional=None):
+        return TabelaprecoProduto.objects.create(
+            produto=produto,
+            tabela=tabela or self.tabela_varejo,
+            preco=Decimal(preco),
+            preco_promocional=Decimal(promocional) if promocional is not None else None,
+            DataInicio=timezone.localdate(),
+            ativo=True,
+        )
+
+    def _estoque(self, sku, loja=None, estoque="5.000", reserva="1.000"):
+        return Estoque.objects.create(
+            CodigodeBarra=sku.ean13,
+            referencia=sku.produto.referencia or "",
+            Idloja=loja or self.loja,
+            Estoque=Decimal(estoque),
+            reserva=Decimal(reserva),
+        )
+
+    def _catalogo(self, query=""):
+        return self.client.get(f"/api/hub/catalogo/{query}")
+
+    def test_catalogo_autenticado_retorna_contrato_e_item_vendavel(self):
+        hub = self._hub_autenticado()
+        produto = self._produto()
+        sku = self._sku(produto)
+        self._preco(produto)
+        self._estoque(sku)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["catalogo_versao"], 1)
+        self.assertIn("gerado_em", resp.data)
+        self.assertEqual(resp.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
+        self.assertEqual(resp.data["loja"]["id"], self.loja.id)
+        self.assertEqual(resp.data["loja"]["nome"], "Loja Catalogo")
+        self.assertEqual(resp.data["loja"]["apelido"], "CAT")
+        self.assertEqual(resp.data["tabela_preco"]["codigo"], "VAREJO")
+        self.assertEqual(resp.data["tabela_preco"]["id"], self.tabela_varejo.pk)
+        self.assertEqual(resp.data["total_itens"], 1)
+        item = resp.data["itens"][0]
+        self.assertEqual(item["produto_id"], produto.pk)
+        self.assertEqual(item["sku_id"], sku.pk)
+        self.assertEqual(item["tipo_produto"], "1")
+        self.assertEqual(item["ean13"], sku.ean13)
+        self.assertEqual(item["codigo_item_ref"], sku.codigo_item_ref)
+        self.assertEqual(item["cor"], {"id": self.cor.pk, "descricao": "AZUL"})
+        self.assertEqual(item["tamanho"], {"id": self.tamanho.pk, "descricao": "40"})
+        self.assertEqual(item["unidade"], {"id": self.unidade.pk, "codigo": "UN", "descricao": "UNIDADE"})
+        self.assertEqual(item["preco"], Decimal("199.9000"))
+        self.assertIsNone(item["preco_promocional"])
+        self.assertEqual(item["preco_venda"], Decimal("199.9000"))
+        self.assertEqual(item["estoque_fisico"], Decimal("5.000"))
+        self.assertEqual(item["reserva"], Decimal("1.000"))
+        self.assertEqual(item["estoque_disponivel"], Decimal("4.000"))
+        self.assertTrue(item["vendavel"])
+        self.assertEqual(item["motivos_bloqueio"], [])
+        self.assertEqual(item["fiscal"]["ncm"], "6204.62.00")
+        self.assertEqual(item["fiscal"]["origem_mercadoria"], 0)
+        self.assertEqual(item["fiscal"]["cfop_venda_dentro"], "5102")
+        self.assertEqual(item["fiscal"]["cfop_venda_fora"], "6102")
+        self.assertEqual(item["fiscal"]["csosn_ou_cst_icms"], "102")
+        self.assertEqual(item["fiscal"]["aliquota_icms"], Decimal("12.00"))
+        self.assertEqual(item["fiscal"]["cst_pis"], "01")
+        self.assertEqual(item["fiscal"]["aliq_pis"], Decimal("1.65"))
+        self.assertEqual(item["fiscal"]["cst_cofins"], "01")
+        self.assertEqual(item["fiscal"]["aliq_cofins"], Decimal("7.60"))
+        self.assertNotIn("imagem", item)
+        self.assertNotIn("imagem_url", item)
+
+    def test_catalogo_sem_authorization_token_invalido_e_hub_inativo_sao_rejeitados(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+        self.assertIn(self._catalogo().status_code, (401, 403))
+        self.client.credentials(HTTP_AUTHORIZATION="Hub token-invalido")
+        self.assertIn(self._catalogo().status_code, (401, 403))
+        self._hub_autenticado(ativo=False)
+        self.assertIn(self._catalogo().status_code, (401, 403))
+
+    def test_escopo_vem_do_hub_e_query_string_nao_altera_loja_ou_empresa(self):
+        self._hub_autenticado()
+        produto = self._produto()
+        sku = self._sku(produto)
+        self._preco(produto)
+        self._estoque(sku, self.loja, "2.000", "0.000")
+        self._estoque(sku, self.outra_loja_mesma_empresa, "100.000", "0.000")
+
+        resp = self._catalogo(f"?loja_id={self.outra_loja_mesma_empresa.id}&empresa_id={self.outra_empresa.id}")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
+        self.assertEqual(resp.data["loja"]["id"], self.loja.id)
+        self.assertEqual(resp.data["itens"][0]["estoque_fisico"], Decimal("2.000"))
+        self.assertEqual(resp.data["itens"][0]["estoque_disponivel"], Decimal("2.000"))
+
+    def test_filtros_operacionais_e_escopo_de_empresa(self):
+        self._hub_autenticado()
+        incluidos = []
+        for tipo, ref in (("1", "26-01-01011"), ("3", "26-01-01013")):
+            produto = self._produto(f"Tipo {tipo}", tipo=tipo, ref=ref)
+            sku = self._sku(produto)
+            self._preco(produto)
+            self._estoque(sku)
+            incluidos.append(sku.pk)
+
+        casos_excluidos = [
+            self._produto("Tipo nao vendavel", tipo="2", ref="USO-000001"),
+            self._produto("Produto inativo", ativo=False, ref="26-01-01014"),
+            self._produto("Produto bloqueado", bloqueado=True, ref="26-01-01015"),
+        ]
+        for produto in casos_excluidos:
+            self._sku(produto)
+        produto_sku_inativo = self._produto("SKU inativo", ref="26-01-01016")
+        self._sku(produto_sku_inativo, ativo=False)
+        produto_sku_bloqueado = self._produto("SKU bloqueado", ref="26-01-01017")
+        self._sku(produto_sku_bloqueado, bloqueado=True)
+
+        unidade_outra = Unidade.objects.create(empresa=self.outra_empresa, Codigo="UN", Descricao="UNIDADE")
+        produto_outra_empresa = Produto.objects.create(
+            empresa=self.outra_empresa,
+            tipo_produto="1",
+            referencia="26-01-01999",
+            descricao="Outra Empresa",
+            unidade=unidade_outra,
+            ativo=True,
+        )
+        cor_outra = Cor.objects.create(empresa=self.outra_empresa, Descricao="PRETO", Codigo="PR", Cor="Preto")
+        grade_outra = Grade.objects.create(empresa=self.outra_empresa, Descricao="Grade Outra")
+        tamanho_outra = Tamanho.objects.create(empresa=self.outra_empresa, idgrade=grade_outra, Tamanho="P", Descricao="P")
+        ConfigEan.objects.create(empresa=self.outra_empresa, company_prefix="5678")
+        ProdutoDetalhe.objects.create(produto=produto_outra_empresa, idcor=cor_outra, idtamanho=tamanho_outra)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual([item["sku_id"] for item in resp.data["itens"]], incluidos)
+        self.assertEqual(resp.data["total_itens"], 2)
+
+    def test_sem_preco_sem_estoque_ausencia_de_estoque_e_sku_sem_ean_nao_quebram_snapshot(self):
+        self._hub_autenticado()
+        produto_sem_preco = self._produto("Sem Preco", ref="26-01-02001")
+        sku_sem_preco = self._sku(produto_sem_preco)
+        self._estoque(sku_sem_preco)
+        produto_sem_estoque = self._produto("Sem Estoque", ref="26-01-02002")
+        sku_sem_estoque = self._sku(produto_sem_estoque)
+        self._preco(produto_sem_estoque)
+        self._estoque(sku_sem_estoque, estoque="0.000", reserva="0.000")
+        produto_sem_registro = self._produto("Sem Registro Estoque", ref="26-01-02003")
+        sku_sem_registro = self._sku(produto_sem_registro)
+        self._preco(produto_sem_registro)
+        produto_sem_ean = self._produto("Sem EAN", ref="26-01-02004")
+        sku_sem_ean = self._sku(produto_sem_ean, ean="")
+        self._preco(produto_sem_ean)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        itens = {item["sku_id"]: item for item in resp.data["itens"]}
+        self.assertFalse(itens[sku_sem_preco.pk]["vendavel"])
+        self.assertEqual(itens[sku_sem_preco.pk]["motivos_bloqueio"], ["SEM_PRECO"])
+        self.assertIsNone(itens[sku_sem_preco.pk]["preco_venda"])
+        self.assertFalse(itens[sku_sem_estoque.pk]["vendavel"])
+        self.assertEqual(itens[sku_sem_estoque.pk]["motivos_bloqueio"], ["SEM_ESTOQUE"])
+        self.assertFalse(itens[sku_sem_registro.pk]["vendavel"])
+        self.assertEqual(itens[sku_sem_registro.pk]["estoque_fisico"], Decimal("0.000"))
+        self.assertEqual(itens[sku_sem_registro.pk]["reserva"], Decimal("0.000"))
+        self.assertEqual(itens[sku_sem_registro.pk]["estoque_disponivel"], Decimal("0.000"))
+        self.assertEqual(itens[sku_sem_registro.pk]["motivos_bloqueio"], ["SEM_ESTOQUE"])
+        self.assertEqual(itens[sku_sem_ean.pk]["sku_id"], sku_sem_ean.pk)
+        self.assertIsNone(itens[sku_sem_ean.pk]["ean13"])
+        self.assertEqual(itens[sku_sem_ean.pk]["motivos_bloqueio"], ["SEM_ESTOQUE"])
+
+    def test_tabela_varejo_empresa_validade_promocional_e_ausencia_de_varejo(self):
+        self._hub_autenticado()
+        produto = self._produto(ref="26-01-03001")
+        sku = self._sku(produto)
+        outra_tabela = Tabelapreco.objects.create(empresa=self.empresa, NomeTabela="ATACADO", DataInicio=timezone.localdate())
+        TabelaprecoProduto.objects.create(produto=produto, tabela=outra_tabela, preco=Decimal("399.9000"), DataInicio=timezone.localdate(), ativo=True)
+        tabela_outra_empresa = Tabelapreco.objects.create(empresa=self.outra_empresa, NomeTabela="VAREJO", DataInicio=timezone.localdate())
+        TabelaprecoProduto.objects.create(produto=produto, tabela=tabela_outra_empresa, preco=Decimal("299.9000"), DataInicio=timezone.localdate(), ativo=True)
+        self._preco(produto, preco="199.9000", promocional="149.9000")
+        self._estoque(sku)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        item = resp.data["itens"][0]
+        self.assertEqual(item["preco"], Decimal("199.9000"))
+        self.assertEqual(item["preco_promocional"], Decimal("149.9000"))
+        self.assertEqual(item["preco_venda"], Decimal("149.9000"))
+
+        TabelaprecoProduto.objects.filter(tabela=self.tabela_varejo).delete()
+        self.tabela_varejo.delete()
+        resp_sem_varejo = self._catalogo()
+
+        self.assertEqual(resp_sem_varejo.status_code, 200, resp_sem_varejo.data)
+        self.assertIsNone(resp_sem_varejo.data["tabela_preco"])
+        self.assertEqual(resp_sem_varejo.data["itens"][0]["motivos_bloqueio"], ["SEM_PRECO"])
+
+    def test_multiplas_tabelas_varejo_validas_usa_mais_recente_e_deterministica(self):
+        self._hub_autenticado()
+        produto = self._produto(ref="26-01-04001")
+        sku = self._sku(produto)
+        antiga = self.tabela_varejo
+        nova = Tabelapreco.objects.create(
+            empresa=self.empresa,
+            NomeTabela="VAREJO",
+            DataInicio=timezone.localdate() + timedelta(days=0),
+        )
+        self._preco(produto, tabela=antiga, preco="100.0000")
+        self._preco(produto, tabela=nova, preco="200.0000")
+        self._estoque(sku)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["tabela_preco"]["id"], nova.pk)
+        self.assertEqual(resp.data["itens"][0]["preco_venda"], Decimal("200.0000"))
+
+    def test_catalogo_evitar_n_mais_um_em_cenario_controlado(self):
+        self._hub_autenticado()
+        for idx in range(3):
+            produto = self._produto(f"Produto {idx}", ref=f"26-01-05{idx:03d}")
+            sku = self._sku(produto)
+            self._preco(produto)
+            self._estoque(sku)
+
+        with self.assertNumQueries(5):
+            resp = self._catalogo()
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["total_itens"], 3)

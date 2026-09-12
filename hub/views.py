@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from cadastros.models import Loja
 from financeiro.models import Caixa
 from hub.authentication import HubTokenAuthentication
+from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
@@ -220,3 +221,11 @@ class HubBootstrapView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class HubCatalogoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(gerar_catalogo_hub(request.sysvar_hub), status=status.HTTP_200_OK)
