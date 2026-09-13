@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from accounts.models import CredencialPdvUsuario
 from cadastros.models import Loja
 from financeiro.models import Caixa
 from hub.authentication import HubTokenAuthentication
@@ -229,3 +230,60 @@ class HubCatalogoView(APIView):
 
     def get(self, request):
         return Response(gerar_catalogo_hub(request.sysvar_hub), status=status.HTTP_200_OK)
+
+
+class HubOperadoresView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        credenciais = (
+            CredencialPdvUsuario.objects
+            .filter(
+                habilitado=True,
+                usuario__is_active=True,
+                usuario__empresa=empresa,
+            )
+            .filter(
+                models.Q(usuario__loja=loja) | models.Q(usuario__lojas=loja)
+            )
+            .select_related("usuario", "usuario__perfil_principal")
+            .order_by("usuario_id")
+            .distinct()
+        )
+
+        operadores = []
+        for credencial in credenciais:
+            usuario = credencial.usuario
+            perfil = usuario.perfil_principal
+            operadores.append({
+                "usuario_id": usuario.pk,
+                "codigo": usuario.username,
+                "nome": (usuario.get_full_name() or usuario.username).strip(),
+                "tipo": usuario.type,
+                "perfil": {"id": perfil.pk, "nome": perfil.nome} if perfil else None,
+                "credencial_hash": credencial.senha_hash,
+                "ativo": usuario.is_active,
+            })
+
+        return Response(
+            {
+                "operadores_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                },
+                "loja": {
+                    "id": loja.pk,
+                },
+                "operadores": operadores,
+            },
+            status=status.HTTP_200_OK,
+        )

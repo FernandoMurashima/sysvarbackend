@@ -4,14 +4,16 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
 from cadastros.models import EmpresaContrato, ModuloSistema
-from accounts.models import PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, SessaoUsuario, SessionToken, UserModulePermission
+from accounts.models import CredencialPdvUsuario, PerfilAcesso, PerfilModuloPermissao, PerfilProcessPermission, SessaoUsuario, SessionToken, UserModulePermission
 from accounts.services.effective_access import EffectiveAccessService
 from accounts.services.sessions import ConcurrentSessionService, token_hash
 from auditoria.models import AuditAction, AuditLog
@@ -293,6 +295,80 @@ class MultiEmpresaIsolationTests(TestCase):
                 self._assert_isolado(url, proprio, outra_empresa)
 
 # Create your tests here.
+
+
+class CredencialPdvUsuarioApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Cred PDV", documento="71111111000191", plano_completo=True)
+        self.outra_empresa = Empresa.objects.create(nome="Outra Cred PDV", documento="72222222000191", plano_completo=True)
+        self.admin = get_user_model().objects.create_user(username="admin_cred_pdv", password="12345678", type="Admin", empresa=self.empresa)
+        self.empresa.contrato.usuario_master = self.admin
+        self.empresa.contrato.save(update_fields=["usuario_master", "updated_at"])
+        self.usuario = get_user_model().objects.create_user(username="caixa_cred_pdv", password="12345678", type="Caixa", empresa=self.empresa)
+        self.usuario_outra_empresa = get_user_model().objects.create_user(username="caixa_outra_cred_pdv", password="12345678", type="Caixa", empresa=self.outra_empresa)
+        self.client.force_authenticate(self.admin)
+
+    def test_credencial_e_um_para_um_com_usuario(self):
+        CredencialPdvUsuario.objects.create(usuario=self.usuario, senha_hash="hash")
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CredencialPdvUsuario.objects.create(usuario=self.usuario, senha_hash="outro-hash")
+
+    def test_put_cria_hash_valido_sem_expor_segredo_e_get_nao_devolve_hash(self):
+        response = self.client.put(
+            f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/",
+            {"senha": "SenhaPdv123", "confirmacao": "SenhaPdv123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn("senha", response.data)
+        self.assertNotIn("senha_hash", response.data)
+        credencial = self.usuario.credencial_pdv
+        self.assertNotEqual(credencial.senha_hash, "SenhaPdv123")
+        self.assertTrue(check_password("SenhaPdv123", credencial.senha_hash))
+        self.assertFalse(check_password("senha-errada", credencial.senha_hash))
+
+        metadata = self.client.get(f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/")
+        self.assertEqual(metadata.status_code, 200, metadata.data)
+        self.assertTrue(metadata.data["configurada"])
+        self.assertTrue(metadata.data["habilitada"])
+        self.assertNotIn("senha_hash", metadata.data)
+
+    def test_senha_curta_e_confirmacao_divergente_sao_rejeitadas(self):
+        curta = self.client.put(
+            f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/",
+            {"senha": "1234567", "confirmacao": "1234567"},
+            format="json",
+        )
+        divergente = self.client.put(
+            f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/",
+            {"senha": "SenhaPdv123", "confirmacao": "OutraSenha123"},
+            format="json",
+        )
+
+        self.assertEqual(curta.status_code, 400)
+        self.assertEqual(divergente.status_code, 400)
+        self.assertFalse(CredencialPdvUsuario.objects.filter(usuario=self.usuario).exists())
+
+    def test_delete_remove_credencial(self):
+        CredencialPdvUsuario.objects.create(usuario=self.usuario, senha_hash="hash")
+
+        response = self.client.delete(f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CredencialPdvUsuario.objects.filter(usuario=self.usuario).exists())
+
+    def test_usuario_de_outra_empresa_nao_pode_ser_alterado(self):
+        response = self.client.put(
+            f"/api/accounts/users/{self.usuario_outra_empresa.pk}/credencial-pdv/",
+            {"senha": "SenhaPdv123", "confirmacao": "SenhaPdv123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(CredencialPdvUsuario.objects.filter(usuario=self.usuario_outra_empresa).exists())
 
 
 class SaaSAccessControlTests(TestCase):

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.http import JsonResponse
 from django.db.models import Count, Q
@@ -27,9 +28,12 @@ from .serializers import (
     UserSerializer,
 )
 from cadastros.models import Empresa, EmpresaContrato, EmpresaModulo, ModuloSistema
-from .models import PerfilAcesso, SessaoUsuario
+from .models import CredencialPdvUsuario, PerfilAcesso, SessaoUsuario
 
 User = get_user_model()
+
+SENHA_PDV_MIN_LENGTH = 8
+SENHA_PDV_MAX_LENGTH = 64
 
 
 
@@ -209,6 +213,66 @@ class UserViewSet(viewsets.ModelViewSet):
                 status_code=200,
             )
         return Response({"detail": "Senha redefinida.", "sessoes_encerradas": len(sessoes)})
+
+    @action(detail=True, methods=["get", "put", "delete"], permission_classes=[CanManageCompanyUsers], url_path="credencial-pdv")
+    def credencial_pdv(self, request, pk=None):
+        user = self.get_object()
+
+        if request.method == "GET":
+            credencial = getattr(user, "credencial_pdv", None)
+            return Response({
+                "configurada": bool(credencial),
+                "habilitada": bool(credencial and credencial.habilitado),
+                "atualizado_em": credencial.atualizado_em if credencial else None,
+            })
+
+        if request.method == "DELETE":
+            with transaction.atomic():
+                user = self.get_queryset().select_for_update().get(pk=pk)
+                self.check_object_permissions(request, user)
+                removidas, _detalhes = CredencialPdvUsuario.objects.filter(usuario=user).delete()
+                AuditService.required_success(
+                    AuditAction.USER_UPDATED,
+                    category=AuditCategory.USER_MANAGEMENT,
+                    request=request,
+                    user=request.user,
+                    instance=user,
+                    metadata={"credencial_pdv": "removida", "credencial_pdv_removida": bool(removidas)},
+                    status_code=200,
+                )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        senha = request.data.get("senha") or ""
+        confirmacao = request.data.get("confirmacao") or ""
+        if senha != confirmacao:
+            raise ValidationError({"confirmacao": "Confirmação da senha PDV não confere."})
+        if len(senha) < SENHA_PDV_MIN_LENGTH:
+            raise ValidationError({"senha": f"Senha PDV deve ter pelo menos {SENHA_PDV_MIN_LENGTH} caracteres."})
+        if len(senha) > SENHA_PDV_MAX_LENGTH:
+            raise ValidationError({"senha": f"Senha PDV deve ter no máximo {SENHA_PDV_MAX_LENGTH} caracteres."})
+
+        with transaction.atomic():
+            user = self.get_queryset().select_for_update().get(pk=pk)
+            self.check_object_permissions(request, user)
+            credencial, criada = CredencialPdvUsuario.objects.update_or_create(
+                usuario=user,
+                defaults={"senha_hash": make_password(senha), "habilitado": True},
+            )
+            AuditService.required_success(
+                AuditAction.USER_UPDATED,
+                category=AuditCategory.USER_MANAGEMENT,
+                request=request,
+                user=request.user,
+                instance=user,
+                metadata={"credencial_pdv": "criada" if criada else "redefinida"},
+                status_code=200,
+            )
+
+        return Response({
+            "configurada": True,
+            "habilitada": credencial.habilitado,
+            "atualizado_em": credencial.atualizado_em,
+        })
 
     @action(detail=True, methods=["post"], permission_classes=[CanManageCompanyUsers], url_path="ativar")
     def ativar(self, request, pk=None):

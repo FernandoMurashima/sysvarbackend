@@ -2,11 +2,13 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Empresa, Loja
 from financeiro.models import Caixa
 from hub.models import AtivacaoSysvarHub, SysvarHub
@@ -792,3 +794,108 @@ class SysvarHubCatalogoApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["total_itens"], 3)
+
+
+class SysvarHubOperadoresApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Operadores Hub", documento="81222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Operadores Hub", documento="91222333000181")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Operadores", apelido_loja="OP", cnpj="81222333000181", estado="SP")
+        self.outra_loja_mesma_empresa = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Operadores", apelido_loja="OOP", cnpj="81222333000182", estado="SP")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Operadores", apelido_loja="OOE", cnpj="91222333000181", estado="SP")
+        self.perfil, _created = PerfilAcesso.objects.get_or_create(empresa=self.empresa, nome="Operador Hub PDV")
+
+    def _hub_autenticado(self, loja=None, hub_uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"):
+        hub = SysvarHub.objects.create(loja=loja or self.loja, hub_uuid=hub_uuid, ativo=True)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _usuario(self, username, empresa=None, loja=None, lojas=None, ativo=True, perfil=True, first_name="", last_name=""):
+        user = get_user_model().objects.create_user(
+            username=username,
+            password="12345678",
+            type="Caixa",
+            empresa=empresa or self.empresa,
+            loja=loja,
+            is_active=ativo,
+            perfil_principal=self.perfil if perfil else None,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        if lojas:
+            user.lojas.set(lojas)
+        if not perfil:
+            get_user_model().objects.filter(pk=user.pk).update(perfil_principal=None)
+            user.refresh_from_db()
+        return user
+
+    def _credencial(self, user, senha="SenhaPdv123", habilitado=True):
+        return CredencialPdvUsuario.objects.create(usuario=user, senha_hash=make_password(senha), habilitado=habilitado)
+
+    def test_operadores_exige_autenticacao_hub(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+
+        response = self.client.get("/api/hub/operadores/")
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_snapshot_retorna_apenas_operadores_elegiveis_da_loja_do_hub(self):
+        hub = self._hub_autenticado()
+        por_loja = self._usuario("caixa_loja", loja=self.loja, first_name="Caixa", last_name="Loja")
+        por_lojas = self._usuario("caixa_lojas", lojas=[self.loja], perfil=False)
+        sem_nome = self._usuario("caixa_sem_nome", loja=self.loja)
+        sem_credencial = self._usuario("sem_credencial", loja=self.loja)
+        cred_removida = self._usuario("cred_removida", loja=self.loja)
+        inativo = self._usuario("inativo", loja=self.loja, ativo=False)
+        outra_empresa = self._usuario("outra_empresa", empresa=self.outra_empresa, loja=self.loja_outra_empresa)
+        sem_acesso_loja = self._usuario("sem_acesso_loja", loja=self.outra_loja_mesma_empresa)
+        for user in [por_loja, por_lojas, sem_nome, cred_removida, inativo, outra_empresa, sem_acesso_loja]:
+            self._credencial(user)
+        cred_removida.credencial_pdv.delete()
+
+        response = self.client.get(f"/api/hub/operadores/?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["operadores_versao"], 1)
+        self.assertIn("gerado_em", response.data)
+        self.assertEqual(response.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja.pk})
+        operadores = {item["codigo"]: item for item in response.data["operadores"]}
+        self.assertEqual(set(operadores), {"caixa_loja", "caixa_lojas", "caixa_sem_nome"})
+        self.assertEqual(operadores["caixa_loja"]["nome"], "Caixa Loja")
+        self.assertEqual(operadores["caixa_sem_nome"]["nome"], "caixa_sem_nome")
+        self.assertEqual(operadores["caixa_loja"]["perfil"], {"id": self.perfil.pk, "nome": "Operador Hub PDV"})
+        self.assertIsNone(operadores["caixa_lojas"]["perfil"])
+        self.assertTrue(operadores["caixa_loja"]["ativo"])
+        self.assertNotIn("senha", operadores["caixa_loja"])
+        self.assertIn("credencial_hash", operadores["caixa_loja"])
+        self.assertTrue(check_password("SenhaPdv123", operadores["caixa_loja"]["credencial_hash"]))
+        self.assertFalse(check_password("senha-errada", operadores["caixa_loja"]["credencial_hash"]))
+        self.assertFalse(CredencialPdvUsuario.objects.filter(usuario=sem_credencial).exists())
+
+    def test_credencial_desabilitada_nao_aparece(self):
+        self._hub_autenticado()
+        user = self._usuario("cred_desabilitada", loja=self.loja)
+        self._credencial(user, habilitado=False)
+
+        response = self.client.get("/api/hub/operadores/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["operadores"], [])
+
+    def test_operadores_evita_n_mais_um_em_cenario_controlado(self):
+        self._hub_autenticado()
+        for idx in range(3):
+            user = self._usuario(f"caixa_query_{idx}", loja=self.loja)
+            self._credencial(user)
+
+        with self.assertNumQueries(2):
+            response = self.client.get("/api/hub/operadores/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["operadores"]), 3)

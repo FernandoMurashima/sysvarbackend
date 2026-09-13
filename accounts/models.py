@@ -46,6 +46,23 @@ class User(AbstractUser):
             raise ValidationError({"perfil_principal": "Perfil principal deve pertencer à empresa do usuário."})
 
 
+class CredencialPdvUsuario(models.Model):
+    usuario = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="credencial_pdv")
+    senha_hash = models.CharField(max_length=128)
+    habilitado = models.BooleanField(default=True, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["usuario_id"]
+        indexes = [
+            models.Index(fields=["habilitado", "usuario"], name="ix_cred_pdv_hab_user"),
+        ]
+
+    def __str__(self):
+        return f"Credencial PDV usuário {self.usuario_id}"
+
+
 class UserModulePermission(models.Model):
     class Module(models.TextChoices):
         OPERACIONAL = "operacional", "Operacional"
