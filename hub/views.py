@@ -10,7 +10,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
-from cadastros.models import Loja
+from cadastros.models import Cliente, Loja
 from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -309,6 +309,71 @@ class HubFormasPagamentoView(APIView):
                     "id": loja.pk,
                 },
                 "formas_pagamento": formas_pagamento,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubClientesView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not hasattr(request, "sysvar_hub"):
+            raise PermissionDenied("Autenticação Hub obrigatória.")
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        clientes = (
+            Cliente.objects
+            .filter(empresa=empresa)
+            .order_by("nome_cliente", "id")
+            .values(
+                "id",
+                "tipo_pessoa",
+                "documento",
+                "cliente_padrao",
+                "nome_cliente",
+                "apelido",
+                "endereco",
+                "numero",
+                "complemento",
+                "cep",
+                "bairro",
+                "cidade",
+                "estado",
+                "telefone1",
+                "telefone2",
+                "email",
+                "categoria",
+                "bloqueio",
+                "motivo_bloqueio",
+                "aniversario",
+                "mala_direta",
+                "aceita_email",
+                "aceita_whatsapp",
+                "aceita_sms",
+                "consentimento_em",
+                "origem_consentimento",
+                "ativo",
+            )
+        )
+
+        return Response(
+            {
+                "clientes_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                },
+                "loja": {
+                    "id": loja.pk,
+                },
+                "clientes": list(clientes),
             },
             status=status.HTTP_200_OK,
         )

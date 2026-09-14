@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
-from cadastros.models import Empresa, Loja
+from cadastros.models import Cliente, Empresa, Loja
 from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento
 from hub.models import AtivacaoSysvarHub, SysvarHub
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
@@ -899,6 +899,175 @@ class SysvarHubOperadoresApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["operadores"]), 3)
+
+
+class SysvarHubClientesApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Clientes Hub", documento="81222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Clientes Hub", documento="81222333000182")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Clientes", apelido_loja="CL", cnpj="81222333000181", estado="SP")
+        self.outra_loja_mesma_empresa = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Clientes", apelido_loja="OCL", cnpj="81222333000183", estado="SP")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Clientes", apelido_loja="OOC", cnpj="81222333000182", estado="SP")
+
+    def _hub_autenticado(self, loja=None, hub_uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd"):
+        hub = SysvarHub.objects.create(loja=loja or self.loja, hub_uuid=hub_uuid, ativo=True)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _clientes(self, query=""):
+        return self.client.get(f"/api/hub/clientes/{query}")
+
+    def _cliente(self, nome, empresa=None, **kwargs):
+        defaults = {
+            "empresa": empresa if empresa is not None else self.empresa,
+            "tipo_pessoa": Cliente.TIPO_PESSOA_FISICA,
+            "documento": None,
+            "nome_cliente": nome,
+            "ativo": True,
+        }
+        defaults.update(kwargs)
+        return Cliente.objects.create(**defaults)
+
+    def test_clientes_exige_autenticacao_hub(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+
+        response_sem_token = self._clientes()
+
+        self.client.credentials(HTTP_AUTHORIZATION="Hub token-invalido")
+        response_token_invalido = self._clientes()
+
+        usuario = get_user_model().objects.create_user(
+            username="usuario-comum-clientes",
+            password="Senha12345",
+            empresa=self.empresa,
+        )
+        self.client.credentials()
+        self.client.force_authenticate(user=usuario)
+        response_usuario_comum = self._clientes()
+
+        self.assertIn(response_sem_token.status_code, (401, 403))
+        self.assertIn(response_token_invalido.status_code, (401, 403))
+        self.assertIn(response_usuario_comum.status_code, (401, 403))
+
+    def test_snapshot_completo_usa_empresa_do_hub_e_serializa_contrato(self):
+        hub = self._hub_autenticado()
+        cliente_padrao = self._cliente(
+            "Consumidor Final",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento=Cliente.DOCUMENTO_CONSUMIDOR_FINAL,
+            cliente_padrao=True,
+        )
+        ativo = self._cliente(
+            "Ana Cliente",
+            tipo_pessoa=Cliente.TIPO_PESSOA_FISICA,
+            documento="12345678901",
+            apelido="Ana",
+            endereco="Rua Central",
+            numero="10",
+            complemento="Sala 1",
+            cep="01001000",
+            bairro="Centro",
+            cidade="Sao Paulo",
+            estado="SP",
+            telefone1="11999990000",
+            telefone2="1133334444",
+            email="ana@sysvar.test",
+            categoria="VIP",
+            aniversario="1990-05-20",
+            mala_direta=True,
+            aceita_email=True,
+            aceita_whatsapp=True,
+            aceita_sms=True,
+            consentimento_em=timezone.now(),
+            origem_consentimento="PDV",
+        )
+        bloqueado = self._cliente(
+            "Bruno Bloqueado",
+            tipo_pessoa=Cliente.TIPO_PESSOA_JURIDICA,
+            documento="11222333000181",
+            bloqueio=True,
+            motivo_bloqueio="FINANCEIRO",
+        )
+        inativo = self._cliente("Carlos Inativo", documento="23456789012", ativo=False)
+        self._cliente("Outra Empresa", empresa=self.outra_empresa, documento="34567890123")
+
+        response = self._clientes(f"?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["clientes_versao"], 1)
+        self.assertIn("gerado_em", response.data)
+        self.assertEqual(response.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja.pk})
+        self.assertEqual([item["id"] for item in response.data["clientes"]], [ativo.pk, bloqueado.pk, inativo.pk, cliente_padrao.pk])
+
+        clientes = {item["id"]: item for item in response.data["clientes"]}
+        self.assertEqual(set(clientes), {ativo.pk, bloqueado.pk, inativo.pk, cliente_padrao.pk})
+        self.assertEqual(clientes[ativo.pk]["tipo_pessoa"], "PF")
+        self.assertEqual(clientes[ativo.pk]["documento"], "12345678901")
+        self.assertEqual(clientes[ativo.pk]["nome_cliente"], "Ana Cliente")
+        self.assertEqual(clientes[ativo.pk]["apelido"], "Ana")
+        self.assertEqual(clientes[ativo.pk]["endereco"], "Rua Central")
+        self.assertEqual(clientes[ativo.pk]["numero"], "10")
+        self.assertEqual(clientes[ativo.pk]["complemento"], "Sala 1")
+        self.assertEqual(clientes[ativo.pk]["cep"], "01001000")
+        self.assertEqual(clientes[ativo.pk]["bairro"], "Centro")
+        self.assertEqual(clientes[ativo.pk]["cidade"], "Sao Paulo")
+        self.assertEqual(clientes[ativo.pk]["estado"], "SP")
+        self.assertEqual(clientes[ativo.pk]["telefone1"], "11999990000")
+        self.assertEqual(clientes[ativo.pk]["telefone2"], "1133334444")
+        self.assertEqual(clientes[ativo.pk]["email"], "ana@sysvar.test")
+        self.assertEqual(clientes[ativo.pk]["categoria"], "VIP")
+        self.assertEqual(str(clientes[ativo.pk]["aniversario"]), "1990-05-20")
+        self.assertTrue(clientes[ativo.pk]["mala_direta"])
+        self.assertTrue(clientes[ativo.pk]["aceita_email"])
+        self.assertTrue(clientes[ativo.pk]["aceita_whatsapp"])
+        self.assertTrue(clientes[ativo.pk]["aceita_sms"])
+        self.assertIsNotNone(clientes[ativo.pk]["consentimento_em"])
+        self.assertEqual(clientes[ativo.pk]["origem_consentimento"], "PDV")
+        self.assertTrue(clientes[ativo.pk]["ativo"])
+
+        self.assertEqual(clientes[bloqueado.pk]["tipo_pessoa"], "PJ")
+        self.assertEqual(clientes[bloqueado.pk]["documento"], "11222333000181")
+        self.assertTrue(clientes[bloqueado.pk]["bloqueio"])
+        self.assertEqual(clientes[bloqueado.pk]["motivo_bloqueio"], "FINANCEIRO")
+        self.assertFalse(clientes[inativo.pk]["ativo"])
+        self.assertTrue(clientes[cliente_padrao.pk]["cliente_padrao"])
+        self.assertEqual(clientes[cliente_padrao.pk]["documento"], Cliente.DOCUMENTO_CONSUMIDOR_FINAL)
+
+        payload_texto = str(response.data).lower()
+        for termo in ["token", "password", "secret", "bloqueado_por", "observacao_bloqueio", "consentimento_observacao"]:
+            self.assertNotIn(termo, payload_texto)
+
+    def test_hub_de_outra_empresa_nao_consegue_alterar_escopo_por_query_string(self):
+        self._cliente("Empresa A", documento="12345678901")
+        cliente_outra = self._cliente("Empresa B", empresa=self.outra_empresa, documento="11222333000181")
+        self._hub_autenticado(loja=self.loja_outra_empresa, hub_uuid="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+
+        response = self._clientes(f"?loja_id={self.loja.pk}&empresa_id={self.empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["empresa"], {"id": self.outra_empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja_outra_empresa.pk})
+        self.assertEqual([item["id"] for item in response.data["clientes"]], [cliente_outra.pk])
+
+    def test_get_nao_altera_clientes_e_evita_n_mais_um(self):
+        self._hub_autenticado()
+        for idx in range(3):
+            self._cliente(f"Cliente {idx}", documento=f"1234567890{idx}")
+        antes = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
+
+        with self.assertNumQueries(2):
+            response = self._clientes()
+
+        depois = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["clientes"]), 3)
+        self.assertEqual(antes, depois)
 
 
 class SysvarHubFormasPagamentoApiTests(TestCase):
