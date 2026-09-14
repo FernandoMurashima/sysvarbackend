@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Empresa, Loja
-from financeiro.models import Caixa
+from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento
 from hub.models import AtivacaoSysvarHub, SysvarHub
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
@@ -899,3 +899,177 @@ class SysvarHubOperadoresApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["operadores"]), 3)
+
+
+class SysvarHubFormasPagamentoApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Formas Hub", documento="71222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Formas Hub", documento="71222333000182")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Formas", apelido_loja="FP", cnpj="71222333000181", estado="SP")
+        self.outra_loja_mesma_empresa = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Formas", apelido_loja="OFP", cnpj="71222333000183", estado="SP")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Formas", apelido_loja="OOF", cnpj="71222333000182", estado="SP")
+
+    def _hub_autenticado(self, loja=None, hub_uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"):
+        hub = SysvarHub.objects.create(loja=loja or self.loja, hub_uuid=hub_uuid, ativo=True)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _formas_pagamento(self, query=""):
+        return self.client.get(f"/api/hub/formas-pagamento/{query}")
+
+    def _forma(self, codigo, empresa=None, **kwargs):
+        defaults = {
+            "empresa": empresa if empresa is not None else self.empresa,
+            "codigo": codigo,
+            "descricao": f"Forma {codigo}",
+            "tipo": FormaPagamento.TIPO_OUTRO,
+            "num_parcelas": 1,
+        }
+        defaults.update(kwargs)
+        return FormaPagamento.objects.create(**defaults)
+
+    def test_formas_pagamento_exige_autenticacao_hub(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+
+        response = self._formas_pagamento()
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_snapshot_completo_usa_escopo_do_hub_e_serializa_contrato(self):
+        hub = self._hub_autenticado()
+        prazo = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="30D",
+            descricao="30 dias",
+            num_parcelas=2,
+            intervalo_dias=30,
+        )
+        conta = ContaBancaria.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            descricao="Conta liquidação",
+            banco="001",
+            agencia="1234",
+            conta="56789",
+        )
+        credito = self._forma(
+            "002",
+            descricao="Cartão Crédito",
+            tipo=FormaPagamento.TIPO_CREDITO_PARCELADO,
+            num_parcelas=2,
+            prazo_pagamento=prazo,
+            adquirente="Rede",
+            conta_liquidacao=conta,
+            gera_recebivel_bancario=True,
+            prazo_credito_dias=30,
+            taxa_percentual=Decimal("2.5000"),
+            taxa_fixa=Decimal("1.20"),
+            tef_habilitado=True,
+            tef_modalidade="CREDITO",
+            tef_adquirente_codigo="REDE",
+            tef_terminal_logico="TERM01",
+        )
+        dinheiro = self._forma(
+            "001",
+            descricao="Dinheiro",
+            tipo=FormaPagamento.TIPO_DINHEIRO,
+            ativo=False,
+            taxa_percentual=Decimal("0"),
+            taxa_fixa=Decimal("0"),
+        )
+        self._forma("003", empresa=self.outra_empresa, descricao="Outra Empresa")
+        FormaPagamento.objects.create(empresa=None, codigo="000", descricao="Sem Empresa", tipo=FormaPagamento.TIPO_OUTRO)
+        FormaPagamentoParcela.objects.create(forma=credito, ordem=2, dias=60, percentual=None, valor_fixo=Decimal("100.00"))
+        FormaPagamentoParcela.objects.create(forma=credito, ordem=1, dias=30, percentual=Decimal("0.500000"), valor_fixo=None)
+        FormaPagamentoParcela.objects.create(forma=dinheiro, ordem=1, dias=0, percentual=Decimal("1.000000"), valor_fixo=None)
+
+        response = self._formas_pagamento(f"?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["formas_pagamento_versao"], 1)
+        self.assertIn("gerado_em", response.data)
+        self.assertEqual(response.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja.pk})
+        self.assertEqual([item["codigo"] for item in response.data["formas_pagamento"]], ["001", "002"])
+
+        dinheiro_payload = response.data["formas_pagamento"][0]
+        self.assertEqual(dinheiro_payload["id"], dinheiro.pk)
+        self.assertFalse(dinheiro_payload["ativo"])
+        self.assertIsNone(dinheiro_payload["prazo_pagamento"])
+        self.assertEqual(dinheiro_payload["taxa_percentual"], "0.0000")
+        self.assertEqual(dinheiro_payload["taxa_fixa"], "0.00")
+        self.assertEqual(dinheiro_payload["parcelas"][0]["percentual"], "1.000000")
+        self.assertIsNone(dinheiro_payload["parcelas"][0]["valor_fixo"])
+
+        credito_payload = response.data["formas_pagamento"][1]
+        self.assertEqual(credito_payload["id"], credito.pk)
+        self.assertEqual(credito_payload["descricao"], "Cartão Crédito")
+        self.assertEqual(credito_payload["tipo"], FormaPagamento.TIPO_CREDITO_PARCELADO)
+        self.assertEqual(credito_payload["num_parcelas"], 2)
+        self.assertEqual(credito_payload["prazo_pagamento"], {
+            "id": prazo.pk,
+            "codigo": "30D",
+            "descricao": "30 dias",
+            "num_parcelas": 2,
+            "intervalo_dias": 30,
+        })
+        self.assertEqual(credito_payload["adquirente"], "Rede")
+        self.assertEqual(credito_payload["conta_liquidacao_id"], conta.pk)
+        self.assertNotIn("conta_liquidacao", credito_payload)
+        self.assertTrue(credito_payload["gera_recebivel_bancario"])
+        self.assertEqual(credito_payload["prazo_credito_dias"], 30)
+        self.assertEqual(credito_payload["taxa_percentual"], "2.5000")
+        self.assertEqual(credito_payload["taxa_fixa"], "1.20")
+        self.assertTrue(credito_payload["tef_habilitado"])
+        self.assertEqual(credito_payload["tef_modalidade"], "CREDITO")
+        self.assertEqual(credito_payload["tef_adquirente_codigo"], "REDE")
+        self.assertEqual(credito_payload["tef_terminal_logico"], "TERM01")
+        self.assertEqual(credito_payload["parcelas"], [
+            {"ordem": 1, "dias": 30, "percentual": "0.500000", "valor_fixo": None},
+            {"ordem": 2, "dias": 60, "percentual": None, "valor_fixo": "100.00"},
+        ])
+        payload_texto = str(response.data).lower()
+        for termo in ["token", "password", "secret"]:
+            self.assertNotIn(termo, payload_texto)
+        self.assertNotIn("hash", payload_texto)
+
+    def test_hub_de_outra_empresa_nao_consegue_alterar_escopo_por_query_string(self):
+        self._forma("EMP1")
+        forma_outra = self._forma("EMP2", empresa=self.outra_empresa)
+        self._hub_autenticado(loja=self.loja_outra_empresa, hub_uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+
+        response = self._formas_pagamento(f"?loja_id={self.loja.pk}&empresa_id={self.empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["empresa"], {"id": self.outra_empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja_outra_empresa.pk})
+        self.assertEqual([item["id"] for item in response.data["formas_pagamento"]], [forma_outra.pk])
+
+    def test_ordenacao_estavel_por_codigo_e_id(self):
+        forma_b = self._forma("B")
+        forma_a = self._forma("A")
+        forma_c = self._forma("C")
+        self._hub_autenticado()
+
+        response = self._formas_pagamento()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([item["id"] for item in response.data["formas_pagamento"]], [forma_a.pk, forma_b.pk, forma_c.pk])
+
+    def test_formas_pagamento_evita_n_mais_um_em_cenario_controlado(self):
+        self._hub_autenticado()
+        prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="AV", descricao="À vista")
+        for idx in range(3):
+            forma = self._forma(f"{idx:03d}", prazo_pagamento=prazo)
+            FormaPagamentoParcela.objects.create(forma=forma, ordem=1, dias=0, percentual=Decimal("1.000000"))
+
+        with self.assertNumQueries(3):
+            response = self._formas_pagamento()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["formas_pagamento"]), 3)

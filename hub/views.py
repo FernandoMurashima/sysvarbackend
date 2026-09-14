@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import IntegrityError, models, transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -10,7 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Loja
-from financeiro.models import Caixa
+from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
@@ -30,6 +31,12 @@ def _texto(data, campo, default="", limite=None):
     if limite:
         return valor[:limite]
     return valor
+
+
+def _decimal_string(valor, casas):
+    if valor is None:
+        return None
+    return f"{valor:.{casas}f}"
 
 
 class HubAtivacaoAdminView(APIView):
@@ -230,6 +237,81 @@ class HubCatalogoView(APIView):
 
     def get(self, request):
         return Response(gerar_catalogo_hub(request.sysvar_hub), status=status.HTTP_200_OK)
+
+
+class HubFormasPagamentoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        parcelas_ordenadas = FormaPagamentoParcela.objects.order_by("ordem", "Idformapagparcela")
+        formas = (
+            FormaPagamento.objects
+            .filter(empresa=empresa)
+            .select_related("prazo_pagamento")
+            .prefetch_related(Prefetch("parcelas", queryset=parcelas_ordenadas))
+            .order_by("codigo", "Idformapagamento")
+        )
+
+        formas_pagamento = []
+        for forma in formas:
+            prazo = forma.prazo_pagamento
+            formas_pagamento.append({
+                "id": forma.pk,
+                "codigo": forma.codigo,
+                "descricao": forma.descricao,
+                "tipo": forma.tipo,
+                "num_parcelas": forma.num_parcelas,
+                "ativo": forma.ativo,
+                "prazo_pagamento": {
+                    "id": prazo.pk,
+                    "codigo": prazo.codigo,
+                    "descricao": prazo.descricao,
+                    "num_parcelas": prazo.num_parcelas,
+                    "intervalo_dias": prazo.intervalo_dias,
+                } if prazo else None,
+                "adquirente": forma.adquirente,
+                "conta_liquidacao_id": forma.conta_liquidacao_id,
+                "gera_recebivel_bancario": forma.gera_recebivel_bancario,
+                "prazo_credito_dias": forma.prazo_credito_dias,
+                "taxa_percentual": _decimal_string(forma.taxa_percentual, 4),
+                "taxa_fixa": _decimal_string(forma.taxa_fixa, 2),
+                "tef_habilitado": forma.tef_habilitado,
+                "tef_modalidade": forma.tef_modalidade,
+                "tef_adquirente_codigo": forma.tef_adquirente_codigo,
+                "tef_terminal_logico": forma.tef_terminal_logico,
+                "parcelas": [
+                    {
+                        "ordem": parcela.ordem,
+                        "dias": parcela.dias,
+                        "percentual": _decimal_string(parcela.percentual, 6),
+                        "valor_fixo": _decimal_string(parcela.valor_fixo, 2),
+                    }
+                    for parcela in forma.parcelas.all()
+                ],
+            })
+
+        return Response(
+            {
+                "formas_pagamento_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                },
+                "loja": {
+                    "id": loja.pk,
+                },
+                "formas_pagamento": formas_pagamento,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class HubOperadoresView(APIView):
