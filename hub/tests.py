@@ -9,8 +9,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
-from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja
-from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento
+from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
+from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv
 from hub.models import AtivacaoSysvarHub, SysvarHub
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
@@ -1380,3 +1380,145 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["formas_pagamento"]), 3)
+
+
+class SysvarHubTiposDespesaPdvApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Despesas Hub", documento="81222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Despesas Hub", documento="81222333000182")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Despesas", apelido_loja="DP", cnpj="81222333000181", estado="SP")
+        self.outra_loja_mesma_empresa = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Despesas", apelido_loja="ODP", cnpj="81222333000183", estado="SP")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Despesas", apelido_loja="OOD", cnpj="81222333000182", estado="SP")
+
+    def _hub_autenticado(self, loja=None, hub_uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd"):
+        hub = SysvarHub.objects.create(loja=loja or self.loja, hub_uuid=hub_uuid, ativo=True)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _tipos_despesa_pdv(self, query=""):
+        return self.client.get(f"/api/hub/tipos-despesa-pdv/{query}")
+
+    def _natureza(self, codigo, empresa=None, **kwargs):
+        defaults = {
+            "empresa": empresa if empresa is not None else self.empresa,
+            "codigo": codigo,
+            "categoria_principal": "Administrativo",
+            "subcategoria": "Loja",
+            "descricao": f"Natureza {codigo}",
+            "tipo": "DESPESA",
+            "status": "ATIVO",
+            "tipo_natureza": "DEBITO",
+            "natureza_operacao": "DESPESA",
+            "categoria_gerencial": "Operacional",
+            "movimenta_financeiro": True,
+            "entra_dre": True,
+        }
+        defaults.update(kwargs)
+        return Nat_Lancamento.objects.create(**defaults)
+
+    def _tipo_despesa(self, codigo, empresa=None, natureza=None, **kwargs):
+        empresa = empresa if empresa is not None else self.empresa
+        defaults = {
+            "empresa": empresa,
+            "codigo": codigo,
+            "descricao": f"Despesa {codigo}",
+            "Idnatureza": natureza or self._natureza(f"N{codigo}", empresa=empresa),
+            "ativo": True,
+            "exige_documento": False,
+        }
+        defaults.update(kwargs)
+        return TipoDespesaPdv.objects.create(**defaults)
+
+    def test_tipos_despesa_pdv_exige_autenticacao_hub(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+
+        response = self._tipos_despesa_pdv()
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_snapshot_usa_escopo_do_hub_e_serializa_contrato(self):
+        hub = self._hub_autenticado()
+        natureza_lanche = self._natureza(
+            "3301",
+            descricao="Lanche",
+            categoria_principal="Alimentação",
+            subcategoria="Equipe",
+            categoria_gerencial="Loja",
+            movimenta_financeiro=True,
+            entra_dre=True,
+        )
+        lanche = self._tipo_despesa("LAN", natureza=natureza_lanche, descricao="Lanche de loja")
+        taxi = self._tipo_despesa("TAX", descricao="Taxi", exige_documento=True)
+        self._tipo_despesa("INA", descricao="Inativa", ativo=False)
+        self._tipo_despesa("OUT", empresa=self.outra_empresa, descricao="Outra Empresa")
+
+        response = self._tipos_despesa_pdv(f"?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["tipos_despesa_pdv_versao"], 1)
+        self.assertIn("gerado_em", response.data)
+        self.assertEqual(response.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja.pk})
+        self.assertEqual([item["id"] for item in response.data["tipos_despesa_pdv"]], [lanche.pk, taxi.pk])
+
+        item = response.data["tipos_despesa_pdv"][0]
+        self.assertEqual(set(item.keys()), {"id", "codigo", "descricao", "exige_documento", "ativo", "natureza"})
+        self.assertEqual(item["codigo"], "LAN")
+        self.assertEqual(item["descricao"], "Lanche de loja")
+        self.assertFalse(item["exige_documento"])
+        self.assertTrue(item["ativo"])
+        self.assertEqual(item["natureza"], {
+            "id": natureza_lanche.pk,
+            "codigo": "3301",
+            "descricao": "Lanche",
+            "categoria_principal": "Alimentação",
+            "subcategoria": "Equipe",
+            "tipo": "DESPESA",
+            "status": "ATIVO",
+            "tipo_natureza": "DEBITO",
+            "natureza_operacao": "DESPESA",
+            "categoria_gerencial": "Loja",
+            "movimenta_financeiro": True,
+            "entra_dre": True,
+        })
+        for termo in ["plano_contabil", "conta_contabil", "token", "password", "secret", "hash"]:
+            self.assertNotIn(termo, str(response.data).lower())
+
+    def test_hub_de_outra_empresa_nao_consegue_alterar_escopo_por_query_string(self):
+        self._tipo_despesa("EMP1")
+        tipo_outra = self._tipo_despesa("EMP2", empresa=self.outra_empresa)
+        self._hub_autenticado(loja=self.loja_outra_empresa, hub_uuid="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+
+        response = self._tipos_despesa_pdv(f"?loja_id={self.loja.pk}&empresa_id={self.empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["empresa"], {"id": self.outra_empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja_outra_empresa.pk})
+        self.assertEqual([item["id"] for item in response.data["tipos_despesa_pdv"]], [tipo_outra.pk])
+
+    def test_ordenacao_deterministica_por_descricao_codigo_e_id(self):
+        tipo_b = self._tipo_despesa("B", descricao="Taxi")
+        tipo_a = self._tipo_despesa("A", descricao="Taxi")
+        tipo_c = self._tipo_despesa("C", descricao="Abastecimento")
+        self._hub_autenticado()
+
+        response = self._tipos_despesa_pdv()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([item["id"] for item in response.data["tipos_despesa_pdv"]], [tipo_c.pk, tipo_a.pk, tipo_b.pk])
+
+    def test_tipos_despesa_pdv_evita_n_mais_um_em_cenario_controlado(self):
+        self._hub_autenticado()
+        for idx in range(3):
+            self._tipo_despesa(f"{idx:03d}")
+
+        with self.assertNumQueries(2):
+            response = self._tipos_despesa_pdv()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["tipos_despesa_pdv"]), 3)

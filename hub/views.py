@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela
+from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
@@ -37,6 +37,23 @@ def _decimal_string(valor, casas):
     if valor is None:
         return None
     return f"{valor:.{casas}f}"
+
+
+def _serializar_natureza_despesa_pdv(natureza):
+    return {
+        "id": natureza.pk,
+        "codigo": natureza.codigo,
+        "descricao": natureza.descricao,
+        "categoria_principal": natureza.categoria_principal,
+        "subcategoria": natureza.subcategoria,
+        "tipo": natureza.tipo,
+        "status": natureza.status,
+        "tipo_natureza": natureza.tipo_natureza,
+        "natureza_operacao": natureza.natureza_operacao,
+        "categoria_gerencial": natureza.categoria_gerencial,
+        "movimenta_financeiro": natureza.movimenta_financeiro,
+        "entra_dre": natureza.entra_dre,
+    }
 
 
 class HubAtivacaoAdminView(APIView):
@@ -309,6 +326,51 @@ class HubFormasPagamentoView(APIView):
                     "id": loja.pk,
                 },
                 "formas_pagamento": formas_pagamento,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubTiposDespesaPdvView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        tipos = (
+            TipoDespesaPdv.objects
+            .filter(empresa=empresa, ativo=True)
+            .select_related("Idnatureza")
+            .order_by("descricao", "codigo", "Idtipodespesapdv")
+        )
+
+        return Response(
+            {
+                "tipos_despesa_pdv_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                },
+                "loja": {
+                    "id": loja.pk,
+                },
+                "tipos_despesa_pdv": [
+                    {
+                        "id": tipo.pk,
+                        "codigo": tipo.codigo,
+                        "descricao": tipo.descricao,
+                        "exige_documento": tipo.exige_documento,
+                        "ativo": tipo.ativo,
+                        "natureza": _serializar_natureza_despesa_pdv(tipo.Idnatureza),
+                    }
+                    for tipo in tipos
+                ],
             },
             status=status.HTTP_200_OK,
         )
