@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
-from cadastros.models import Cliente, Empresa, Loja
+from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja
 from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento
 from hub.models import AtivacaoSysvarHub, SysvarHub
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
@@ -899,6 +899,144 @@ class SysvarHubOperadoresApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["operadores"]), 3)
+
+
+class SysvarHubVendedoresApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Vendedores Hub", documento="81222333000191")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Vendedores Hub", documento="91222333000191")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Vendedores", apelido_loja="VD", cnpj="81222333000191", estado="SP")
+        self.outra_loja_mesma_empresa = Loja.objects.create(empresa=self.empresa, nome_loja="Outra Loja Vendedores", apelido_loja="OVD", cnpj="81222333000192", estado="SP")
+        self.loja_outra_empresa = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Vendedores", apelido_loja="VOE", cnpj="91222333000191", estado="SP")
+        self.cargo = Cargo.objects.create(
+            empresa=self.empresa,
+            codigo="VEND",
+            descricao="Vendedor",
+            ativo=True,
+            participa_vendas=True,
+            permite_comissao=True,
+        )
+        self.cargo_outra_empresa = Cargo.objects.create(
+            empresa=self.outra_empresa,
+            codigo="VEND",
+            descricao="Vendedor Outra Empresa",
+            ativo=True,
+            participa_vendas=True,
+            permite_comissao=True,
+        )
+        self._cpf_seq = 10000000000
+
+    def _hub_autenticado(self, loja=None, hub_uuid="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"):
+        hub = SysvarHub.objects.create(loja=loja or self.loja, hub_uuid=hub_uuid, ativo=True)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _funcionario(self, nome, empresa=None, loja=None, cargo=None, **kwargs):
+        self._cpf_seq += 1
+        defaults = {
+            "empresa": empresa if empresa is not None else self.empresa,
+            "idloja": loja if loja is not None else self.loja,
+            "cargo": cargo if cargo is not None else self.cargo,
+            "matricula": str(self._cpf_seq)[-6:],
+            "nomefuncionario": nome,
+            "apelido": nome[:20],
+            "cpf": str(self._cpf_seq),
+            "ativo": True,
+            "situacao": Funcionarios.SITUACAO_ATIVO,
+            "participa_vendas": True,
+            "comissionado": True,
+            "comissao_percentual": Decimal("3.00"),
+            "salario": Decimal("2500.00"),
+            "telefone": "11999990000",
+            "whatsapp": "11999990001",
+            "email": f"{self._cpf_seq}@example.com",
+            "endereco": "Rua Sigilosa",
+        }
+        defaults.update(kwargs)
+        return Funcionarios.objects.create(**defaults)
+
+    def test_vendedores_exige_autenticacao_hub(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials()
+
+        response = self.client.get("/api/hub/vendedores/")
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_snapshot_retorna_apenas_vendedores_elegiveis_da_loja_do_hub(self):
+        hub = self._hub_autenticado()
+        ana = self._funcionario("Ana Vendedora", matricula="000101", comissao_percentual=Decimal("3.00"))
+        bruno = self._funcionario("Bruno Vendedor", matricula="000102", comissao_percentual=Decimal("2.50"))
+        self._funcionario("Outra Loja", loja=self.outra_loja_mesma_empresa)
+        self._funcionario("Outra Empresa", empresa=self.outra_empresa, loja=self.loja_outra_empresa, cargo=self.cargo_outra_empresa)
+        self._funcionario("Nao Participa", participa_vendas=False)
+        self._funcionario("Inativo", ativo=False)
+        self._funcionario("Afastado", situacao=Funcionarios.SITUACAO_AFASTADO)
+        self._funcionario("Desligado", situacao=Funcionarios.SITUACAO_DESLIGADO)
+
+        response = self.client.get(f"/api/hub/vendedores/?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["vendedores_versao"], 1)
+        self.assertIn("gerado_em", response.data)
+        self.assertEqual(response.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
+        self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
+        self.assertEqual(response.data["loja"], {"id": self.loja.pk})
+        self.assertEqual([item["nome"] for item in response.data["vendedores"]], ["Ana Vendedora", "Bruno Vendedor"])
+
+        vendedores = {item["nome"]: item for item in response.data["vendedores"]}
+        self.assertEqual(vendedores["Ana Vendedora"]["id"], ana.pk)
+        self.assertEqual(vendedores["Ana Vendedora"]["matricula"], "000101")
+        self.assertEqual(vendedores["Ana Vendedora"]["apelido"], "Ana Vendedora")
+        self.assertEqual(vendedores["Ana Vendedora"]["cargo"], {"id": self.cargo.pk, "codigo": "VEND", "descricao": "Vendedor"})
+        self.assertTrue(vendedores["Ana Vendedora"]["comissionado"])
+        self.assertEqual(vendedores["Ana Vendedora"]["comissao_percentual"], "3.00")
+        self.assertTrue(vendedores["Ana Vendedora"]["ativo"])
+        self.assertEqual(vendedores["Ana Vendedora"]["situacao"], Funcionarios.SITUACAO_ATIVO)
+        self.assertTrue(vendedores["Ana Vendedora"]["participa_vendas"])
+        self.assertEqual(vendedores["Bruno Vendedor"]["id"], bruno.pk)
+        self.assertEqual(vendedores["Bruno Vendedor"]["comissao_percentual"], "2.50")
+
+    def test_payload_nao_expoe_campos_sensiveis_de_funcionario(self):
+        self._hub_autenticado()
+        self._funcionario("Privado Vendedor")
+
+        response = self.client.get("/api/hub/vendedores/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        vendedor = response.data["vendedores"][0]
+        campos_sensiveis = {
+            "cpf",
+            "salario",
+            "telefone",
+            "whatsapp",
+            "email",
+            "endereco",
+            "inicio",
+            "fim",
+            "usuario",
+            "usuario_id",
+            "senha",
+            "password",
+            "credencial_hash",
+            "dados_bancarios",
+        }
+        for campo in campos_sensiveis:
+            self.assertNotIn(campo, vendedor)
+
+    def test_vendedores_evita_n_mais_um_em_cenario_controlado(self):
+        self._hub_autenticado()
+        for idx in range(3):
+            self._funcionario(f"Vendedor Query {idx}")
+
+        with self.assertNumQueries(2):
+            response = self.client.get("/api/hub/vendedores/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["vendedores"]), 3)
 
 
 class SysvarHubClientesApiTests(TestCase):

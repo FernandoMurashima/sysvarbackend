@@ -10,7 +10,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
-from cadastros.models import Cliente, Loja
+from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -431,6 +431,67 @@ class HubOperadoresView(APIView):
                     "id": loja.pk,
                 },
                 "operadores": operadores,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubVendedoresView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        vendedores_queryset = (
+            Funcionarios.objects
+            .filter(
+                empresa=empresa,
+                idloja=loja,
+                ativo=True,
+                situacao=Funcionarios.SITUACAO_ATIVO,
+                participa_vendas=True,
+            )
+            .select_related("cargo", "idloja", "empresa")
+            .order_by("nomefuncionario", "id")
+        )
+
+        vendedores = []
+        for vendedor in vendedores_queryset:
+            cargo = vendedor.cargo
+            vendedores.append({
+                "id": vendedor.pk,
+                "matricula": vendedor.matricula,
+                "nome": vendedor.nomefuncionario,
+                "apelido": vendedor.apelido,
+                "cargo": {
+                    "id": cargo.pk,
+                    "codigo": cargo.codigo,
+                    "descricao": cargo.descricao,
+                } if cargo else None,
+                "comissionado": vendedor.comissionado,
+                "comissao_percentual": _decimal_string(vendedor.comissao_percentual, 2),
+                "ativo": vendedor.ativo,
+                "situacao": vendedor.situacao,
+                "participa_vendas": vendedor.participa_vendas,
+            })
+
+        return Response(
+            {
+                "vendedores_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": hub.pk,
+                    "hub_uuid": str(hub.hub_uuid),
+                },
+                "empresa": {
+                    "id": empresa.pk,
+                },
+                "loja": {
+                    "id": loja.pk,
+                },
+                "vendedores": vendedores,
             },
             status=status.HTTP_200_OK,
         )

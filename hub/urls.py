@@ -9,6 +9,7 @@ from hub.views import (
     HubFormasPagamentoView,
     HubHeartbeatView,
     HubOperadoresView,
+    HubVendedoresView,
 )
 
 urlpatterns = [
@@ -20,4 +21,5 @@ urlpatterns = [
     path("formas-pagamento/", HubFormasPagamentoView.as_view(), name="hub-formas-pagamento"),
     path("heartbeat/", HubHeartbeatView.as_view(), name="hub-heartbeat"),
     path("operadores/", HubOperadoresView.as_view(), name="hub-operadores"),
+    path("vendedores/", HubVendedoresView.as_view(), name="hub-vendedores"),
 ]
