@@ -100,3 +100,129 @@ class AtivacaoSysvarHub(models.Model):
     def esta_utilizavel(self, agora=None) -> bool:
         agora = agora or timezone.now()
         return self.usado_em is None and self.revogado_em is None and self.expira_em > agora
+
+
+class HubEventoRecebido(models.Model):
+    STATUS_RECEBIDO = "RECEBIDO"
+    STATUS_PROCESSADO = "PROCESSADO"
+    STATUS_DUPLICADO = "DUPLICADO"
+    STATUS_ERRO = "ERRO"
+    STATUS_CONFLITO = "CONFLITO"
+    STATUS_CHOICES = [
+        (STATUS_RECEBIDO, "Recebido"),
+        (STATUS_PROCESSADO, "Processado"),
+        (STATUS_DUPLICADO, "Duplicado"),
+        (STATUS_ERRO, "Erro"),
+        (STATUS_CONFLITO, "Conflito"),
+    ]
+
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="eventos_recebidos")
+    evento_uuid = models.UUIDField()
+    chave_idempotencia = models.CharField(max_length=120)
+    tipo = models.CharField(max_length=40, db_index=True)
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_RECEBIDO, db_index=True)
+    mensagem_erro = models.CharField(max_length=255, blank=True, default="")
+    recebido_em = models.DateTimeField(auto_now_add=True)
+    processado_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-recebido_em", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "evento_uuid"], name="uq_hub_evento_uuid"),
+            models.UniqueConstraint(fields=["hub", "chave_idempotencia"], name="uq_hub_chave_idempotencia"),
+        ]
+        indexes = [
+            models.Index(fields=["hub", "tipo"], name="ix_hub_evt_hub_tipo"),
+            models.Index(fields=["hub", "status"], name="ix_hub_evt_hub_status"),
+        ]
+
+
+class HubClienteMapeamento(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="clientes_mapeados")
+    cliente_uuid = models.UUIDField()
+    cliente = models.ForeignKey("cadastros.Cliente", on_delete=models.PROTECT, related_name="mapeamentos_hub")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "cliente_uuid"], name="uq_hub_cliente_uuid"),
+        ]
+
+
+class HubVendaMapeamento(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="vendas_mapeadas")
+    venda_uuid = models.UUIDField()
+    venda = models.ForeignKey("fiscal.VendaPdv", on_delete=models.PROTECT, related_name="mapeamentos_hub")
+    documento = models.CharField(max_length=50, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "venda_uuid"], name="uq_hub_venda_uuid"),
+        ]
+
+
+class HubMovimentoCaixaRecebido(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="movimentos_caixa_recebidos")
+    movimento_uuid = models.UUIDField()
+    tipo = models.CharField(max_length=20, db_index=True)
+    caixa = models.ForeignKey("financeiro.Caixa", on_delete=models.PROTECT, null=True, blank=True, related_name="movimentos_hub")
+    operador = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="movimentos_caixa_hub")
+    terminal = models.CharField(max_length=80, blank=True, default="")
+    valor = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    historico = models.CharField(max_length=255, blank=True, default="")
+    documento = models.CharField(max_length=80, blank=True, default="")
+    tipo_despesa = models.CharField(max_length=80, blank=True, default="")
+    ocorrido_em = models.DateTimeField(null=True, blank=True)
+    snapshot = models.JSONField(default=dict, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "movimento_uuid"], name="uq_hub_mov_caixa_uuid"),
+        ]
+
+
+class HubSessaoCaixaRecebida(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="sessoes_caixa_recebidas")
+    sessao_uuid = models.UUIDField()
+    caixa = models.ForeignKey("financeiro.Caixa", on_delete=models.PROTECT, null=True, blank=True, related_name="sessoes_hub")
+    operador = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="sessoes_caixa_hub")
+    terminal = models.CharField(max_length=80, blank=True, default="")
+    aberto_em = models.DateTimeField(null=True, blank=True)
+    fechado_em = models.DateTimeField(null=True, blank=True)
+    valor_abertura = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_esperado = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_contado = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    diferenca = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    situacao = models.CharField(max_length=40, blank=True, default="")
+    observacao = models.CharField(max_length=255, blank=True, default="")
+    snapshot = models.JSONField(default=dict, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "sessao_uuid"], name="uq_hub_sessao_uuid"),
+        ]
+
+
+class HubFechamentoDiaRecebido(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="fechamentos_dia_recebidos")
+    fechamento_uuid = models.UUIDField()
+    data_operacional = models.DateField()
+    total_sistema = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    total_conferido = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    diferenca = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    situacao = models.CharField(max_length=40, blank=True, default="")
+    formas_pagamento = models.JSONField(default=list, blank=True)
+    operador = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="fechamentos_dia_hub")
+    terminal = models.CharField(max_length=80, blank=True, default="")
+    snapshot = models.JSONField(default=dict, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "fechamento_uuid"], name="uq_hub_fech_dia_uuid"),
+        ]

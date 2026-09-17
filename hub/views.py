@@ -15,6 +15,7 @@ from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela, Tipo
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
+from hub.sync import HubSyncProcessor
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
 
@@ -198,6 +199,20 @@ class HubHeartbeatView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class HubSyncPushView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if request.data.get("versao") != 1:
+            raise ValidationError({"versao": "Versão de sincronização inválida."})
+        eventos = request.data.get("eventos") or []
+        if not isinstance(eventos, list):
+            raise ValidationError({"eventos": "Informe uma lista de eventos."})
+        resultados = HubSyncProcessor(request.sysvar_hub, request=request).processar_lote(eventos)
+        return Response({"resultados": resultados}, status=status.HTTP_200_OK)
 
 
 class HubBootstrapView(APIView):

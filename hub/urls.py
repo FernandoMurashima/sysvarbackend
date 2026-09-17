@@ -9,6 +9,7 @@ from hub.views import (
     HubFormasPagamentoView,
     HubHeartbeatView,
     HubOperadoresView,
+    HubSyncPushView,
     HubTiposDespesaPdvView,
     HubVendedoresView,
 )
@@ -21,6 +22,7 @@ urlpatterns = [
     path("clientes/", HubClientesView.as_view(), name="hub-clientes"),
     path("formas-pagamento/", HubFormasPagamentoView.as_view(), name="hub-formas-pagamento"),
     path("heartbeat/", HubHeartbeatView.as_view(), name="hub-heartbeat"),
+    path("sync/push/", HubSyncPushView.as_view(), name="hub-sync-push"),
     path("operadores/", HubOperadoresView.as_view(), name="hub-operadores"),
     path("tipos-despesa-pdv/", HubTiposDespesaPdvView.as_view(), name="hub-tipos-despesa-pdv"),
     path("vendedores/", HubVendedoresView.as_view(), name="hub-vendedores"),

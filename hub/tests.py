@@ -11,7 +11,19 @@ from rest_framework.test import APIClient
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv
-from hub.models import AtivacaoSysvarHub, SysvarHub
+from fiscal.models import VendaPdv, VendaPdvItem, VendaPdvPagamento
+from financeiro.models import MovimentacaoFinanceira, Receber
+from hub.models import (
+    AtivacaoSysvarHub,
+    HubClienteMapeamento,
+    HubEventoRecebido,
+    HubFechamentoDiaRecebido,
+    HubMovimentoCaixaRecebido,
+    HubSessaoCaixaRecebida,
+    HubVendaMapeamento,
+    SysvarHub,
+)
+from produto.models import EstoqueMovimentacao
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
 
@@ -1522,3 +1534,184 @@ class SysvarHubTiposDespesaPdvApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["tipos_despesa_pdv"]), 3)
+
+
+class SysvarHubSyncPushApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.empresa = Empresa.objects.create(nome="Empresa Sync Hub", documento="71222333000181")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Empresa Sync Hub", documento="81222333000181")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Sync", apelido_loja="SYNC", cnpj="71222333000181", estado="SP")
+        self.outra_loja = Loja.objects.create(empresa=self.outra_empresa, nome_loja="Loja Outra Sync", apelido_loja="OSYNC", cnpj="81222333000181", estado="SP")
+        self.caixa = Caixa.objects.create(empresa=self.empresa, idloja=self.loja, tipo_caixa=Caixa.TIPO_LOJA, codigo="CX1", descricao="Caixa Loja")
+        self.caixa_outra = Caixa.objects.create(empresa=self.outra_empresa, idloja=self.outra_loja, tipo_caixa=Caixa.TIPO_LOJA, codigo="CX2", descricao="Caixa Outra")
+        self.cliente = Cliente.objects.create(empresa=self.empresa, tipo_pessoa="PF", documento="39053344705", cpf="39053344705", nome_cliente="Cliente Sync", apelido="Cliente")
+        self.vendedor = Funcionarios.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            nomefuncionario="Vendedor Sync",
+            cpf="52998224725",
+            matricula="000001",
+            participa_vendas=True,
+            ativo=True,
+        )
+        self.unidade = Unidade.objects.create(empresa=self.empresa, Codigo="UN", Descricao="UNIDADE")
+        self.grade = Grade.objects.create(empresa=self.empresa, Descricao="Grade Sync")
+        self.cor = Cor.objects.create(empresa=self.empresa, Descricao="AZUL", Codigo="AZ", Cor="Azul")
+        self.tamanho = Tamanho.objects.create(empresa=self.empresa, idgrade=self.grade, Tamanho="40", Descricao="40")
+        ConfigEan.objects.create(empresa=self.empresa, company_prefix="2234")
+        self.produto = Produto.objects.create(
+            empresa=self.empresa,
+            referencia="26-01-01099",
+            descricao="Produto Sync",
+            unidade=self.unidade,
+            ncm="6204.62.00",
+            origem_mercadoria=0,
+            cfop_venda_dentro="5102",
+        )
+        self.sku = ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor, idtamanho=self.tamanho)
+        self.estoque = Estoque.objects.create(CodigodeBarra=self.sku.ean13, referencia=self.produto.referencia, Idloja=self.loja, Estoque=Decimal("5.000"))
+
+    def _hub_autenticado(self, ativo=True):
+        hub = SysvarHub.objects.create(loja=self.loja, hub_uuid="11111111-2222-4333-8444-555555555555", ativo=ativo)
+        token = hub.gerar_token()
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        return hub
+
+    def _push(self, eventos):
+        return self.client.post("/api/hub/sync/push/", {"versao": 1, "eventos": eventos}, format="json")
+
+    def _evento(self, tipo, payload, evento_uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", chave="chave-1"):
+        return {
+            "evento_uuid": evento_uuid,
+            "chave_idempotencia": chave,
+            "tipo": tipo,
+            "ocorrido_em": timezone.now().isoformat(),
+            "payload": payload,
+        }
+
+    def test_sync_push_exige_hub_autenticado_e_ativo(self):
+        response = self._push([])
+        self.assertIn(response.status_code, (401, 403))
+
+        self._hub_autenticado(ativo=False)
+        response = self._push([])
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_cliente_local_cria_mapeamento_e_retry_nao_duplica(self):
+        self._hub_autenticado()
+        payload = {
+            "cliente_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "tipo_pessoa": "PF",
+            "documento": "12345678901",
+            "nome": "Cliente Local",
+            "apelido": "Local",
+        }
+
+        response = self._push([self._evento("CLIENTE_LOCAL", payload)])
+        self.assertEqual(response.status_code, 200, response.data)
+        resultado = response.data["resultados"][0]
+        self.assertEqual(resultado["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertTrue(HubClienteMapeamento.objects.filter(cliente_uuid=payload["cliente_uuid"]).exists())
+        cliente_id = resultado["mapeamento"]["cliente_retaguarda_id"]
+
+        response = self._push([self._evento("CLIENTE_LOCAL", payload)])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["cliente_retaguarda_id"], cliente_id)
+        self.assertEqual(Cliente.objects.filter(empresa=self.empresa, documento="12345678901").count(), 1)
+
+    def test_mesma_chave_com_payload_diferente_retorna_conflito(self):
+        self._hub_autenticado()
+        evento = self._evento("MOVIMENTO_CAIXA", {"movimento_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "tipo": "SANGRIA", "valor": "10.00"})
+        self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+
+        evento["payload"] = {"movimento_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "tipo": "SANGRIA", "valor": "11.00"}
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_CONFLITO)
+
+    def test_lote_processa_eventos_independentemente(self):
+        self._hub_autenticado()
+        eventos = [
+            self._evento("MOVIMENTO_CAIXA", {"movimento_uuid": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "tipo": "SUPRIMENTO", "valor": "5.00"}, chave="ok-1"),
+            self._evento("CLIENTE_LOCAL", {"cliente_uuid": "invalido"}, evento_uuid="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", chave="erro-1"),
+            self._evento("SESSAO_CAIXA_FECHADA", {"sessao_uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff", "valor_contado": "5.00"}, evento_uuid="99999999-9999-4999-8999-999999999999", chave="ok-2"),
+        ]
+
+        response = self._push(eventos)
+
+        self.assertEqual([r["status"] for r in response.data["resultados"]], ["PROCESSADO", "ERRO", "PROCESSADO"])
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
+        self.assertEqual(HubSessaoCaixaRecebida.objects.count(), 1)
+
+    def test_venda_finalizada_cria_venda_itens_pagamentos_estoque_e_retry_nao_rebaixa(self):
+        self._hub_autenticado()
+        payload = {
+            "venda_uuid": "12121212-1212-4121-8121-121212121212",
+            "caixa_retaguarda_id": self.caixa.pk,
+            "cliente_retaguarda_id": self.cliente.pk,
+            "vendedor_retaguarda_id": self.vendedor.pk,
+            "total": "20.00",
+            "valor_recebido": "20.00",
+            "itens": [{
+                "produto_retaguarda_id": self.produto.pk,
+                "sku_retaguarda_id": self.sku.pk,
+                "ean": self.sku.ean13,
+                "quantidade": 2,
+                "preco_unitario": "10.00",
+                "desconto": "0.00",
+            }],
+            "pagamentos": [{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "20.00"}],
+        }
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload)])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda_id = response.data["resultados"][0]["mapeamento"]["venda_retaguarda_id"]
+        self.assertTrue(HubVendaMapeamento.objects.filter(venda_id=venda_id).exists())
+        self.assertEqual(VendaPdv.objects.get(pk=venda_id).total, Decimal("20.00"))
+        self.assertEqual(VendaPdvItem.objects.filter(venda_id=venda_id).count(), 1)
+        self.assertEqual(VendaPdvPagamento.objects.filter(venda_id=venda_id).count(), 1)
+        self.estoque.refresh_from_db()
+        self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(documento=VendaPdv.objects.get(pk=venda_id).documento).count(), 1)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload)])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.estoque.refresh_from_db()
+        self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_entidade_de_outra_empresa_bloqueada(self):
+        self._hub_autenticado()
+        payload = {
+            "venda_uuid": "34343434-3434-4343-8343-343434343434",
+            "caixa_retaguarda_id": self.caixa_outra.pk,
+            "cliente_retaguarda_id": self.cliente.pk,
+            "vendedor_retaguarda_id": self.vendedor.pk,
+            "total": "1.00",
+            "valor_recebido": "1.00",
+            "itens": [],
+            "pagamentos": [{"codigo": "DINHEIRO", "valor": "1.00"}],
+        }
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload)])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertFalse(HubVendaMapeamento.objects.exists())
+
+    def test_movimento_sessao_e_fechamento_dia_sao_persistidos_idempotentes(self):
+        self._hub_autenticado()
+        eventos = [
+            self._evento("MOVIMENTO_CAIXA", {"movimento_uuid": "13131313-1313-4131-8131-131313131313", "tipo": "DESPESA", "valor": "7.00"}, chave="mov"),
+            self._evento("SESSAO_CAIXA_FECHADA", {"sessao_uuid": "14141414-1414-4141-8141-141414141414", "valor_contado": "7.00"}, evento_uuid="15151515-1515-4151-8151-151515151515", chave="sessao"),
+            self._evento("FECHAMENTO_DIA", {"fechamento_uuid": "16161616-1616-4161-8161-161616161616", "data_operacional": "2026-09-17", "total_sistema": "7.00"}, evento_uuid="17171717-1717-4171-8171-171717171717", chave="fech"),
+        ]
+
+        response = self._push(eventos)
+        self.assertEqual([r["status"] for r in response.data["resultados"]], ["PROCESSADO", "PROCESSADO", "PROCESSADO"])
+        self._push(eventos)
+
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
+        self.assertEqual(HubSessaoCaixaRecebida.objects.count(), 1)
+        self.assertEqual(HubFechamentoDiaRecebido.objects.count(), 1)
