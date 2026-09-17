@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
@@ -23,6 +24,7 @@ from hub.models import (
     HubVendaMapeamento,
     SysvarHub,
 )
+from hub.sync import HubSyncProcessor, payload_hash
 from produto.models import EstoqueMovimentacao
 from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
@@ -1591,6 +1593,33 @@ class SysvarHubSyncPushApiTests(TestCase):
             "payload": payload,
         }
 
+    def _payload_movimento(self, movimento_uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc", valor="10.00", caixa=None):
+        payload = {"movimento_uuid": movimento_uuid, "tipo": "SANGRIA", "valor": valor}
+        if caixa is not None:
+            payload["caixa_retaguarda_id"] = caixa
+        return payload
+
+    def _payload_venda(self, venda_uuid="12121212-1212-4121-8121-121212121212", **extras):
+        payload = {
+            "venda_uuid": venda_uuid,
+            "caixa_retaguarda_id": self.caixa.pk,
+            "cliente_retaguarda_id": self.cliente.pk,
+            "vendedor_retaguarda_id": self.vendedor.pk,
+            "total": "10.00",
+            "valor_recebido": "10.00",
+            "itens": [{
+                "produto_retaguarda_id": self.produto.pk,
+                "sku_retaguarda_id": self.sku.pk,
+                "ean": self.sku.ean13,
+                "quantidade": 1,
+                "preco_unitario": "10.00",
+                "desconto": "0.00",
+            }],
+            "pagamentos": [{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "10.00"}],
+        }
+        payload.update(extras)
+        return payload
+
     def test_sync_push_exige_hub_autenticado_e_ativo(self):
         response = self._push([])
         self.assertIn(response.status_code, (401, 403))
@@ -1623,13 +1652,79 @@ class SysvarHubSyncPushApiTests(TestCase):
 
     def test_mesma_chave_com_payload_diferente_retorna_conflito(self):
         self._hub_autenticado()
-        evento = self._evento("MOVIMENTO_CAIXA", {"movimento_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "tipo": "SANGRIA", "valor": "10.00"})
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento())
         self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
 
-        evento["payload"] = {"movimento_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "tipo": "SANGRIA", "valor": "11.00"}
+        evento["payload"] = self._payload_movimento(valor="11.00")
         response = self._push([evento])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_CONFLITO)
+
+    def test_conflito_nao_altera_evento_processado_original(self):
+        self._hub_autenticado()
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento(), chave="original")
+        self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+
+        evento["payload"] = self._payload_movimento(valor="12.00")
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_CONFLITO)
+        registro = HubEventoRecebido.objects.get(chave_idempotencia="original")
+        self.assertEqual(registro.status, HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertEqual(registro.mensagem_erro, "")
+
+    def test_mesmo_evento_uuid_com_chave_diferente_retorna_conflito(self):
+        self._hub_autenticado()
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento(), chave="chave-original")
+        self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+
+        evento["chave_idempotencia"] = "chave-outra"
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_CONFLITO)
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
+
+    def test_mesma_chave_com_evento_uuid_diferente_retorna_conflito(self):
+        self._hub_autenticado()
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento(), chave="chave-original")
+        self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+
+        evento["evento_uuid"] = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_CONFLITO)
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
+
+    def test_evento_erro_com_mesmo_conteudo_e_reprocessado_e_pode_virar_processado(self):
+        self._hub_autenticado()
+        caixa_id = 999
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento(caixa=caixa_id), chave="retry-ok")
+        response = self._push([evento])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+
+        Caixa.objects.create(Idcaixa=caixa_id, empresa=self.empresa, idloja=self.loja, tipo_caixa=Caixa.TIPO_LOJA, codigo="CX999", descricao="Caixa Retry")
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        registro = HubEventoRecebido.objects.get(chave_idempotencia="retry-ok")
+        self.assertEqual(registro.status, HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertEqual(registro.mensagem_erro, "")
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
+
+    def test_evento_erro_com_mesmo_conteudo_falha_novamente_e_permanece_erro(self):
+        self._hub_autenticado()
+        evento = self._evento("MOVIMENTO_CAIXA", self._payload_movimento(caixa=998), chave="retry-fail")
+        response = self._push([evento])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        primeira_mensagem = HubEventoRecebido.objects.get(chave_idempotencia="retry-fail").mensagem_erro
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        registro = HubEventoRecebido.objects.get(chave_idempotencia="retry-fail")
+        self.assertEqual(registro.status, HubEventoRecebido.STATUS_ERRO)
+        self.assertEqual(registro.mensagem_erro, primeira_mensagem)
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 0)
 
     def test_lote_processa_eventos_independentemente(self):
         self._hub_autenticado()
@@ -1647,23 +1742,9 @@ class SysvarHubSyncPushApiTests(TestCase):
 
     def test_venda_finalizada_cria_venda_itens_pagamentos_estoque_e_retry_nao_rebaixa(self):
         self._hub_autenticado()
-        payload = {
-            "venda_uuid": "12121212-1212-4121-8121-121212121212",
-            "caixa_retaguarda_id": self.caixa.pk,
-            "cliente_retaguarda_id": self.cliente.pk,
-            "vendedor_retaguarda_id": self.vendedor.pk,
-            "total": "20.00",
-            "valor_recebido": "20.00",
-            "itens": [{
-                "produto_retaguarda_id": self.produto.pk,
-                "sku_retaguarda_id": self.sku.pk,
-                "ean": self.sku.ean13,
-                "quantidade": 2,
-                "preco_unitario": "10.00",
-                "desconto": "0.00",
-            }],
-            "pagamentos": [{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "20.00"}],
-        }
+        payload = self._payload_venda(total="20.00", valor_recebido="20.00")
+        payload["itens"][0]["quantidade"] = 2
+        payload["pagamentos"][0]["valor"] = "20.00"
 
         response = self._push([self._evento("VENDA_FINALIZADA", payload)])
         self.assertEqual(response.status_code, 200, response.data)
@@ -1681,6 +1762,24 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_data_operacional_invalida_retorna_erro_e_nao_grava_fechamento_hoje(self):
+        self._hub_autenticado()
+        payload = {"fechamento_uuid": "18181818-1818-4181-8181-181818181818", "data_operacional": "data-invalida", "total_sistema": "7.00"}
+
+        response = self._push([self._evento("FECHAMENTO_DIA", payload, chave="data-fechamento")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertFalse(HubFechamentoDiaRecebido.objects.exists())
+
+    def test_data_de_venda_informada_invalida_retorna_erro(self):
+        self._hub_autenticado()
+        payload = self._payload_venda(venda_uuid="19191919-1919-4191-8191-191919191919", finalizado_em="data-invalida")
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="data-venda")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertFalse(VendaPdv.objects.exists())
 
     def test_entidade_de_outra_empresa_bloqueada(self):
         self._hub_autenticado()
@@ -1715,3 +1814,26 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
         self.assertEqual(HubSessaoCaixaRecebida.objects.count(), 1)
         self.assertEqual(HubFechamentoDiaRecebido.objects.count(), 1)
+
+    def test_integrity_error_concorrente_resolve_para_registro_vencedor_sem_reprocessar(self):
+        hub = self._hub_autenticado()
+        payload = self._payload_movimento(movimento_uuid="20202020-2020-4020-8020-202020202020")
+        evento = self._evento("MOVIMENTO_CAIXA", payload, evento_uuid="21212121-2121-4121-8121-212121212121", chave="concorrente")
+        vencedor = HubEventoRecebido.objects.create(
+            hub=hub,
+            evento_uuid=evento["evento_uuid"],
+            chave_idempotencia=evento["chave_idempotencia"],
+            tipo=evento["tipo"],
+            payload_hash=payload_hash(payload),
+            payload=payload,
+            status=HubEventoRecebido.STATUS_PROCESSADO,
+            processado_em=timezone.now(),
+        )
+        vencedor.refresh_from_db()
+        processor = HubSyncProcessor(hub)
+
+        with patch.object(processor, "_buscar_evento_existente", side_effect=[None, vencedor]), patch("hub.sync.HubEventoRecebido.objects.create", side_effect=IntegrityError):
+            resultado = processor.processar_evento(evento)
+
+        self.assertEqual(resultado["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 0)

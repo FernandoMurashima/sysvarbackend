@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import dateparse, timezone
 
 from cadastros.models import Cliente, Funcionarios
@@ -47,19 +47,24 @@ def parse_decimal(value):
     return money(value)
 
 
-def parse_datetime(value):
+def parse_datetime(value, campo="data/hora"):
     if not value:
         return None
     parsed = dateparse.parse_datetime(str(value))
-    if parsed and timezone.is_naive(parsed):
+    if not parsed:
+        raise HubSyncError(f"{campo} inválida.")
+    if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
 
 
-def parse_date(value):
+def parse_required_date(value, campo):
     if not value:
-        return timezone.localdate()
-    return dateparse.parse_date(str(value)) or timezone.localdate()
+        raise HubSyncError(f"{campo} é obrigatória.")
+    parsed = dateparse.parse_date(str(value))
+    if not parsed:
+        raise HubSyncError(f"{campo} inválida.")
+    return parsed
 
 
 def uuid_value(value, campo):
@@ -99,43 +104,64 @@ class HubSyncProcessor:
 
         digest = payload_hash(payload)
         with transaction.atomic():
-            existente = (
-                HubEventoRecebido.objects.select_for_update()
-                .filter(hub=self.hub)
-                .filter(models_q_evento(evento_uuid_obj, chave))
-                .first()
-            )
+            existente = self._buscar_evento_existente(evento_uuid_obj, chave)
             if existente:
-                if existente.payload_hash != digest:
-                    existente.status = HubEventoRecebido.STATUS_CONFLITO
-                    existente.mensagem_erro = "Chave idempotente reutilizada com payload diferente."
-                    existente.processado_em = timezone.now()
-                    existente.save(update_fields=["status", "mensagem_erro", "processado_em"])
-                    return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_CONFLITO, mensagem=existente.mensagem_erro)
-                return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_DUPLICADO, mapeamento=self._mapeamento_existente(tipo, payload))
+                return self._resolver_evento_existente(existente, evento_uuid_obj, chave, tipo, payload, digest)
 
-            registro = HubEventoRecebido.objects.create(
-                hub=self.hub,
-                evento_uuid=evento_uuid_obj,
-                chave_idempotencia=chave,
-                tipo=tipo,
-                payload_hash=digest,
-                payload=payload,
-            )
             try:
                 with transaction.atomic():
-                    mapeamento = self._processar_payload(tipo, payload)
-            except Exception as exc:
-                registro.status = HubEventoRecebido.STATUS_ERRO
-                registro.mensagem_erro = str(exc)[:255] or "Erro ao processar evento."
-                registro.processado_em = timezone.now()
-                registro.save(update_fields=["status", "mensagem_erro", "processado_em"])
-                return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_ERRO, mensagem=registro.mensagem_erro)
+                    registro = HubEventoRecebido.objects.create(
+                        hub=self.hub,
+                        evento_uuid=evento_uuid_obj,
+                        chave_idempotencia=chave,
+                        tipo=tipo,
+                        payload_hash=digest,
+                        payload=payload,
+                    )
+            except IntegrityError:
+                registro = self._buscar_evento_existente(evento_uuid_obj, chave)
+                if registro:
+                    return self._resolver_evento_existente(registro, evento_uuid_obj, chave, tipo, payload, digest)
+                return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_ERRO, mensagem="Conflito concorrente ao registrar evento.")
 
-            registro.status = HubEventoRecebido.STATUS_PROCESSADO
+            return self._processar_registro(registro, tipo, payload, evento_uuid, chave)
+
+    def _buscar_evento_existente(self, evento_uuid, chave):
+        return (
+            HubEventoRecebido.objects.select_for_update()
+            .filter(hub=self.hub)
+            .filter(models_q_evento(evento_uuid, chave))
+            .order_by("id")
+            .first()
+        )
+
+    def _resolver_evento_existente(self, registro, evento_uuid, chave, tipo, payload, digest):
+        if registro.evento_uuid != evento_uuid or registro.chave_idempotencia != chave:
+            return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_CONFLITO, mensagem="Identificadores idempotentes conflitantes.")
+        if registro.payload_hash != digest:
+            return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_CONFLITO, mensagem="Chave idempotente reutilizada com payload diferente.")
+        if registro.status == HubEventoRecebido.STATUS_PROCESSADO:
+            return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_DUPLICADO, mapeamento=self._mapeamento_existente(tipo, payload))
+        if registro.status == HubEventoRecebido.STATUS_ERRO:
+            return self._processar_registro(registro, tipo, payload, evento_uuid, chave)
+        return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_DUPLICADO, mapeamento=self._mapeamento_existente(tipo, payload))
+
+    def _processar_registro(self, registro, tipo, payload, evento_uuid, chave):
+        try:
+            with transaction.atomic():
+                mapeamento = self._processar_payload(tipo, payload)
+        except Exception as exc:
+            registro.status = HubEventoRecebido.STATUS_ERRO
+            registro.mensagem_erro = str(exc)[:255] or "Erro ao processar evento."
             registro.processado_em = timezone.now()
-            registro.save(update_fields=["status", "processado_em"])
-            return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_PROCESSADO, mapeamento=mapeamento)
+            registro.save(update_fields=["status", "mensagem_erro", "processado_em"])
+            return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_ERRO, mensagem=registro.mensagem_erro)
+
+        registro.status = HubEventoRecebido.STATUS_PROCESSADO
+        registro.mensagem_erro = ""
+        registro.processado_em = timezone.now()
+        registro.save(update_fields=["status", "mensagem_erro", "processado_em"])
+        return self._resultado(evento_uuid, chave, HubEventoRecebido.STATUS_PROCESSADO, mapeamento=mapeamento)
 
     def _processar_payload(self, tipo, payload):
         if tipo == "CLIENTE_LOCAL":
@@ -206,7 +232,7 @@ class HubSyncProcessor:
             return {"venda_retaguarda_id": venda.pk, "documento": documento}
 
         view = VendaPdvViewSet()
-        data_venda = parse_datetime(payload.get("finalizado_em") or payload.get("data_hora") or payload.get("ocorrido_em")) or timezone.now()
+        data_venda = parse_datetime(payload.get("finalizado_em") or payload.get("data_hora") or payload.get("ocorrido_em"), "data da venda") or timezone.now()
         venda = VendaPdv.objects.create(
             empresa=self.empresa,
             loja=self.loja,
@@ -321,7 +347,7 @@ class HubSyncProcessor:
                 "historico": str(payload.get("historico") or "")[:255],
                 "documento": str(payload.get("documento") or "")[:80],
                 "tipo_despesa": str(payload.get("tipo_despesa") or "")[:80],
-                "ocorrido_em": parse_datetime(payload.get("ocorrido_em")),
+                "ocorrido_em": parse_datetime(payload.get("ocorrido_em"), "ocorrido_em"),
                 "snapshot": payload,
             },
         )
@@ -337,8 +363,8 @@ class HubSyncProcessor:
                 "caixa": caixa,
                 "operador": self._operador(payload.get("operador_retaguarda_usuario_id") or payload.get("operador")),
                 "terminal": str(payload.get("terminal") or "")[:80],
-                "aberto_em": parse_datetime(payload.get("aberto_em")),
-                "fechado_em": parse_datetime(payload.get("fechado_em")),
+                "aberto_em": parse_datetime(payload.get("aberto_em"), "aberto_em"),
+                "fechado_em": parse_datetime(payload.get("fechado_em"), "fechado_em"),
                 "valor_abertura": parse_decimal(payload.get("valor_abertura")),
                 "valor_esperado": parse_decimal(payload.get("valor_esperado")),
                 "valor_contado": parse_decimal(payload.get("valor_contado")),
@@ -356,7 +382,7 @@ class HubSyncProcessor:
             hub=self.hub,
             fechamento_uuid=fechamento_uuid,
             defaults={
-                "data_operacional": parse_date(payload.get("data_operacional")),
+                "data_operacional": parse_required_date(payload.get("data_operacional"), "data_operacional"),
                 "total_sistema": parse_decimal(payload.get("total_sistema")),
                 "total_conferido": parse_decimal(payload.get("total_conferido")),
                 "diferenca": parse_decimal(payload.get("diferenca")),
