@@ -6,6 +6,7 @@ from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.renderers import BaseRenderer
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -273,9 +274,20 @@ class HubCatalogoView(APIView):
         return Response(gerar_catalogo_hub(request.sysvar_hub), status=status.HTTP_200_OK)
 
 
+class HubImagemRenderer(BaseRenderer):
+    media_type = "image/*"
+    format = "image"
+    charset = None
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+
 class HubCatalogoImagemView(APIView):
     authentication_classes = [HubTokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [HubImagemRenderer]
 
     def get(self, request, imagem_id):
         imagem = (

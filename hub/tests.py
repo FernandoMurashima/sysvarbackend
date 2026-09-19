@@ -653,6 +653,30 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.assertEqual(resp.data["itens"][0]["imagem"]["id"], primeira.pk)
         self.assertEqual(resp.data["itens"][0]["imagem"]["tipo"], "original")
 
+    def test_download_imagem_aceita_accept_image_wildcard(self):
+        self._hub_autenticado()
+        produto = self._produto()
+        imagem = ProdutoImagem.objects.create(produto=produto, principal=True)
+        imagem.imagem.save("foto-hub.png", ContentFile(b"\x89PNG\r\n\x1a\nfoto-central"), save=True)
+
+        resp = self.client.get(f"/api/hub/catalogo/imagens/{imagem.pk}/", HTTP_ACCEPT="image/*")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(b"".join(resp.streaming_content), b"\x89PNG\r\n\x1a\nfoto-central")
+        self.assertEqual(resp["Content-Type"], "image/png")
+
+    def test_download_imagem_sem_accept_especifico_continua_funcionando(self):
+        self._hub_autenticado()
+        produto = self._produto()
+        imagem = ProdutoImagem.objects.create(produto=produto, principal=True)
+        imagem.imagem.save("foto.jpg", ContentFile(b"foto-central"), save=True)
+
+        resp = self.client.get(f"/api/hub/catalogo/imagens/{imagem.pk}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(b"".join(resp.streaming_content), b"foto-central")
+        self.assertEqual(resp["Content-Type"], "image/jpeg")
+
     def test_download_imagem_exige_hub_e_respeita_empresa(self):
         hub = self._hub_autenticado()
         produto = self._produto()
