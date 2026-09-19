@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
@@ -26,7 +27,7 @@ from hub.models import (
 )
 from hub.sync import HubSyncProcessor, payload_hash
 from produto.models import EstoqueMovimentacao
-from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
+from produto.models import ConfigEan, Cor, Estoque, Grade, Produto, ProdutoDetalhe, ProdutoImagem, Tabelapreco, TabelaprecoProduto, Tamanho, Unidade
 
 
 class SysvarHubModelTests(TestCase):
@@ -576,7 +577,7 @@ class SysvarHubCatalogoApiTests(TestCase):
         resp = self._catalogo()
 
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(resp.data["catalogo_versao"], 1)
+        self.assertEqual(resp.data["catalogo_versao"], 2)
         self.assertIn("gerado_em", resp.data)
         self.assertEqual(resp.data["hub"], {"id": hub.pk, "hub_uuid": str(hub.hub_uuid)})
         self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
@@ -614,8 +615,61 @@ class SysvarHubCatalogoApiTests(TestCase):
         self.assertEqual(item["fiscal"]["aliq_pis"], Decimal("1.65"))
         self.assertEqual(item["fiscal"]["cst_cofins"], "01")
         self.assertEqual(item["fiscal"]["aliq_cofins"], Decimal("7.60"))
-        self.assertNotIn("imagem", item)
+        self.assertIsNone(item["imagem"])
         self.assertNotIn("imagem_url", item)
+
+    def test_catalogo_envia_imagem_principal_preferindo_reduzida(self):
+        self._hub_autenticado()
+        produto = self._produto()
+        sku = self._sku(produto)
+        self._preco(produto)
+        self._estoque(sku)
+        secundaria = ProdutoImagem.objects.create(produto=produto, principal=False, ordem=1)
+        secundaria.imagem.save("secundaria.jpg", ContentFile(b"original"), save=True)
+        principal = ProdutoImagem.objects.create(produto=produto, principal=True, ordem=2)
+        principal.imagem.save("principal.jpg", ContentFile(b"original"), save=False)
+        principal.imagem_reduzida.save("principal.webp", ContentFile(b"reduzida"), save=True)
+
+        resp = self._catalogo()
+
+        imagem = resp.data["itens"][0]["imagem"]
+        self.assertEqual(imagem["id"], principal.pk)
+        self.assertEqual(imagem["tipo"], "reduzida")
+        self.assertEqual(imagem["versao"], principal.atualizado_em.isoformat())
+
+    def test_catalogo_sem_principal_usa_ordem_e_id_deterministicos(self):
+        self._hub_autenticado()
+        produto = self._produto()
+        sku = self._sku(produto)
+        self._preco(produto)
+        self._estoque(sku)
+        segunda = ProdutoImagem.objects.create(produto=produto, ordem=2)
+        segunda.imagem.save("segunda.jpg", ContentFile(b"segunda"), save=True)
+        primeira = ProdutoImagem.objects.create(produto=produto, ordem=1)
+        primeira.imagem.save("primeira.jpg", ContentFile(b"primeira"), save=True)
+
+        resp = self._catalogo()
+
+        self.assertEqual(resp.data["itens"][0]["imagem"]["id"], primeira.pk)
+        self.assertEqual(resp.data["itens"][0]["imagem"]["tipo"], "original")
+
+    def test_download_imagem_exige_hub_e_respeita_empresa(self):
+        hub = self._hub_autenticado()
+        produto = self._produto()
+        imagem = ProdutoImagem.objects.create(produto=produto, principal=True)
+        imagem.imagem.save("foto.jpg", ContentFile(b"foto-central"), save=True)
+
+        ok = self.client.get(f"/api/hub/catalogo/imagens/{imagem.pk}/")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(b"".join(ok.streaming_content), b"foto-central")
+
+        self.client.credentials()
+        self.assertIn(self.client.get(f"/api/hub/catalogo/imagens/{imagem.pk}/").status_code, (401, 403))
+
+        outro_hub = SysvarHub.objects.create(loja=self.loja_outra_empresa, hub_uuid="77777777-7777-4777-8777-777777777777", ativo=True)
+        token = outro_hub.gerar_token()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        self.assertEqual(self.client.get(f"/api/hub/catalogo/imagens/{imagem.pk}/").status_code, 404)
 
     def test_catalogo_sem_authorization_token_invalido_e_hub_inativo_sao_rejeitados(self):
         self.client.force_authenticate(user=None)
@@ -803,7 +857,7 @@ class SysvarHubCatalogoApiTests(TestCase):
             self._preco(produto)
             self._estoque(sku)
 
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(6):
             resp = self._catalogo()
 
         self.assertEqual(resp.status_code, 200, resp.data)

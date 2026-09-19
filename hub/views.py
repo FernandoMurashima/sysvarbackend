@@ -1,5 +1,6 @@
 import uuid
 
+from django.http import FileResponse, Http404
 from django.db import IntegrityError, models, transaction
 from django.db.models import Prefetch
 from django.utils import timezone
@@ -16,6 +17,7 @@ from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
 from hub.sync import HubSyncProcessor
+from produto.models import ProdutoImagem
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
 
@@ -269,6 +271,38 @@ class HubCatalogoView(APIView):
 
     def get(self, request):
         return Response(gerar_catalogo_hub(request.sysvar_hub), status=status.HTTP_200_OK)
+
+
+class HubCatalogoImagemView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, imagem_id):
+        imagem = (
+            ProdutoImagem.objects.select_related("produto", "produto__empresa")
+            .filter(pk=imagem_id, produto__empresa=request.sysvar_hub.loja.empresa)
+            .first()
+        )
+        if not imagem:
+            raise Http404
+        arquivo = imagem.imagem_reduzida or imagem.imagem
+        if not arquivo:
+            raise Http404
+        try:
+            return FileResponse(arquivo.open("rb"), content_type=_content_type_imagem(arquivo.name))
+        except FileNotFoundError as exc:
+            raise Http404 from exc
+
+
+def _content_type_imagem(nome):
+    extensao = (nome.rsplit(".", 1)[-1] if "." in nome else "").lower()
+    return {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "gif": "image/gif",
+    }.get(extensao, "application/octet-stream")
 
 
 class HubFormasPagamentoView(APIView):

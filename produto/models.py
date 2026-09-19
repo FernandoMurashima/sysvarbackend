@@ -716,6 +716,7 @@ class ProdutoImagem(models.Model):
     principal = models.BooleanField(default=False, db_index=True)
     ordem = models.PositiveSmallIntegerField(default=1)
     data_cadastro = models.DateTimeField(default=timezone.now)
+    atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['ordem', 'id']

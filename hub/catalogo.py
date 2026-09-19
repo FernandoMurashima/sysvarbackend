@@ -3,9 +3,9 @@ from decimal import Decimal
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from produto.models import Estoque, ProdutoDetalhe, Tabelapreco, TabelaprecoProduto
+from produto.models import Estoque, ProdutoDetalhe, ProdutoImagem, Tabelapreco, TabelaprecoProduto
 
-CATALOGO_VERSAO = 1
+CATALOGO_VERSAO = 2
 CATALOGO_TABELA_PRECO_CODIGO_V1 = "PADRAO"
 CATALOGO_TABELA_PRECO_NOME_V1 = "Tabela Padrão"
 MOTIVO_SEM_PRECO = "SEM_PRECO"
@@ -61,6 +61,27 @@ def _estoques_por_ean(loja, eans):
     }
 
 
+def _imagens_por_produto(produto_ids):
+    imagens = (
+        ProdutoImagem.objects.filter(produto_id__in=produto_ids)
+        .only("id", "produto_id", "imagem", "imagem_reduzida", "principal", "ordem", "atualizado_em")
+        .order_by("produto_id", "-principal", "ordem", "id")
+    )
+    por_produto = {}
+    for imagem in imagens:
+        if imagem.produto_id in por_produto:
+            continue
+        arquivo = imagem.imagem_reduzida or imagem.imagem
+        if not arquivo:
+            continue
+        por_produto[imagem.produto_id] = {
+            "id": imagem.pk,
+            "versao": imagem.atualizado_em.isoformat(),
+            "tipo": "reduzida" if imagem.imagem_reduzida else "original",
+        }
+    return por_produto
+
+
 def _fiscal(produto):
     return {
         "ncm": produto.ncm or "",
@@ -95,6 +116,7 @@ def gerar_catalogo_hub(hub):
     )
     precos = _precos_por_produto(tabela, hoje)
     estoques = _estoques_por_ean(loja, [sku.ean13 for sku in skus])
+    imagens = _imagens_por_produto({sku.produto_id for sku in skus})
 
     itens = []
     for sku in skus:
@@ -140,6 +162,7 @@ def gerar_catalogo_hub(hub):
                 "vendavel": not motivos,
                 "motivos_bloqueio": motivos,
                 "fiscal": _fiscal(produto),
+                "imagem": imagens.get(produto.pk),
             }
         )
 
