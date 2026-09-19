@@ -1,10 +1,14 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+import importlib
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.urls import clear_url_caches
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -38,6 +42,26 @@ from .models import (
     Unidade,
     Material,
 )
+
+
+class MediaDevelopmentUrlTests(SimpleTestCase):
+    def test_media_url_serve_arquivo_existente_em_debug(self):
+        with tempfile.TemporaryDirectory() as media_root:
+            path = Path(media_root) / "produtos" / "imagens"
+            path.mkdir(parents=True)
+            (path / "produto.png").write_bytes(b"imagem")
+
+            with override_settings(DEBUG=True, MEDIA_ROOT=media_root):
+                import Varejo.urls
+
+                clear_url_caches()
+                importlib.reload(Varejo.urls)
+                response = self.client.get("/media/produtos/imagens/produto.png")
+                response.close()
+            clear_url_caches()
+            importlib.reload(Varejo.urls)
+
+        self.assertEqual(response.status_code, 200)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
