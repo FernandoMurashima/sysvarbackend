@@ -9,9 +9,11 @@ from django.db import IntegrityError, transaction
 from django.utils import dateparse, timezone
 
 from cadastros.models import Cliente, Funcionarios
-from fiscal.models import NFCe, VendaPdv
+from fiscal.models import NFCe, VendaDevolucao, VendaPdv
 from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
+from fiscal.views.venda_pdv import VendaDevolucaoViewSet
+from financeiro.models import ValeTroca, ValeTrocaMovimento
 from financeiro.models import Caixa
 from produto.models import ProdutoDetalhe
 
@@ -19,6 +21,7 @@ from hub.models import (
     HubClienteMapeamento,
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
+    HubDevolucaoMapeamento,
     HubMovimentoCaixaRecebido,
     HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
@@ -299,14 +302,95 @@ class HubSyncProcessor:
     def _devolucao_finalizada(self, payload):
         devolucao_uuid = uuid_value(payload.get("devolucao_uuid"), "devolucao_uuid")
         venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid")
+        existente = HubDevolucaoMapeamento.objects.filter(hub=self.hub, devolucao_uuid=devolucao_uuid).first()
+        if existente:
+            return {
+                "devolucao_retaguarda_id": existente.devolucao_id,
+                "documento": existente.documento,
+                "vale_documento": existente.vale_documento,
+            }
         venda_mapeada = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
         if not venda_mapeada:
             raise HubSyncError("Venda origem da devolução ainda não foi sincronizada.")
+        venda = (
+            VendaPdv.objects.select_for_update()
+            .select_related("loja", "cliente", "caixa")
+            .prefetch_related("itens", "devolucoes__itens", "pagamentos")
+            .filter(pk=venda_mapeada.venda_id, empresa=self.empresa, loja=self.loja, status=VendaPdv.Status.FINALIZADA)
+            .first()
+        )
+        if not venda:
+            raise HubSyncError("Venda origem da devolução não pertence ao Hub.")
+
+        view = VendaDevolucaoViewSet()
+        itens_por_sku = {item.sku_id: item for item in venda.itens.all()}
+        itens_por_uuid = {str(getattr(item, "item_uuid", "")): item for item in venda.itens.all()}
+        devolvidos = view._quantidades_devolvidas(venda)
+        selecionados = []
+        total = Decimal("0.00")
+        for row in payload.get("itens") or []:
+            sku_id = row.get("sku_retaguarda_id")
+            venda_item = itens_por_sku.get(sku_id) or itens_por_uuid.get(str(row.get("item_uuid") or ""))
+            quantidade = int(row.get("quantidade") or 0)
+            if not venda_item or quantidade <= 0:
+                raise HubSyncError("Item de devolução inválido.")
+            disponivel = int(venda_item.quantidade or 0) - int(devolvidos.get(venda_item.id, 0))
+            if quantidade > disponivel:
+                raise HubSyncError(f"Quantidade maior que o saldo para devolver em {venda_item.descricao}.")
+            desconto_unitario = money(Decimal(venda_item.desconto or 0) / Decimal(venda_item.quantidade or 1))
+            total_item = money((Decimal(venda_item.preco_unitario or 0) - desconto_unitario) * Decimal(quantidade))
+            total += total_item
+            selecionados.append((venda_item, quantidade, money(desconto_unitario * Decimal(quantidade))))
+        if total <= 0:
+            raise HubSyncError("Valor da devolução inválido.")
+
+        documento = f"HUB-DEV-{self.hub.pk}-{devolucao_uuid.hex[:16]}"
+        devolucao = VendaDevolucao.objects.create(
+            empresa=venda.empresa,
+            venda=venda,
+            loja=venda.loja,
+            cliente=venda.cliente,
+            documento=documento,
+            motivo=str(payload.get("motivo") or "")[:255],
+            subtotal=money(total),
+            credito_cliente=money(total),
+            criado_por=self._operador(payload.get("operador_retaguarda_usuario_id")),
+        )
+        for venda_item, quantidade, desconto in selecionados:
+            view._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
+
+        view._registrar_credito_cliente(devolucao)
+        vale_payload = payload.get("vale_troca") or {}
+        vale_documento = str(vale_payload.get("documento") or "").strip()
+        if vale_documento:
+            vale = ValeTroca.objects.select_for_update().filter(devolucao=devolucao).first()
+            if vale and not ValeTroca.objects.filter(documento=vale_documento).exclude(pk=vale.pk).exists():
+                antigo = vale.documento
+                vale.documento = vale_documento[:50]
+                vale.observacao = f"Vale-troca Hub {vale_documento} gerado pela devolução {devolucao.documento}"
+                vale.save(update_fields=["documento", "observacao", "atualizado_em"])
+                ValeTrocaMovimento.objects.filter(vale=vale, observacao__icontains=antigo).update(
+                    observacao=f"Crédito por devolução {devolucao.documento} da venda {venda.documento}"
+                )
+        else:
+            vale = ValeTroca.objects.filter(devolucao=devolucao).first()
+            vale_documento = vale.documento if vale else ""
+        view._estornar_financeiro(devolucao)
+        view._estornar_cmv(devolucao)
+        view._registrar_nfe_devolucao(devolucao)
+        HubDevolucaoMapeamento.objects.create(
+            hub=self.hub,
+            devolucao_uuid=devolucao_uuid,
+            devolucao=devolucao,
+            venda_uuid=venda_uuid,
+            documento=documento,
+            vale_documento=vale_documento,
+        )
         return {
-            "devolucao_uuid": str(devolucao_uuid),
-            "venda_retaguarda_id": venda_mapeada.venda_id,
-            "valor_total": str(payload.get("valor_total") or "0.00"),
-            "status": "RECEBIDA",
+            "devolucao_retaguarda_id": devolucao.pk,
+            "documento": documento,
+            "vale_documento": vale_documento,
+            "valor_total": str(devolucao.credito_cliente),
         }
 
     def _normalizar_item_venda(self, item):

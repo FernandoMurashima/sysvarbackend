@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv
+from financeiro.models import Caixa, CashbackConfig, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -289,6 +289,7 @@ class HubBootstrapView(APIView):
                     }
                     for caixa in caixas
                 ],
+                "cashback_config": _serializar_cashback_config(CashbackConfig.regra_ativa(empresa)),
             },
             status=status.HTTP_200_OK,
         )
@@ -516,6 +517,27 @@ class HubClientesView(APIView):
                 "ativo",
             )
         )
+        vales_por_cliente = {}
+        for vale in (
+            ValeTroca.objects.filter(empresa=empresa, loja=loja, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=timezone.localdate()))
+            .values("Idvaletroca", "cliente_id", "documento", "saldo", "valor_original", "validade", "status")
+        ):
+            vales_por_cliente.setdefault(vale["cliente_id"], []).append(
+                {
+                    "id": vale["Idvaletroca"],
+                    "documento": vale["documento"],
+                    "saldo": vale["saldo"],
+                    "valor_original": vale["valor_original"],
+                    "validade": vale["validade"].isoformat() if vale["validade"] else None,
+                    "status": vale["status"],
+                }
+            )
+        clientes_payload = []
+        for cliente in clientes:
+            item = dict(cliente)
+            item["vales_troca"] = vales_por_cliente.get(cliente["id"], [])
+            clientes_payload.append(item)
 
         return Response(
             {
@@ -531,10 +553,26 @@ class HubClientesView(APIView):
                 "loja": {
                     "id": loja.pk,
                 },
-                "clientes": list(clientes),
+                "clientes": clientes_payload,
             },
             status=status.HTTP_200_OK,
         )
+
+
+def _serializar_cashback_config(config):
+    if not config:
+        return None
+    return {
+        "retaguarda_id": config.pk,
+        "nome": config.nome,
+        "ativo": config.ativo,
+        "percentual": config.percentual,
+        "validade_dias": config.validade_dias,
+        "valor_minimo_geracao": config.valor_minimo_geracao,
+        "valor_minimo_uso": config.valor_minimo_uso,
+        "limite_uso_percentual": config.limite_uso_percentual,
+        "consumidor_final_participa": config.consumidor_final_participa,
+    }
 
 
 class HubOperadoresView(APIView):

@@ -12,12 +12,13 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
-from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv
-from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca
+from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber
 from hub.models import (
     AtivacaoSysvarHub,
     HubClienteMapeamento,
+    HubDevolucaoMapeamento,
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
     HubMovimentoCaixaRecebido,
@@ -961,7 +962,7 @@ class SysvarHubCatalogoApiTests(TestCase):
             self._preco(produto)
             self._estoque(sku)
 
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(7):
             resp = self._catalogo()
 
         self.assertEqual(resp.status_code, 200, resp.data)
@@ -1371,7 +1372,7 @@ class SysvarHubClientesApiTests(TestCase):
             self._cliente(f"Cliente {idx}", documento=f"1234567890{idx}")
         antes = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self._clientes()
 
         depois = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
@@ -2020,6 +2021,59 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_devolucao_finalizada_materializa_devolucao_estoque_vale_e_retry_nao_duplica(self):
+        self._hub_autenticado()
+        payload_venda = self._payload_venda(venda_uuid="45454545-4545-4454-8454-454545454545")
+        self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.estoque.refresh_from_db()
+        self.assertEqual(self.estoque.Estoque, Decimal("4.000"))
+        payload = {
+            "devolucao_uuid": "46464646-4646-4464-8464-464646464646",
+            "venda_uuid": payload_venda["venda_uuid"],
+            "motivo": "Troca Hub",
+            "valor_total": "10.00",
+            "itens": [{
+                "sku_retaguarda_id": self.sku.pk,
+                "produto_retaguarda_id": self.produto.pk,
+                "quantidade": 1,
+            }],
+            "vale_troca": {"documento": "VT-HUB-TESTE", "valor": "10.00", "saldo": "10.00"},
+        }
+        evento = self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="47474747-4747-4474-8474-474747474747", chave="dev-1")
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertEqual(VendaDevolucao.objects.count(), 1)
+        self.assertEqual(VendaDevolucaoItem.objects.count(), 1)
+        self.assertEqual(HubDevolucaoMapeamento.objects.count(), 1)
+        self.assertTrue(ValeTroca.objects.filter(documento="VT-HUB-TESTE", saldo=Decimal("10.00")).exists())
+        self.estoque.refresh_from_db()
+        self.assertEqual(self.estoque.Estoque, Decimal("5.000"))
+        self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
+
+        retry = self._push([evento])
+
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(VendaDevolucao.objects.count(), 1)
+        self.assertEqual(ValeTroca.objects.filter(documento="VT-HUB-TESTE").count(), 1)
+        self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
+
+    def test_devolucao_quantidade_acima_do_disponivel_falha(self):
+        self._hub_autenticado()
+        payload_venda = self._payload_venda(venda_uuid="48484848-4848-4484-8484-484848484848")
+        self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-qtd")])
+        payload = {
+            "devolucao_uuid": "49494949-4949-4494-8494-494949494949",
+            "venda_uuid": payload_venda["venda_uuid"],
+            "itens": [{"sku_retaguarda_id": self.sku.pk, "produto_retaguarda_id": self.produto.pk, "quantidade": 2}],
+        }
+
+        response = self._push([self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="50505050-5050-4050-8050-505050505050", chave="dev-qtd")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertFalse(VendaDevolucao.objects.exists())
 
     def test_data_operacional_invalida_retorna_erro_e_nao_grava_fechamento_hoje(self):
         self._hub_autenticado()

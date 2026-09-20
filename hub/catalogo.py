@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from produto.models import Estoque, ProdutoDetalhe, ProdutoImagem, Tabelapreco, TabelaprecoProduto
+from produto.models import Estoque, ProdutoDetalhe, ProdutoImagem, Promocao, Tabelapreco, TabelaprecoProduto
 
 CATALOGO_VERSAO = 2
 CATALOGO_TABELA_PRECO_CODIGO_V1 = "PADRAO"
@@ -97,6 +97,36 @@ def _fiscal(produto):
     }
 
 
+def _promocoes_payload(empresa, loja, hoje):
+    promocoes = (
+        Promocao.objects.filter(empresa=empresa, ativo=True, data_inicio__lte=hoje)
+        .filter(Q(data_fim__isnull=True) | Q(data_fim__gte=hoje))
+        .filter(Q(lojas__isnull=True) | Q(lojas=loja))
+        .prefetch_related("produtos", "colecoes", "grupos", "subgrupos")
+        .distinct()
+        .order_by("prioridade", "Idpromocao")
+    )
+    return [
+        {
+            "id": promocao.pk,
+            "nome": promocao.nome,
+            "ativo": promocao.ativo,
+            "tipo": promocao.tipo,
+            "valor": promocao.valor,
+            "escopo": promocao.escopo,
+            "prioridade": promocao.prioridade,
+            "acumula_cashback": promocao.acumula_cashback,
+            "data_inicio": promocao.data_inicio.isoformat(),
+            "data_fim": promocao.data_fim.isoformat() if promocao.data_fim else None,
+            "produto_ids": list(promocao.produtos.values_list("pk", flat=True)),
+            "colecao_ids": list(promocao.colecoes.values_list("pk", flat=True)),
+            "grupo_ids": list(promocao.grupos.values_list("pk", flat=True)),
+            "subgrupo_ids": list(promocao.subgrupos.values_list("pk", flat=True)),
+        }
+        for promocao in promocoes
+    ]
+
+
 def gerar_catalogo_hub(hub):
     hoje = timezone.localdate()
     loja = hub.loja
@@ -141,6 +171,9 @@ def gerar_catalogo_hub(hub):
                 "produto_id": produto.pk,
                 "sku_id": sku.pk,
                 "tipo_produto": produto.tipo_produto,
+                "colecao_id": produto.colecao_id,
+                "grupo_id": produto.grupo_id,
+                "subgrupo_id": produto.subgrupo_id,
                 "referencia": produto.referencia or "",
                 "descricao": produto.descricao,
                 "descricao_reduzida": produto.descricao_reduzida or produto.descricao,
@@ -177,4 +210,5 @@ def gerar_catalogo_hub(hub):
         ),
         "total_itens": len(itens),
         "itens": itens,
+        "promocoes": _promocoes_payload(empresa, loja, hoje),
     }
