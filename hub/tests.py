@@ -2067,6 +2067,9 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(VendaPdv.objects.get(pk=venda_id).total, Decimal("20.00"))
         self.assertEqual(VendaPdvItem.objects.filter(venda_id=venda_id).count(), 1)
         self.assertEqual(VendaPdvPagamento.objects.filter(venda_id=venda_id).count(), 1)
+        receber = Receber.objects.get(pedido_venda=venda_id)
+        self.assertEqual(receber.Valor_total, Decimal("20.00"))
+        self.assertEqual(sum(ReceberItem.objects.filter(Idreceber=receber).values_list("valor_parcela", flat=True), Decimal("0.00")), Decimal("20.00"))
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=VendaPdv.objects.get(pk=venda_id).documento).count(), 1)
@@ -2088,20 +2091,56 @@ class SysvarHubSyncPushApiTests(TestCase):
             empresa=self.empresa,
             cliente=self.cliente,
             tipo=CashbackMovimento.TIPO_CREDITO,
-            valor=Decimal("10.00"),
+            valor=Decimal("100.00"),
         )
         payload = self._payload_venda(
             venda_uuid="61616161-6161-4161-8161-616161616161",
-            pagamentos=[{"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "10.00"}],
+            total="100.00",
+            valor_recebido="100.00",
+            pagamentos=[{"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "100.00"}],
         )
+        payload["itens"][0]["preco_unitario"] = "100.00"
 
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
         self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "CASHBACK")
-        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("10.00")).exists())
-        self.assertFalse(ReceberItem.objects.filter(Idreceber__pedido_venda=venda.pk, valor_parcela=Decimal("10.00")).exists())
+        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("100.00")).exists())
+        self.assertFalse(Receber.objects.filter(pedido_venda=venda.pk).exists())
+
+    def test_venda_hub_cashback_parcial_cria_recebivel_so_do_valor_financeiro(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("0.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("10.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="63636363-6363-4363-8363-636363636363",
+            total="100.00",
+            valor_recebido="100.00",
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "10.00"},
+                {"codigo": "DINHEIRO", "tipo": "DINHEIRO", "descricao": "Dinheiro", "valor": "90.00"},
+            ],
+        )
+        payload["itens"][0]["preco_unitario"] = "100.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-parcial")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        receber = Receber.objects.get(pedido_venda=venda.pk)
+        self.assertEqual(receber.Valor_total, Decimal("90.00"))
+        self.assertEqual(sum(ReceberItem.objects.filter(Idreceber=receber).values_list("valor_parcela", flat=True), Decimal("0.00")), Decimal("90.00"))
 
     def test_venda_hub_normaliza_troca_por_tipo_e_consumo_do_vale_documentado(self):
         self._hub_autenticado()
@@ -2113,8 +2152,8 @@ class SysvarHubSyncPushApiTests(TestCase):
             vendedor=self.vendedor,
             documento="VD-TROCA-HUB",
             forma_pagamento="DINHEIRO",
-            total=Decimal("10.00"),
-            valor_recebido=Decimal("10.00"),
+            total=Decimal("100.00"),
+            valor_recebido=Decimal("100.00"),
         )
         devolucao = VendaDevolucao.objects.create(
             empresa=self.empresa,
@@ -2122,7 +2161,7 @@ class SysvarHubSyncPushApiTests(TestCase):
             loja=self.loja,
             cliente=self.cliente,
             documento="DEV-TROCA-HUB",
-            credito_cliente=Decimal("10.00"),
+            credito_cliente=Decimal("100.00"),
         )
         vale = ValeTroca.objects.create(
             empresa=self.empresa,
@@ -2130,13 +2169,16 @@ class SysvarHubSyncPushApiTests(TestCase):
             cliente=self.cliente,
             devolucao=devolucao,
             documento="VT-HUB-CANONICO",
-            valor_original=Decimal("10.00"),
-            saldo=Decimal("10.00"),
+            valor_original=Decimal("100.00"),
+            saldo=Decimal("100.00"),
         )
         payload = self._payload_venda(
             venda_uuid="62626262-6262-4262-8262-626262626262",
-            pagamentos=[{"codigo": "TRO", "tipo": "TROCA", "valor": "10.00", "vale_troca_documento": "VT-HUB-CANONICO"}],
+            total="100.00",
+            valor_recebido="100.00",
+            pagamentos=[{"codigo": "TRO", "tipo": "TROCA", "valor": "100.00", "vale_troca_documento": "VT-HUB-CANONICO"}],
         )
+        payload["itens"][0]["preco_unitario"] = "100.00"
 
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-troca")])
 
@@ -2145,7 +2187,8 @@ class SysvarHubSyncPushApiTests(TestCase):
         vale.refresh_from_db()
         self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "TROCA")
         self.assertEqual(vale.saldo, Decimal("0.00"))
-        self.assertTrue(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, valor=Decimal("10.00")).exists())
+        self.assertTrue(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, valor=Decimal("100.00")).exists())
+        self.assertFalse(Receber.objects.filter(pedido_venda=venda.pk).exists())
 
     def test_devolucao_finalizada_materializa_devolucao_estoque_vale_e_retry_nao_duplica(self):
         self._hub_autenticado()

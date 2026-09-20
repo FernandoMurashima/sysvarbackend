@@ -1236,6 +1236,10 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         natureza = self._natureza_venda(venda.empresa)
         pagamentos = list(venda.pagamentos.all())
         valor_venda = money(venda.total)
+        total_beneficios = money(sum((pagamento.valor for pagamento in pagamentos if pagamento.forma in ("CASHBACK", "TROCA")), Decimal("0")))
+        valor_financeiro = money(max(Decimal("0.00"), valor_venda - total_beneficios))
+        if valor_financeiro <= 0:
+            return
         formas_liquidacao = {
             forma.codigo.upper(): forma
             for forma in FormaPagamento.objects.select_related("conta_liquidacao")
@@ -1248,15 +1252,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             Titulo=str(venda.documento),
             Documento=venda.documento,
             Data_emissao=timezone.localdate(),
-            Valor_total=valor_venda,
+            Valor_total=valor_financeiro,
             Previsao=False,
             FormaPagamento=venda.forma_pagamento,
             Idnatureza=natureza,
             pedido_venda=venda.pk,
         )
 
-        total_beneficios = money(sum((pagamento.valor for pagamento in pagamentos if pagamento.forma in ("CASHBACK", "TROCA")), Decimal("0")))
-        saldo_financeiro = money(max(Decimal("0.00"), valor_venda - total_beneficios))
+        saldo_financeiro = valor_financeiro
         parcela_n = 1
         for pagamento in pagamentos:
             if pagamento.forma in ("CASHBACK", "TROCA"):
