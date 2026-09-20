@@ -33,6 +33,7 @@ TIPOS_SUPORTADOS = {
     "SESSAO_CAIXA_FECHADA",
     "FECHAMENTO_DIA",
     "NFCE_ATUALIZADA",
+    "DEVOLUCAO_FINALIZADA",
 }
 
 
@@ -186,6 +187,8 @@ class HubSyncProcessor:
             return self._fechamento_dia(payload)
         if tipo == "NFCE_ATUALIZADA":
             return self._nfce_atualizada(payload)
+        if tipo == "DEVOLUCAO_FINALIZADA":
+            return self._devolucao_finalizada(payload)
         raise HubSyncError("Tipo de evento não suportado.")
 
     def _cliente_local(self, payload):
@@ -270,6 +273,12 @@ class HubSyncProcessor:
         total_pago = money(sum((pagamento["valor"] for pagamento in pagamentos), Decimal("0")))
         if total_pago < total:
             raise HubSyncError("O total pago é menor que o total da venda.")
+        erro_cashback = view._validar_cashback(venda, pagamentos, total)
+        if erro_cashback:
+            raise HubSyncError(erro_cashback)
+        erro_vale = view._validar_vale_troca(venda, pagamentos, total)
+        if erro_vale:
+            raise HubSyncError(erro_vale)
         venda.subtotal = money(subtotal)
         venda.desconto_itens = money(desconto_itens)
         venda.total = total
@@ -279,11 +288,26 @@ class HubSyncProcessor:
         venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
         view._registrar_pagamentos(venda, pagamentos)
         view._registrar_financeiro(venda)
+        view._registrar_uso_vale_troca(venda, pagamentos)
+        view._registrar_cashback(venda, pagamentos)
         view._registrar_cmv(venda)
         view._registrar_impostos_venda(venda)
         view._registrar_comissao(venda)
         HubVendaMapeamento.objects.create(hub=self.hub, venda_uuid=venda_uuid, venda=venda, documento=documento)
         return {"venda_retaguarda_id": venda.pk, "documento": documento, "total": str(venda.total)}
+
+    def _devolucao_finalizada(self, payload):
+        devolucao_uuid = uuid_value(payload.get("devolucao_uuid"), "devolucao_uuid")
+        venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid")
+        venda_mapeada = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
+        if not venda_mapeada:
+            raise HubSyncError("Venda origem da devolução ainda não foi sincronizada.")
+        return {
+            "devolucao_uuid": str(devolucao_uuid),
+            "venda_retaguarda_id": venda_mapeada.venda_id,
+            "valor_total": str(payload.get("valor_total") or "0.00"),
+            "status": "RECEBIDA",
+        }
 
     def _normalizar_item_venda(self, item):
         produto_id = item.get("produto_retaguarda_id")
