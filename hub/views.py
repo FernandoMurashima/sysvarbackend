@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, CashbackConfig, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -519,7 +519,7 @@ class HubClientesView(APIView):
         )
         vales_por_cliente = {}
         for vale in (
-            ValeTroca.objects.filter(empresa=empresa, loja=loja, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
+            ValeTroca.objects.filter(empresa=empresa, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)
             .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=timezone.localdate()))
             .values("Idvaletroca", "cliente_id", "documento", "saldo", "valor_original", "validade", "status")
         ):
@@ -533,10 +533,28 @@ class HubClientesView(APIView):
                     "status": vale["status"],
                 }
             )
+        cashback_por_cliente = {}
+        for saldo in (
+            CashbackMovimento.objects.filter(empresa=empresa, status=CashbackMovimento.STATUS_ATIVO)
+            .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=timezone.localdate()))
+            .values("cliente_id")
+            .annotate(
+                saldo=models.Sum(
+                    models.Case(
+                        models.When(tipo=CashbackMovimento.TIPO_CREDITO, then="valor"),
+                        models.When(tipo=CashbackMovimento.TIPO_ESTORNO, then="valor"),
+                        default=models.Value(0) - models.F("valor"),
+                        output_field=models.DecimalField(max_digits=18, decimal_places=2),
+                    )
+                )
+            )
+        ):
+            cashback_por_cliente[saldo["cliente_id"]] = saldo["saldo"] or 0
         clientes_payload = []
         for cliente in clientes:
             item = dict(cliente)
             item["vales_troca"] = vales_por_cliente.get(cliente["id"], [])
+            item["cashback_saldo_retaguarda"] = cashback_por_cliente.get(cliente["id"], 0)
             clientes_payload.append(item)
 
         return Response(

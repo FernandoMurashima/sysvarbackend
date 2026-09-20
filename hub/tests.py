@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
-from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackMovimento, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber
 from hub.models import (
@@ -1372,13 +1372,67 @@ class SysvarHubClientesApiTests(TestCase):
             self._cliente(f"Cliente {idx}", documento=f"1234567890{idx}")
         antes = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             response = self._clientes()
 
         depois = list(Cliente.objects.filter(empresa=self.empresa).order_by("id").values())
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["clientes"]), 3)
         self.assertEqual(antes, depois)
+
+    def test_snapshot_envia_vales_da_empresa_independente_da_loja_e_saldo_cashback(self):
+        self._hub_autenticado()
+        cliente = self._cliente("Ana Beneficio", documento="12345678901")
+        vendedor = Funcionarios.objects.create(
+            empresa=self.empresa,
+            nomefuncionario="Vendedor Beneficio",
+            matricula="V001",
+            cpf="12345678901",
+            ativo=True,
+            situacao=Funcionarios.SITUACAO_ATIVO,
+            participa_vendas=True,
+            salario=Decimal("0.00"),
+        )
+        venda = VendaPdv.objects.create(
+            empresa=self.empresa,
+            loja=self.outra_loja_mesma_empresa,
+            cliente=cliente,
+            vendedor=vendedor,
+            documento="VD-BEN",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("50.00"),
+            valor_recebido=Decimal("50.00"),
+        )
+        devolucao = VendaDevolucao.objects.create(
+            empresa=self.empresa,
+            venda=venda,
+            loja=self.outra_loja_mesma_empresa,
+            cliente=cliente,
+            documento="DEV-BEN",
+            credito_cliente=Decimal("30.00"),
+        )
+        ValeTroca.objects.create(
+            empresa=self.empresa,
+            loja=self.outra_loja_mesma_empresa,
+            cliente=cliente,
+            devolucao=devolucao,
+            documento="VT-OUTRA-LOJA",
+            valor_original=Decimal("30.00"),
+            saldo=Decimal("30.00"),
+        )
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("12.34"),
+        )
+
+        response = self._clientes()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        payload = next(item for item in response.data["clientes"] if item["id"] == cliente.pk)
+        self.assertEqual(payload["vales_troca"][0]["documento"], "VT-OUTRA-LOJA")
+        self.assertEqual(payload["cashback_saldo_retaguarda"], Decimal("12.34"))
 
 
 class SysvarHubFormasPagamentoApiTests(TestCase):
