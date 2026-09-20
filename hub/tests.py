@@ -12,9 +12,9 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
-from financeiro.models import Caixa, CashbackMovimento, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
-from financeiro.models import MovimentacaoFinanceira, Receber
+from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
     AtivacaoSysvarHub,
     HubClienteMapeamento,
@@ -2075,6 +2075,77 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_venda_hub_normaliza_cashback_por_tipo_e_nao_gera_recebivel_comum(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("0.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("10.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="61616161-6161-4161-8161-616161616161",
+            pagamentos=[{"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "10.00"}],
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "CASHBACK")
+        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("10.00")).exists())
+        self.assertFalse(ReceberItem.objects.filter(Idreceber__pedido_venda=venda.pk, valor_parcela=Decimal("10.00")).exists())
+
+    def test_venda_hub_normaliza_troca_por_tipo_e_consumo_do_vale_documentado(self):
+        self._hub_autenticado()
+        venda_origem = VendaPdv.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            caixa=self.caixa,
+            cliente=self.cliente,
+            vendedor=self.vendedor,
+            documento="VD-TROCA-HUB",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("10.00"),
+            valor_recebido=Decimal("10.00"),
+        )
+        devolucao = VendaDevolucao.objects.create(
+            empresa=self.empresa,
+            venda=venda_origem,
+            loja=self.loja,
+            cliente=self.cliente,
+            documento="DEV-TROCA-HUB",
+            credito_cliente=Decimal("10.00"),
+        )
+        vale = ValeTroca.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            cliente=self.cliente,
+            devolucao=devolucao,
+            documento="VT-HUB-CANONICO",
+            valor_original=Decimal("10.00"),
+            saldo=Decimal("10.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="62626262-6262-4262-8262-626262626262",
+            pagamentos=[{"codigo": "TRO", "tipo": "TROCA", "valor": "10.00", "vale_troca_documento": "VT-HUB-CANONICO"}],
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-troca")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        vale.refresh_from_db()
+        self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "TROCA")
+        self.assertEqual(vale.saldo, Decimal("0.00"))
+        self.assertTrue(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, valor=Decimal("10.00")).exists())
 
     def test_devolucao_finalizada_materializa_devolucao_estoque_vale_e_retry_nao_duplica(self):
         self._hub_autenticado()

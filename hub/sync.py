@@ -413,6 +413,21 @@ class HubSyncProcessor:
 
     def _normalizar_pagamento(self, pagamento):
         codigo = pagamento.get("codigo") or pagamento.get("forma") or pagamento.get("tipo") or "DINHEIRO"
+        tipo = str(pagamento.get("tipo") or "").upper()
+        if tipo == "CASHBACK":
+            return {
+                "forma": "CASHBACK",
+                "descricao": pagamento.get("descricao") or "CASHBACK",
+                "valor": pagamento.get("valor"),
+                "autorizacao": pagamento.get("autorizacao") or "",
+            }
+        if tipo in ("TROCA", "VALE_TROCA"):
+            return {
+                "forma": "TROCA",
+                "descricao": pagamento.get("descricao") or "TROCA",
+                "valor": pagamento.get("valor"),
+                "autorizacao": pagamento.get("vale_troca_documento") or pagamento.get("autorizacao") or "",
+            }
         return {
             "forma": str(codigo).upper(),
             "descricao": pagamento.get("descricao") or str(codigo).upper(),

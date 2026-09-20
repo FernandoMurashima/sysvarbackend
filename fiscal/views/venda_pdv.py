@@ -1255,7 +1255,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             pedido_venda=venda.pk,
         )
 
-        saldo_financeiro = valor_venda
+        total_beneficios = money(sum((pagamento.valor for pagamento in pagamentos if pagamento.forma in ("CASHBACK", "TROCA")), Decimal("0")))
+        saldo_financeiro = money(max(Decimal("0.00"), valor_venda - total_beneficios))
         parcela_n = 1
         for pagamento in pagamentos:
             if pagamento.forma in ("CASHBACK", "TROCA"):
@@ -1293,18 +1294,18 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 self._registrar_recebimento_imediato(venda, natureza, pagamento, valor_pagamento, item)
             parcela_n += 1
 
-        if not receber.itens.exists():
+        if not receber.itens.exists() and saldo_financeiro > 0:
             ReceberItem.objects.create(
                 Idreceber=receber,
                 parcela_n=1,
                 status=ReceberItem.STATUS_BAIXADO,
                 Data_vencimento=timezone.localdate(),
-                valor_parcela=valor_venda,
+                valor_parcela=saldo_financeiro,
                 FormaPagamento=venda.forma_pagamento,
                 Previsao=False,
                 Idnatureza=natureza,
                 data_baixa=timezone.localdate(),
-                valor_baixa=valor_venda,
+                valor_baixa=saldo_financeiro,
             )
 
     def _registrar_recebimento_imediato(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, valor: Decimal, item: ReceberItem):
