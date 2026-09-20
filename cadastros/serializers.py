@@ -91,6 +91,7 @@ class LojaSerializer(serializers.ModelSerializer):
             "bairro",
             "cidade",
             "estado",
+            "codigo_municipio_ibge",
             "telefone1",
             "telefone2",
             "email",

@@ -329,6 +329,25 @@ class SysvarHubApiTests(TestCase):
         self.assertFalse(SysvarHub.objects.filter(loja=self.loja).exists())
 
     def test_bootstrap_autenticado_retorna_identidade_canonica_do_hub(self):
+        self.empresa.nome = "Razao Social API Hub"
+        self.empresa.nome_fantasia = "Fantasia Empresa API"
+        self.empresa.save(update_fields=["nome", "nome_fantasia"])
+        self.loja.logradouro = "Rua"
+        self.loja.endereco = "Rua Fiscal"
+        self.loja.numero = "123"
+        self.loja.complemento = "Sala 4"
+        self.loja.bairro = "Centro"
+        self.loja.cidade = "Sao Paulo"
+        self.loja.estado = "SP"
+        self.loja.cep = "01001000"
+        self.loja.codigo_municipio_ibge = "3550308"
+        self.loja.emite_nfce = True
+        self.loja.ambiente_fiscal = Empresa.AMBIENTE_HOMOLOGACAO
+        self.loja.regime_tributario = Empresa.REGIME_SIMPLES
+        self.loja.inscricao_estadual = "110042490114"
+        self.loja.serie_nfce = 7
+        self.loja.proximo_numero_nfce = 1234
+        self.loja.save()
         hub, _token = self._hub_autenticado()
 
         resp = self.client.get("/api/hub/bootstrap/")
@@ -346,6 +365,64 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(resp.data["loja"]["apelido_loja"], self.loja.apelido_loja)
         self.assertEqual(resp.data["loja"]["cnpj"], self.loja.cnpj)
         self.assertEqual(resp.data["loja"]["estado"], self.loja.estado)
+        self.assertEqual(resp.data["loja"]["fiscal"], {
+            "emite_nfce": True,
+            "ambiente_fiscal": Empresa.AMBIENTE_HOMOLOGACAO,
+            "regime_tributario": Empresa.REGIME_SIMPLES,
+            "inscricao_estadual": "110042490114",
+            "serie_nfce": 7,
+            "proximo_numero_nfce": 1234,
+            "razao_social": "Razao Social API Hub",
+            "nome_fantasia": "Fantasia Empresa API",
+            "cnpj": self.loja.cnpj,
+            "logradouro": "Rua",
+            "endereco": "Rua Fiscal",
+            "numero": "123",
+            "complemento": "Sala 4",
+            "bairro": "Centro",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "uf": "SP",
+            "cep": "01001000",
+            "codigo_municipio_ibge": "3550308",
+        })
+        for termo in ["certificado", "pfx", "p12", "senha", "chave_privada", "csc", "token_csc"]:
+            self.assertNotIn(termo, str(resp.data).lower())
+
+    def test_bootstrap_fiscal_usa_fallbacks_e_aceita_opcionais_vazios(self):
+        self.empresa.nome_fantasia = ""
+        self.empresa.save(update_fields=["nome_fantasia"])
+        self.loja.nome_loja = "Loja Fallback"
+        self.loja.inscricao_estadual = None
+        self.loja.logradouro = None
+        self.loja.endereco = None
+        self.loja.numero = None
+        self.loja.complemento = None
+        self.loja.bairro = None
+        self.loja.cidade = None
+        self.loja.estado = None
+        self.loja.cep = None
+        self.loja.codigo_municipio_ibge = None
+        self.loja.save()
+        self._hub_autenticado()
+
+        resp = self.client.get("/api/hub/bootstrap/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        fiscal = resp.data["loja"]["fiscal"]
+        self.assertEqual(fiscal["razao_social"], self.empresa.nome)
+        self.assertEqual(fiscal["nome_fantasia"], "Loja Fallback")
+        self.assertIsNone(fiscal["inscricao_estadual"])
+        self.assertIsNone(fiscal["logradouro"])
+        self.assertIsNone(fiscal["endereco"])
+        self.assertIsNone(fiscal["numero"])
+        self.assertIsNone(fiscal["complemento"])
+        self.assertIsNone(fiscal["bairro"])
+        self.assertIsNone(fiscal["cidade"])
+        self.assertIsNone(fiscal["estado"])
+        self.assertIsNone(fiscal["uf"])
+        self.assertIsNone(fiscal["cep"])
+        self.assertIsNone(fiscal["codigo_municipio_ibge"])
 
     def test_bootstrap_nao_cria_empresa_ou_loja(self):
         empresas_antes = Empresa.objects.count()
@@ -444,6 +521,8 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["empresa"]["id"], self.empresa.id)
         self.assertEqual(resp.data["loja"]["id"], self.loja.id)
+        self.assertEqual(resp.data["loja"]["fiscal"]["cnpj"], self.loja.cnpj)
+        self.assertNotEqual(resp.data["loja"]["fiscal"]["cnpj"], self.outra_loja.cnpj)
         self.assertEqual([caixa["id"] for caixa in resp.data["caixas"]], [caixa_loja.Idcaixa])
 
     def test_token_invalido_e_bootstrap_sem_autenticacao_sao_rejeitados(self):

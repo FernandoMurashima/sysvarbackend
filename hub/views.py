@@ -43,6 +43,32 @@ def _decimal_string(valor, casas):
     return f"{valor:.{casas}f}"
 
 
+def _serializar_fiscal_loja(loja, empresa):
+    nome_fantasia = empresa.nome_fantasia or loja.nome_loja or empresa.nome
+    uf = loja.estado
+    return {
+        "emite_nfce": loja.emite_nfce,
+        "ambiente_fiscal": loja.ambiente_fiscal,
+        "regime_tributario": loja.regime_tributario,
+        "inscricao_estadual": loja.inscricao_estadual,
+        "serie_nfce": loja.serie_nfce,
+        "proximo_numero_nfce": loja.proximo_numero_nfce,
+        "razao_social": empresa.nome,
+        "nome_fantasia": nome_fantasia,
+        "cnpj": loja.cnpj,
+        "logradouro": loja.logradouro,
+        "endereco": loja.endereco,
+        "numero": loja.numero,
+        "complemento": loja.complemento,
+        "bairro": loja.bairro,
+        "cidade": loja.cidade,
+        "estado": uf,
+        "uf": uf,
+        "cep": loja.cep,
+        "codigo_municipio_ibge": loja.codigo_municipio_ibge,
+    }
+
+
 def _serializar_natureza_despesa_pdv(natureza):
     return {
         "id": natureza.pk,
@@ -251,6 +277,7 @@ class HubBootstrapView(APIView):
                     "apelido_loja": loja.apelido_loja,
                     "cnpj": loja.cnpj,
                     "estado": loja.estado,
+                    "fiscal": _serializar_fiscal_loja(loja, empresa),
                 },
                 "caixas": [
                     {

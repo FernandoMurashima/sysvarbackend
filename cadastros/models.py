@@ -310,6 +310,7 @@ class Loja(models.Model):
     bairro = models.CharField(max_length=30, null=True, blank=True)
     cidade = models.CharField(max_length=50, null=True, blank=True, db_index=True)
     estado = models.CharField(max_length=2, null=True, blank=True, db_index=True)
+    codigo_municipio_ibge = models.CharField(max_length=7, null=True, blank=True)
 
     telefone1 = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
     telefone2 = models.CharField(max_length=15, null=True, blank=True, validators=[telefone_br_validator])
