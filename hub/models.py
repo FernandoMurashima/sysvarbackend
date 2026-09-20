@@ -164,6 +164,22 @@ class HubVendaMapeamento(models.Model):
         ]
 
 
+class HubNFCeMapeamento(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="nfces_mapeadas")
+    nfce_uuid = models.UUIDField()
+    nfce = models.ForeignKey("fiscal.NFCe", on_delete=models.PROTECT, related_name="mapeamentos_hub")
+    venda_uuid = models.UUIDField()
+    ultima_versao_evento = models.PositiveIntegerField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "nfce_uuid"], name="uq_hub_nfce_uuid"),
+            models.UniqueConstraint(fields=["hub", "nfce"], name="uq_hub_nfce_central"),
+        ]
+
+
 class HubMovimentoCaixaRecebido(models.Model):
     hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="movimentos_caixa_recebidos")
     movimento_uuid = models.UUIDField()

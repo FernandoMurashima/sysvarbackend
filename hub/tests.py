@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv
-from fiscal.models import FormaPagamentoFiscalMap, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber
 from hub.models import (
     AtivacaoSysvarHub,
@@ -21,6 +21,7 @@ from hub.models import (
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
     HubMovimentoCaixaRecebido,
+    HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
     HubVendaMapeamento,
     SysvarHub,
@@ -1779,6 +1780,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         token = hub.gerar_token()
         self.client.force_authenticate(user=None)
         self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        self.hub = hub
         return hub
 
     def _push(self, eventos):
@@ -1816,6 +1818,62 @@ class SysvarHubSyncPushApiTests(TestCase):
                 "desconto": "0.00",
             }],
             "pagamentos": [{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "10.00"}],
+        }
+        payload.update(extras)
+        return payload
+
+    def _criar_venda_mapeada(self, hub=None, venda_uuid="23232323-2323-4232-8232-232323232323", loja=None):
+        loja = loja or self.loja
+        venda = VendaPdv.objects.create(
+            empresa=loja.empresa,
+            loja=loja,
+            caixa=self.caixa if loja == self.loja else None,
+            cliente=self.cliente,
+            vendedor=self.vendedor,
+            documento=f"HUB-TEST-{VendaPdv.objects.count() + 1}",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("10.00"),
+            valor_recebido=Decimal("10.00"),
+        )
+        HubVendaMapeamento.objects.create(
+            hub=hub or self.hub,
+            venda_uuid=venda_uuid,
+            venda=venda,
+            documento=venda.documento,
+        )
+        return venda
+
+    def _payload_nfce(
+        self,
+        nfce_uuid="33333333-3333-4333-8333-333333333333",
+        venda_uuid="23232323-2323-4232-8232-232323232323",
+        versao_evento=1,
+        status="GERADA",
+        serie=1,
+        numero=123,
+        protocolo="",
+        **extras,
+    ):
+        payload = {
+            "nfce_uuid": nfce_uuid,
+            "venda_uuid": venda_uuid,
+            "versao_evento": versao_evento,
+            "ambiente": "HOMOLOGACAO",
+            "modelo": "65",
+            "serie": serie,
+            "numero": numero,
+            "status": status,
+            "tipo_emissao": "1",
+            "chave_acesso": "3" * 44,
+            "protocolo": protocolo,
+            "xml_assinado": "<NFCe>assinada</NFCe>",
+            "qr_code_payload": "https://sefaz.test/qr?p=123",
+            "retorno_codigo": "",
+            "retorno_mensagem": "",
+            "emitida_em": "2026-09-20T10:00:00-03:00",
+            "autorizada_em": None,
+            "entrada_contingencia_em": None,
+            "justificativa_contingencia": "",
         }
         payload.update(extras)
         return payload
@@ -2014,6 +2072,154 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 1)
         self.assertEqual(HubSessaoCaixaRecebida.objects.count(), 1)
         self.assertEqual(HubFechamentoDiaRecebido.objects.count(), 1)
+
+    def test_nfce_atualizada_cria_nfce_e_mapeamento(self):
+        self._hub_autenticado()
+        venda = self._criar_venda_mapeada()
+        payload = self._payload_nfce()
+
+        response = self._push([self._evento("NFCE_ATUALIZADA", payload, chave="nfce-1")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        nfce = NFCe.objects.get(venda=venda)
+        self.assertEqual(nfce.loja_id, self.loja.id)
+        self.assertEqual(nfce.status, NFCe.Status.GERADA)
+        self.assertEqual(nfce.xml, payload["xml_assinado"])
+        self.assertEqual(nfce.qr_code_payload, payload["qr_code_payload"])
+        mapping = HubNFCeMapeamento.objects.get(nfce=nfce)
+        self.assertEqual(str(mapping.nfce_uuid), payload["nfce_uuid"])
+        self.assertEqual(mapping.ultima_versao_evento, 1)
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["nfce_retaguarda_id"], nfce.pk)
+
+    def test_nfce_mesmo_evento_nao_duplica(self):
+        self._hub_autenticado()
+        self._criar_venda_mapeada()
+        evento = self._evento("NFCE_ATUALIZADA", self._payload_nfce(), chave="nfce-dup")
+
+        self.assertEqual(self._push([evento]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(NFCe.objects.count(), 1)
+        self.assertEqual(HubNFCeMapeamento.objects.count(), 1)
+
+    def test_nfce_atualiza_gerada_para_contingencia_no_mesmo_registro(self):
+        self._hub_autenticado()
+        self._criar_venda_mapeada()
+        self._push([self._evento("NFCE_ATUALIZADA", self._payload_nfce(), chave="nfce-gerada")])
+        nfce_id = NFCe.objects.get().pk
+
+        payload = self._payload_nfce(
+            versao_evento=2,
+            status=NFCe.Status.CONTINGENCIA,
+            entrada_contingencia_em="2026-09-20T10:05:00-03:00",
+            justificativa_contingencia="Sem conexao",
+        )
+        response = self._push([self._evento("NFCE_ATUALIZADA", payload, evento_uuid="34343434-3434-4343-8343-343434343434", chave="nfce-cont")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        nfce = NFCe.objects.get()
+        self.assertEqual(nfce.pk, nfce_id)
+        self.assertEqual(nfce.status, NFCe.Status.CONTINGENCIA)
+        self.assertEqual(nfce.justificativa_contingencia, "Sem conexao")
+        self.assertEqual(nfce.mapeamentos_hub.get().ultima_versao_evento, 2)
+
+    def test_nfce_atualiza_contingencia_para_autorizada_com_protocolo(self):
+        self._hub_autenticado()
+        self._criar_venda_mapeada()
+        self._push([self._evento("NFCE_ATUALIZADA", self._payload_nfce(status=NFCe.Status.CONTINGENCIA), chave="nfce-cont-1")])
+        nfce_id = NFCe.objects.get().pk
+
+        payload = self._payload_nfce(
+            versao_evento=2,
+            status=NFCe.Status.AUTORIZADA,
+            protocolo="135260000000001",
+            autorizada_em="2026-09-20T10:10:00-03:00",
+        )
+        self._push([self._evento("NFCE_ATUALIZADA", payload, evento_uuid="35353535-3535-4353-8353-353535353535", chave="nfce-aut")])
+
+        nfce = NFCe.objects.get()
+        self.assertEqual(nfce.pk, nfce_id)
+        self.assertEqual(nfce.status, NFCe.Status.AUTORIZADA)
+        self.assertEqual(nfce.protocolo, "135260000000001")
+        self.assertIsNotNone(nfce.autorizada_em)
+
+    def test_nfce_evento_obsoleto_nao_regride(self):
+        self._hub_autenticado()
+        self._criar_venda_mapeada()
+        self._push([self._evento("NFCE_ATUALIZADA", self._payload_nfce(versao_evento=2, status=NFCe.Status.CONTINGENCIA), chave="nfce-v2")])
+
+        antigo = self._payload_nfce(versao_evento=1, status=NFCe.Status.GERADA)
+        response = self._push([self._evento("NFCE_ATUALIZADA", antigo, evento_uuid="36363636-3636-4363-8363-363636363636", chave="nfce-v1")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertTrue(response.data["resultados"][0]["mapeamento"]["obsoleto"])
+        nfce = NFCe.objects.get()
+        self.assertEqual(nfce.status, NFCe.Status.CONTINGENCIA)
+        self.assertEqual(nfce.mapeamentos_hub.get().ultima_versao_evento, 2)
+
+    def test_nfce_sem_venda_mapeada_retorna_erro_controlado(self):
+        self._hub_autenticado()
+
+        response = self._push([self._evento("NFCE_ATUALIZADA", self._payload_nfce(), chave="nfce-sem-venda")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertIn("Venda ainda não sincronizada", response.data["resultados"][0]["mensagem"])
+        self.assertEqual(NFCe.objects.count(), 0)
+
+    def test_nfce_de_outro_hub_nao_acessa_mapeamento(self):
+        self._hub_autenticado()
+        outro_hub = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="45454545-4545-4454-8454-454545454545")
+        self._criar_venda_mapeada(hub=outro_hub)
+
+        response = self._push([self._evento("NFCE_ATUALIZADA", self._payload_nfce(), chave="nfce-outro-hub")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertEqual(NFCe.objects.count(), 0)
+
+    def test_nfce_mesma_serie_numero_em_lojas_diferentes_e_permitida(self):
+        self._hub_autenticado()
+        venda_a = self._criar_venda_mapeada()
+        NFCe.objects.create(venda=venda_a, loja=self.loja, serie=1, numero=321, status=NFCe.Status.GERADA, xml="<NFCe />")
+        venda_b = VendaPdv.objects.create(
+            empresa=self.outra_loja.empresa,
+            loja=self.outra_loja,
+            cliente=self.cliente,
+            vendedor=self.vendedor,
+            documento="OUTRA-LOJA-NFCE",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("1.00"),
+            valor_recebido=Decimal("1.00"),
+        )
+
+        NFCe.objects.create(venda=venda_b, loja=self.outra_loja, serie=1, numero=321, status=NFCe.Status.GERADA, xml="<NFCe />")
+
+        self.assertEqual(NFCe.objects.filter(serie=1, numero=321).count(), 2)
+
+    def test_nfce_mesma_loja_ambiente_modelo_serie_numero_e_bloqueada(self):
+        self._hub_autenticado()
+        venda_existente = self._criar_venda_mapeada(venda_uuid="46464646-4646-4464-8464-464646464646")
+        NFCe.objects.create(venda=venda_existente, loja=self.loja, serie=1, numero=456, status=NFCe.Status.GERADA, xml="<NFCe />")
+        self._criar_venda_mapeada(venda_uuid="47474747-4747-4474-8474-474747474747")
+
+        payload = self._payload_nfce(venda_uuid="47474747-4747-4474-8474-474747474747", serie=1, numero=456)
+        response = self._push([self._evento("NFCE_ATUALIZADA", payload, chave="nfce-colisao")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertEqual(NFCe.objects.count(), 1)
+
+    def test_nfce_nao_persiste_segredos_fiscais_do_payload(self):
+        self._hub_autenticado()
+        self._criar_venda_mapeada()
+        payload = self._payload_nfce(certificado="CERT", chave_privada="PRIV", senha="123", csc="CSC")
+
+        self._push([self._evento("NFCE_ATUALIZADA", payload, chave="nfce-segredos")])
+
+        nfce = NFCe.objects.get()
+        mapping = HubNFCeMapeamento.objects.get()
+        dados = f"{nfce.__dict__} {mapping.__dict__}".lower()
+        for termo in ("cert", "priv", "senha", "csc"):
+            self.assertNotIn(termo, dados)
 
     def test_integrity_error_concorrente_resolve_para_registro_vencedor_sem_reprocessar(self):
         hub = self._hub_autenticado()

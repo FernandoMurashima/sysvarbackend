@@ -9,7 +9,7 @@ from django.db import IntegrityError, transaction
 from django.utils import dateparse, timezone
 
 from cadastros.models import Cliente, Funcionarios
-from fiscal.models import VendaPdv
+from fiscal.models import NFCe, VendaPdv
 from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from financeiro.models import Caixa
@@ -20,6 +20,7 @@ from hub.models import (
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
     HubMovimentoCaixaRecebido,
+    HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
     HubVendaMapeamento,
 )
@@ -31,6 +32,15 @@ TIPOS_SUPORTADOS = {
     "MOVIMENTO_CAIXA",
     "SESSAO_CAIXA_FECHADA",
     "FECHAMENTO_DIA",
+    "NFCE_ATUALIZADA",
+}
+
+
+STATUS_NFCE_GERADOS = {
+    NFCe.Status.GERADA,
+    NFCe.Status.PENDENTE_TRANSMISSAO,
+    NFCe.Status.CONTINGENCIA,
+    NFCe.Status.AUTORIZADA,
 }
 
 
@@ -174,6 +184,8 @@ class HubSyncProcessor:
             return self._sessao_caixa(payload)
         if tipo == "FECHAMENTO_DIA":
             return self._fechamento_dia(payload)
+        if tipo == "NFCE_ATUALIZADA":
+            return self._nfce_atualizada(payload)
         raise HubSyncError("Tipo de evento não suportado.")
 
     def _cliente_local(self, payload):
@@ -395,6 +407,135 @@ class HubSyncProcessor:
         )
         return {"fechamento_dia_id": obj.pk}
 
+    def _nfce_atualizada(self, payload):
+        nfce_uuid = uuid_value(payload.get("nfce_uuid"), "nfce_uuid")
+        venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid")
+        versao_evento = self._versao_evento(payload.get("versao_evento"))
+
+        venda_mapeada = (
+            HubVendaMapeamento.objects.select_related("venda", "venda__loja", "venda__empresa")
+            .filter(hub=self.hub, venda_uuid=venda_uuid)
+            .first()
+        )
+        if not venda_mapeada:
+            raise HubSyncError("Venda ainda não sincronizada para receber NFC-e.")
+        venda = venda_mapeada.venda
+        if venda.loja_id != self.loja.pk or venda.empresa_id != self.empresa.pk:
+            raise HubSyncError("Venda não pertence à loja/empresa do Hub.")
+
+        dados = self._dados_nfce(payload)
+        mapeamento = (
+            HubNFCeMapeamento.objects.select_for_update()
+            .select_related("nfce")
+            .filter(hub=self.hub, nfce_uuid=nfce_uuid)
+            .first()
+        )
+        if mapeamento and mapeamento.venda_uuid != venda_uuid:
+            raise HubSyncError("NFC-e do Hub vinculada a outra venda.")
+        if mapeamento and versao_evento < mapeamento.ultima_versao_evento:
+            return self._resultado_nfce(mapeamento, obsoleto=True)
+        if mapeamento and versao_evento == mapeamento.ultima_versao_evento:
+            return self._resultado_nfce(mapeamento)
+
+        nfce = mapeamento.nfce if mapeamento else getattr(venda, "nfce", None)
+        if nfce and nfce.venda_id != venda.pk:
+            raise HubSyncError("NFC-e Central vinculada a outra venda.")
+        self._validar_colisao_nfce(dados, nfce)
+
+        if not nfce:
+            nfce = NFCe.objects.create(venda=venda, **dados)
+        else:
+            for campo, valor in dados.items():
+                setattr(nfce, campo, valor)
+            nfce.save()
+
+        if not mapeamento:
+            mapeamento = HubNFCeMapeamento.objects.create(
+                hub=self.hub,
+                nfce_uuid=nfce_uuid,
+                nfce=nfce,
+                venda_uuid=venda_uuid,
+                ultima_versao_evento=versao_evento,
+            )
+        elif versao_evento > mapeamento.ultima_versao_evento:
+            mapeamento.ultima_versao_evento = versao_evento
+            mapeamento.save(update_fields=["ultima_versao_evento", "atualizado_em"])
+
+        return self._resultado_nfce(mapeamento)
+
+    def _versao_evento(self, value):
+        try:
+            versao = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HubSyncError("versao_evento inválida.") from exc
+        if versao < 1:
+            raise HubSyncError("versao_evento deve ser maior ou igual a 1.")
+        return versao
+
+    def _dados_nfce(self, payload):
+        modelo = str(payload.get("modelo") or "").strip()
+        if modelo != "65":
+            raise HubSyncError("Modelo de NFC-e inválido.")
+        try:
+            serie = int(payload.get("serie"))
+            numero = int(payload.get("numero"))
+        except (TypeError, ValueError) as exc:
+            raise HubSyncError("Série/número da NFC-e inválidos.") from exc
+        if serie < 1 or numero < 1:
+            raise HubSyncError("Série/número da NFC-e devem ser positivos.")
+        status = str(payload.get("status") or "").strip().upper()
+        if status not in dict(NFCe.Status.choices):
+            raise HubSyncError("Status de NFC-e não suportado.")
+        chave = str(payload.get("chave_acesso") or "").strip()
+        if chave and (len(chave) != 44 or not chave.isdigit()):
+            raise HubSyncError("Chave de acesso da NFC-e inválida.")
+        xml = str(payload.get("xml_assinado") or "")
+        if status in STATUS_NFCE_GERADOS and not xml.strip():
+            raise HubSyncError("XML assinado é obrigatório para o status informado.")
+        return {
+            "loja": self.loja,
+            "ambiente": str(payload.get("ambiente") or "HOMOLOGACAO").strip().upper()[:12],
+            "modelo": modelo,
+            "serie": serie,
+            "numero": numero,
+            "status": status,
+            "tipo_emissao": str(payload.get("tipo_emissao") or "").strip()[:2],
+            "chave_acesso": chave,
+            "protocolo": str(payload.get("protocolo") or "").strip()[:30],
+            "xml": xml,
+            "qr_code_payload": str(payload.get("qr_code_payload") or ""),
+            "retorno_codigo": str(payload.get("retorno_codigo") or "").strip()[:10],
+            "retorno_mensagem": str(payload.get("retorno_mensagem") or "").strip()[:255],
+            "emitida_em": parse_datetime(payload.get("emitida_em"), "emitida_em"),
+            "autorizada_em": parse_datetime(payload.get("autorizada_em"), "autorizada_em"),
+            "entrada_contingencia_em": parse_datetime(payload.get("entrada_contingencia_em"), "entrada_contingencia_em"),
+            "justificativa_contingencia": str(payload.get("justificativa_contingencia") or "").strip()[:255],
+        }
+
+    def _validar_colisao_nfce(self, dados, nfce=None):
+        qs = NFCe.objects.filter(
+            loja=dados["loja"],
+            ambiente=dados["ambiente"],
+            modelo=dados["modelo"],
+            serie=dados["serie"],
+            numero=dados["numero"],
+        )
+        if nfce:
+            qs = qs.exclude(pk=nfce.pk)
+        if qs.exists():
+            raise HubSyncError("Já existe NFC-e com mesma loja/ambiente/modelo/série/número.")
+
+    def _resultado_nfce(self, mapeamento, obsoleto=False):
+        nfce = mapeamento.nfce
+        return {
+            "nfce_retaguarda_id": nfce.pk,
+            "nfce_uuid": str(mapeamento.nfce_uuid),
+            "venda_retaguarda_id": nfce.venda_id,
+            "status": nfce.status,
+            "versao_evento": mapeamento.ultima_versao_evento,
+            "obsoleto": obsoleto,
+        }
+
     def _mapeamento_existente(self, tipo, payload):
         if tipo == "CLIENTE_LOCAL" and payload.get("cliente_uuid"):
             obj = HubClienteMapeamento.objects.filter(hub=self.hub, cliente_uuid=payload.get("cliente_uuid")).first()
@@ -402,6 +543,9 @@ class HubSyncProcessor:
         if tipo == "VENDA_FINALIZADA" and payload.get("venda_uuid"):
             obj = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=payload.get("venda_uuid")).first()
             return {"venda_retaguarda_id": obj.venda_id, "documento": obj.documento} if obj else {}
+        if tipo == "NFCE_ATUALIZADA" and payload.get("nfce_uuid"):
+            obj = HubNFCeMapeamento.objects.filter(hub=self.hub, nfce_uuid=payload.get("nfce_uuid")).select_related("nfce").first()
+            return self._resultado_nfce(obj) if obj else {}
         return {}
 
     def _resultado(self, evento_uuid, chave, status, mapeamento=None, mensagem=""):

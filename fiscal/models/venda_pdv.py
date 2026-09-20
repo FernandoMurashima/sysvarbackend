@@ -246,24 +246,33 @@ class NFCe(models.Model):
     class Status(models.TextChoices):
         DIGITADA = "DIGITADA", "Digitada"
         EMITINDO = "EMITINDO", "Emitindo"
+        GERADA = "GERADA", "Gerada"
+        PENDENTE_TRANSMISSAO = "PENDENTE_TRANSMISSAO", "Pendente transmissao"
         AUTORIZADA = "AUTORIZADA", "Autorizada"
         REJEITADA = "REJEITADA", "Rejeitada"
-        CANCELADA = "CANCELADA", "Cancelada"
+        ERRO_GERACAO = "ERRO_GERACAO", "Erro geracao"
         CONTINGENCIA = "CONTINGENCIA", "Contingencia"
+        CANCELADA = "CANCELADA", "Cancelada"
 
     venda = models.OneToOneField(VendaPdv, on_delete=models.PROTECT, related_name="nfce")
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="nfces")
     ambiente = models.CharField(max_length=12, default="HOMOLOGACAO")
     modelo = models.CharField(max_length=2, default="65")
     serie = models.PositiveIntegerField(default=1)
     numero = models.PositiveIntegerField(db_index=True)
-    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DIGITADA, db_index=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.DIGITADA, db_index=True)
     chave_acesso = models.CharField(max_length=44, blank=True, default="", db_index=True)
     protocolo = models.CharField(max_length=30, blank=True, default="")
+    tipo_emissao = models.CharField(max_length=2, blank=True, default="")
     qr_code_url = models.TextField(blank=True, default="")
+    qr_code_payload = models.TextField(blank=True, default="")
     xml = models.TextField(blank=True, default="")
     retorno_codigo = models.CharField(max_length=10, blank=True, default="")
     retorno_mensagem = models.CharField(max_length=255, blank=True, default="")
+    emitida_em = models.DateTimeField(null=True, blank=True)
     autorizada_em = models.DateTimeField(null=True, blank=True)
+    entrada_contingencia_em = models.DateTimeField(null=True, blank=True)
+    justificativa_contingencia = models.CharField(max_length=255, blank=True, default="")
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -271,12 +280,17 @@ class NFCe(models.Model):
         db_table = "fiscal_nfce"
         ordering = ["-numero"]
         constraints = [
-            models.UniqueConstraint(fields=["serie", "numero"], name="uq_nfce_serie_numero"),
+            models.UniqueConstraint(fields=["loja", "ambiente", "modelo", "serie", "numero"], name="uq_nfce_loja_amb_mod_serie_num"),
         ]
         indexes = [
             models.Index(fields=["status"], name="ix_nfce_status"),
             models.Index(fields=["chave_acesso"], name="ix_nfce_chave"),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.loja_id is None and self.venda_id:
+            self.loja_id = self.venda.loja_id
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"NFC-e {self.serie}/{self.numero} - {self.status}"
