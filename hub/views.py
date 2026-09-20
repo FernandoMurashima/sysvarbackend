@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv
+from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, SysvarHub
@@ -360,6 +361,12 @@ class HubFormasPagamentoView(APIView):
             .prefetch_related(Prefetch("parcelas", queryset=parcelas_ordenadas))
             .order_by("codigo", "Idformapagamento")
         )
+        mapas_fiscais = (
+            FormaPagamentoFiscalMap.objects
+            .filter(empresa=empresa, ativo=True, forma_pagamento__empresa=empresa)
+            .order_by("forma_pagamento_id", "codigo_tpag", "id")
+            .values("forma_pagamento_id", "codigo_tpag", "descricao_fiscal")
+        )
 
         formas_pagamento = []
         for forma in formas:
@@ -414,6 +421,7 @@ class HubFormasPagamentoView(APIView):
                     "id": loja.pk,
                 },
                 "formas_pagamento": formas_pagamento,
+                "mapas_fiscais": list(mapas_fiscais),
             },
             status=status.HTTP_200_OK,
         )

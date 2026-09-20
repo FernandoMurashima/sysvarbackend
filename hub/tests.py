@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from financeiro.models import Caixa, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv
-from fiscal.models import VendaPdv, VendaPdvItem, VendaPdvPagamento
+from fiscal.models import FormaPagamentoFiscalMap, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber
 from hub.models import (
     AtivacaoSysvarHub,
@@ -1464,6 +1464,42 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         FormaPagamentoParcela.objects.create(forma=credito, ordem=2, dias=60, percentual=None, valor_fixo=Decimal("100.00"))
         FormaPagamentoParcela.objects.create(forma=credito, ordem=1, dias=30, percentual=Decimal("0.500000"), valor_fixo=None)
         FormaPagamentoParcela.objects.create(forma=dinheiro, ordem=1, dias=0, percentual=Decimal("1.000000"), valor_fixo=None)
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=dinheiro,
+            codigo_tpag="01",
+            descricao_fiscal="Dinheiro",
+            ativo=True,
+        )
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            codigo_tpag="03",
+            descricao_fiscal="Cartao de credito",
+            ativo=True,
+        )
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            codigo_tpag="17",
+            descricao_fiscal="Pagamento instantaneo",
+            ativo=True,
+        )
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            codigo_tpag="99",
+            descricao_fiscal="Inativo",
+            ativo=False,
+        )
+        forma_outra = self._forma("004", empresa=self.outra_empresa, descricao="Outra Forma")
+        FormaPagamentoFiscalMap.objects.create(
+            empresa=self.outra_empresa,
+            forma_pagamento=forma_outra,
+            codigo_tpag="15",
+            descricao_fiscal="Outra empresa",
+            ativo=True,
+        )
 
         response = self._formas_pagamento(f"?loja_id={self.outra_loja_mesma_empresa.pk}&empresa_id={self.outra_empresa.pk}")
 
@@ -1474,6 +1510,11 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         self.assertEqual(response.data["empresa"], {"id": self.empresa.pk})
         self.assertEqual(response.data["loja"], {"id": self.loja.pk})
         self.assertEqual([item["codigo"] for item in response.data["formas_pagamento"]], ["001", "002"])
+        self.assertEqual(response.data["mapas_fiscais"], [
+            {"forma_pagamento_id": credito.pk, "codigo_tpag": "03", "descricao_fiscal": "Cartao de credito"},
+            {"forma_pagamento_id": credito.pk, "codigo_tpag": "17", "descricao_fiscal": "Pagamento instantaneo"},
+            {"forma_pagamento_id": dinheiro.pk, "codigo_tpag": "01", "descricao_fiscal": "Dinheiro"},
+        ])
 
         dinheiro_payload = response.data["formas_pagamento"][0]
         self.assertEqual(dinheiro_payload["id"], dinheiro.pk)
@@ -1527,6 +1568,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         self.assertEqual(response.data["empresa"], {"id": self.outra_empresa.pk})
         self.assertEqual(response.data["loja"], {"id": self.loja_outra_empresa.pk})
         self.assertEqual([item["id"] for item in response.data["formas_pagamento"]], [forma_outra.pk])
+        self.assertEqual(response.data["mapas_fiscais"], [])
 
     def test_ordenacao_estavel_por_codigo_e_id(self):
         forma_b = self._forma("B")
@@ -1546,11 +1588,12 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             forma = self._forma(f"{idx:03d}", prazo_pagamento=prazo)
             FormaPagamentoParcela.objects.create(forma=forma, ordem=1, dias=0, percentual=Decimal("1.000000"))
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             response = self._formas_pagamento()
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["formas_pagamento"]), 3)
+        self.assertEqual(response.data["mapas_fiscais"], [])
 
 
 class SysvarHubTiposDespesaPdvApiTests(TestCase):
