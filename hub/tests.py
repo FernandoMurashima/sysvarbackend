@@ -333,6 +333,206 @@ class SysvarHubApiTests(TestCase):
         solicitacao.refresh_from_db()
         self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PENDENTE)
 
+    def test_solicitar_sincronizacao_loja_cria_pendente_e_reaproveita_ativa(self):
+        hub, _token = self._hub_autenticado()
+        self._admin()
+
+        resp = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.loja.pk}, format="json")
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        solicitacao = HubSincronizacaoSolicitacao.objects.get(pk=resp.data["id"])
+        self.assertEqual(solicitacao.hub_id, hub.pk)
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+        self.assertEqual(solicitacao.solicitado_por_id, self.user.pk)
+
+        repetida = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.loja.pk}, format="json")
+        self.assertEqual(repetida.status_code, 200, repetida.data)
+        self.assertEqual(repetida.data["id"], solicitacao.pk)
+        self.assertEqual(HubSincronizacaoSolicitacao.objects.filter(hub=hub).count(), 1)
+
+        solicitacao.status = HubSincronizacaoSolicitacao.STATUS_PROCESSANDO
+        solicitacao.iniciado_em = timezone.now()
+        solicitacao.save(update_fields=["status", "iniciado_em"])
+        processando = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.loja.pk}, format="json")
+        self.assertEqual(processando.status_code, 200, processando.data)
+        self.assertEqual(processando.data["id"], solicitacao.pk)
+        self.assertEqual(HubSincronizacaoSolicitacao.objects.filter(hub=hub).count(), 1)
+
+    def test_nova_solicitacao_permitida_depois_de_terminal(self):
+        hub, _token = self._hub_autenticado()
+        self._admin()
+        concluida = HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+
+        resp_concluida = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.loja.pk}, format="json")
+        self.assertEqual(resp_concluida.status_code, 201, resp_concluida.data)
+        self.assertNotEqual(resp_concluida.data["id"], concluida.pk)
+
+        HubSincronizacaoSolicitacao.objects.filter(pk=resp_concluida.data["id"]).update(
+            status=HubSincronizacaoSolicitacao.STATUS_ERRO,
+            concluido_em=timezone.now(),
+            mensagem_erro="falha anterior",
+        )
+        resp_erro = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.loja.pk}, format="json")
+        self.assertEqual(resp_erro.status_code, 201, resp_erro.data)
+        self.assertEqual(HubSincronizacaoSolicitacao.objects.filter(hub=hub).count(), 3)
+
+    def test_sincronizar_todas_respeita_hubs_ativos_pendentes_sem_hub_inativos_e_empresa(self):
+        loja_a2 = Loja.objects.create(empresa=self.empresa, nome_loja="Loja A2", apelido_loja="A2", cnpj="31222333000182", estado="SP")
+        loja_sem_hub = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Sem Hub", apelido_loja="ASH", cnpj="31222333000183", estado="SP")
+        loja_inativa = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Hub Inativo", apelido_loja="AHI", cnpj="31222333000184", estado="SP")
+        hub_a1 = SysvarHub.objects.create(loja=self.loja, hub_uuid="10101010-1010-4010-8010-101010101010", ativo=True)
+        hub_a2 = SysvarHub.objects.create(loja=loja_a2, hub_uuid="20202020-2020-4020-8020-202020202020", ativo=True)
+        hub_inativo = SysvarHub.objects.create(loja=loja_inativa, hub_uuid="30303030-3030-4030-8030-303030303030", ativo=False)
+        hub_b = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="40404040-4040-4040-8040-404040404040", ativo=True)
+        pendente = HubSincronizacaoSolicitacao.objects.create(hub=hub_a1, solicitado_por=self.user)
+        self._admin()
+
+        resp = self.client.post("/api/hub/sincronizacoes/todas/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["criadas"], 1)
+        self.assertEqual(resp.data["ja_pendentes"], 1)
+        self.assertEqual(resp.data["ignoradas_sem_hub"], 1)
+        self.assertEqual(resp.data["ignoradas_inativas"], 1)
+        self.assertEqual(HubSincronizacaoSolicitacao.objects.filter(hub=hub_a1).count(), 1)
+        self.assertTrue(HubSincronizacaoSolicitacao.objects.filter(hub=hub_a2, status=HubSincronizacaoSolicitacao.STATUS_PENDENTE).exists())
+        self.assertFalse(HubSincronizacaoSolicitacao.objects.filter(hub=hub_inativo).exists())
+        self.assertFalse(HubSincronizacaoSolicitacao.objects.filter(hub=hub_b).exists())
+        self.assertIn(pendente.pk, {item["id"] for item in resp.data["solicitacoes"]})
+
+    def test_usuario_nao_comanda_nem_lista_empresa_alheia(self):
+        hub_a, _token = self._hub_autenticado(hub_uuid="50505050-5050-4050-8050-505050505050")
+        hub_b = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="60606060-6060-4060-8060-606060606060", ativo=True)
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_b, status=HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+        self._admin()
+
+        proibido = self.client.post("/api/hub/sincronizacoes/solicitar/", {"loja_id": self.outra_loja.pk}, format="json")
+        self.assertEqual(proibido.status_code, 403, proibido.data)
+
+        painel = self.client.get("/api/hub/sincronizacoes/")
+        self.assertEqual(painel.status_code, 200, painel.data)
+        self.assertEqual({linha["loja_id"] for linha in painel.data}, {self.loja.pk})
+
+        todas = self.client.post("/api/hub/sincronizacoes/todas/", {}, format="json")
+        self.assertEqual(todas.status_code, 200, todas.data)
+        self.assertTrue(HubSincronizacaoSolicitacao.objects.filter(hub=hub_a).exists())
+        self.assertEqual(HubSincronizacaoSolicitacao.objects.filter(hub=hub_b).count(), 1)
+
+    def test_heartbeat_devolve_comando_correto_ou_null_e_isola_hubs(self):
+        hub_a, token_a = self._hub_autenticado(hub_uuid="70707070-7070-4070-8070-707070707070")
+        hub_b = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="80808080-8080-4080-8080-808080808080", ativo=True)
+        token_b = hub_b.gerar_token()
+
+        sem_comando = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(sem_comando.status_code, 200, sem_comando.data)
+        self.assertIsNone(sem_comando.data["comando_sincronizacao"])
+
+        pendente = HubSincronizacaoSolicitacao.objects.create(hub=hub_a, solicitado_por=self.user)
+        com_pendente = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(com_pendente.status_code, 200, com_pendente.data)
+        self.assertEqual(com_pendente.data["comando_sincronizacao"]["id"], pendente.pk)
+        self.assertEqual(com_pendente.data["comando_sincronizacao"]["status"], HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+
+        pendente.status = HubSincronizacaoSolicitacao.STATUS_PROCESSANDO
+        pendente.iniciado_em = timezone.now()
+        pendente.save(update_fields=["status", "iniciado_em"])
+        com_processando = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(com_processando.data["comando_sincronizacao"]["id"], pendente.pk)
+        self.assertEqual(com_processando.data["comando_sincronizacao"]["status"], HubSincronizacaoSolicitacao.STATUS_PROCESSANDO)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token_b}")
+        isolado = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(isolado.status_code, 200, isolado.data)
+        self.assertIsNone(isolado.data["comando_sincronizacao"])
+
+    def test_transicoes_status_timestamps_e_terminais_idempotentes(self):
+        hub, _token = self._hub_autenticado()
+        solicitacao = HubSincronizacaoSolicitacao.objects.create(hub=hub, solicitado_por=self.user)
+
+        processando = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "PROCESSANDO", "etapa_atual": "BOOTSTRAP"},
+            format="json",
+        )
+        self.assertEqual(processando.status_code, 200, processando.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PROCESSANDO)
+        self.assertIsNotNone(solicitacao.iniciado_em)
+
+        erro = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "ERRO", "etapa_atual": "CATALOGO", "mensagem_erro": "falha"},
+            format="json",
+        )
+        self.assertEqual(erro.status_code, 200, erro.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_ERRO)
+        self.assertIsNotNone(solicitacao.concluido_em)
+        self.assertEqual(solicitacao.mensagem_erro, "falha")
+
+        nao_volta = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "PROCESSANDO", "etapa_atual": "CLIENTES"},
+            format="json",
+        )
+        self.assertEqual(nao_volta.status_code, 200, nao_volta.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_ERRO)
+
+        concluida = HubSincronizacaoSolicitacao.objects.create(hub=hub, solicitado_por=self.user)
+        self.client.post(f"/api/hub/sincronizacoes/{concluida.pk}/status/", {"status": "PROCESSANDO"}, format="json")
+        ok = self.client.post(
+            f"/api/hub/sincronizacoes/{concluida.pk}/status/",
+            {"status": "CONCLUIDA", "etapa_atual": "CLIENTES", "mensagem_erro": "ignorar"},
+            format="json",
+        )
+        self.assertEqual(ok.status_code, 200, ok.data)
+        concluida.refresh_from_db()
+        self.assertEqual(concluida.status, HubSincronizacaoSolicitacao.STATUS_CONCLUIDA)
+        self.assertIsNotNone(concluida.concluido_em)
+        self.assertEqual(concluida.mensagem_erro, "")
+
+        nao_volta_ok = self.client.post(f"/api/hub/sincronizacoes/{concluida.pk}/status/", {"status": "PROCESSANDO"}, format="json")
+        self.assertEqual(nao_volta_ok.status_code, 200, nao_volta_ok.data)
+        concluida.refresh_from_db()
+        self.assertEqual(concluida.status, HubSincronizacaoSolicitacao.STATUS_CONCLUIDA)
+
+    def test_painel_status_visual_amarelo_verde_vermelho(self):
+        loja_pendente = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Pendente", apelido_loja="PEN", cnpj="31222333000185", estado="SP")
+        loja_processando = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Processando", apelido_loja="PRO", cnpj="31222333000186", estado="SP")
+        loja_verde = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Verde", apelido_loja="VER", cnpj="31222333000187", estado="SP")
+        loja_inativo = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Inativo", apelido_loja="INA", cnpj="31222333000188", estado="SP")
+        loja_nunca = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Nunca", apelido_loja="NUN", cnpj="31222333000189", estado="SP")
+        loja_erro = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Erro", apelido_loja="ERR", cnpj="31222333000190", estado="SP")
+        hub_pendente = SysvarHub.objects.create(loja=loja_pendente, hub_uuid="11111111-1111-4111-8111-111111111112", ativo=True)
+        hub_processando = SysvarHub.objects.create(loja=loja_processando, hub_uuid="11111111-1111-4111-8111-111111111113", ativo=True)
+        hub_verde = SysvarHub.objects.create(loja=loja_verde, hub_uuid="11111111-1111-4111-8111-111111111114", ativo=True)
+        SysvarHub.objects.create(loja=loja_inativo, hub_uuid="11111111-1111-4111-8111-111111111115", ativo=False)
+        SysvarHub.objects.create(loja=loja_nunca, hub_uuid="11111111-1111-4111-8111-111111111116", ativo=True)
+        hub_erro = SysvarHub.objects.create(loja=loja_erro, hub_uuid="11111111-1111-4111-8111-111111111117", ativo=True)
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_pendente, status=HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_processando, status=HubSincronizacaoSolicitacao.STATUS_PROCESSANDO, iniciado_em=timezone.now())
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_verde, status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA, concluido_em=timezone.now())
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_erro, status=HubSincronizacaoSolicitacao.STATUS_ERRO, concluido_em=timezone.now(), mensagem_erro="falha")
+        self._admin()
+
+        resp = self.client.get("/api/hub/sincronizacoes/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        por_loja = {linha["loja_id"]: linha for linha in resp.data}
+        self.assertEqual(por_loja[loja_pendente.pk]["status_visual"], "AMARELO")
+        self.assertEqual(por_loja[loja_processando.pk]["status_visual"], "AMARELO")
+        self.assertEqual(por_loja[loja_verde.pk]["status_visual"], "VERDE")
+        self.assertEqual(por_loja[self.loja.pk]["status_visual"], "VERMELHO")
+        self.assertEqual(por_loja[loja_inativo.pk]["status_visual"], "VERMELHO")
+        self.assertEqual(por_loja[loja_nunca.pk]["status_visual"], "VERMELHO")
+        self.assertEqual(por_loja[loja_erro.pk]["status_visual"], "VERMELHO")
+
     def test_nova_ativacao_da_mesma_loja_rotaciona_token_e_invalida_anterior(self):
         _ativacao, codigo = self._criar_codigo()
         self.client.force_authenticate(user=None)
