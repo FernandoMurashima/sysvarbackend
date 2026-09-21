@@ -46,6 +46,47 @@ class SysvarHub(models.Model):
         return token
 
 
+class HubSincronizacaoSolicitacao(models.Model):
+    TIPO_COMPLETA = "COMPLETA"
+    TIPO_CHOICES = [
+        (TIPO_COMPLETA, "Completa"),
+    ]
+
+    STATUS_PENDENTE = "PENDENTE"
+    STATUS_PROCESSANDO = "PROCESSANDO"
+    STATUS_CONCLUIDA = "CONCLUIDA"
+    STATUS_ERRO = "ERRO"
+    STATUS_CHOICES = [
+        (STATUS_PENDENTE, "Pendente"),
+        (STATUS_PROCESSANDO, "Processando"),
+        (STATUS_CONCLUIDA, "Concluída"),
+        (STATUS_ERRO, "Erro"),
+    ]
+    STATUS_ATIVOS = (STATUS_PENDENTE, STATUS_PROCESSANDO)
+    STATUS_TERMINAIS = (STATUS_CONCLUIDA, STATUS_ERRO)
+
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="sincronizacoes")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_COMPLETA)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDENTE, db_index=True)
+    solicitado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    solicitado_em = models.DateTimeField(auto_now_add=True)
+    iniciado_em = models.DateTimeField(null=True, blank=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+    etapa_atual = models.CharField(max_length=80, blank=True, default="")
+    mensagem_erro = models.TextField(blank=True, default="")
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-solicitado_em", "-id"]
+        indexes = [
+            models.Index(fields=["hub", "status"], name="ix_hub_sync_hub_status"),
+            models.Index(fields=["status", "solicitado_em"], name="ix_hub_sync_status_sol"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.hub_id} - {self.tipo} - {self.status}"
+
+
 class AtivacaoSysvarHub(models.Model):
     TEMPO_EXPIRACAO = timedelta(minutes=15)
     ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

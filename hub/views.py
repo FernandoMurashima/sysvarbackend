@@ -17,7 +17,16 @@ from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, FormaPag
 from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
-from hub.models import AtivacaoSysvarHub, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubSincronizacaoSolicitacao, SysvarHub
+from hub.sincronizacao import (
+    atualizar_status_sincronizacao,
+    montar_painel_sincronizacao,
+    obter_comando_para_hub,
+    serializar_solicitacao,
+    solicitar_sincronizacao_loja,
+    solicitar_sincronizacao_todas,
+    validar_usuario_sincronizacao,
+)
 from hub.sync import HubSyncProcessor
 from produto.models import ProdutoImagem
 
@@ -226,9 +235,75 @@ class HubHeartbeatView(APIView):
                 "loja_id": hub.loja_id,
                 "empresa_id": hub.loja.empresa_id,
                 "servidor_em": timezone.now(),
+                "comando_sincronizacao": obter_comando_para_hub(hub),
             },
             status=status.HTTP_200_OK,
         )
+
+
+class HubSincronizacaoPainelView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        validar_usuario_sincronizacao(request.user)
+        return Response(montar_painel_sincronizacao(request.user), status=status.HTTP_200_OK)
+
+
+class HubSincronizacaoSolicitarView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        validar_usuario_sincronizacao(request.user)
+        loja_id = request.data.get("loja_id")
+        if not loja_id:
+            raise ValidationError({"loja_id": "Informe a loja."})
+        loja = Loja.objects.filter(pk=loja_id).first()
+        if not loja:
+            raise ValidationError({"loja_id": "Loja inválida."})
+        user_empresa_id = getattr(request.user, "empresa_id", None)
+        if user_empresa_id and loja.empresa_id != int(user_empresa_id):
+            raise PermissionDenied("Loja fora do escopo do usuário.")
+        if not user_empresa_id and not request.user.is_superuser:
+            raise PermissionDenied("Usuário sem empresa vinculada.")
+        solicitacao, criada = solicitar_sincronizacao_loja(loja, usuario=request.user)
+        if not solicitacao:
+            raise ValidationError({"loja_id": "Loja sem Hub ativo."})
+        return Response(serializar_solicitacao(solicitacao), status=status.HTTP_201_CREATED if criada else status.HTTP_200_OK)
+
+
+class HubSincronizacaoTodasView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        validar_usuario_sincronizacao(request.user)
+        resultado = solicitar_sincronizacao_todas(request.user)
+        return Response(
+            {
+                "criadas": resultado["criadas"],
+                "ja_pendentes": resultado["ja_pendentes"],
+                "ignoradas_sem_hub": resultado["ignoradas_sem_hub"],
+                "ignoradas_inativas": resultado["ignoradas_inativas"],
+                "solicitacoes": [serializar_solicitacao(s) for s in resultado["solicitacoes"]],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubSincronizacaoStatusView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, sincronizacao_id):
+        solicitacao = HubSincronizacaoSolicitacao.objects.filter(pk=sincronizacao_id, hub=request.sysvar_hub).first()
+        if not solicitacao:
+            raise Http404
+        solicitacao = atualizar_status_sincronizacao(
+            solicitacao,
+            status=request.data.get("status"),
+            etapa_atual=_texto(request.data, "etapa_atual", "", 80),
+            mensagem_erro=str(request.data.get("mensagem_erro") or ""),
+        )
+        return Response(serializar_solicitacao(solicitacao), status=status.HTTP_200_OK)
 
 
 class HubSyncPushView(APIView):
