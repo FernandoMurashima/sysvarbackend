@@ -294,12 +294,20 @@ class HubSincronizacaoStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, sincronizacao_id):
+        status_payload = request.data.get("status")
+        status_permitidos = {
+            HubSincronizacaoSolicitacao.STATUS_PROCESSANDO,
+            HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            HubSincronizacaoSolicitacao.STATUS_ERRO,
+        }
+        if status_payload not in status_permitidos:
+            raise ValidationError({"status": "Status inválido para atualização pelo Hub."})
         solicitacao = HubSincronizacaoSolicitacao.objects.filter(pk=sincronizacao_id, hub=request.sysvar_hub).first()
         if not solicitacao:
             raise Http404
         solicitacao = atualizar_status_sincronizacao(
             solicitacao,
-            status=request.data.get("status"),
+            status=status_payload,
             etapa_atual=_texto(request.data, "etapa_atual", "", 80),
             mensagem_erro=str(request.data.get("mensagem_erro") or ""),
         )

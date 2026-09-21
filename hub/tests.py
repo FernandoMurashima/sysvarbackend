@@ -24,6 +24,7 @@ from hub.models import (
     HubMovimentoCaixaRecebido,
     HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
+    HubSincronizacaoSolicitacao,
     HubVendaMapeamento,
     SysvarHub,
 )
@@ -294,6 +295,43 @@ class SysvarHubApiTests(TestCase):
 
         self.client.credentials(HTTP_AUTHORIZATION="Hub token-invalido")
         self.assertIn(self.client.post("/api/hub/heartbeat/", {}, format="json").status_code, (401, 403))
+
+    def test_hub_nao_pode_regredir_sincronizacao_para_pendente(self):
+        hub, token = self._hub_autenticado()
+        solicitacao = HubSincronizacaoSolicitacao.objects.create(hub=hub, solicitado_por=self.user)
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+
+        processando = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "PROCESSANDO", "etapa_atual": "BOOTSTRAP"},
+            format="json",
+        )
+        self.assertEqual(processando.status_code, 200, processando.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PROCESSANDO)
+
+        pendente = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "PENDENTE"},
+            format="json",
+        )
+        self.assertEqual(pendente.status_code, 400, pendente.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PROCESSANDO)
+
+    def test_hub_nao_pode_enviar_status_invalido_de_sincronizacao(self):
+        hub, token = self._hub_autenticado()
+        solicitacao = HubSincronizacaoSolicitacao.objects.create(hub=hub, solicitado_por=self.user)
+
+        resp = self.client.post(
+            f"/api/hub/sincronizacoes/{solicitacao.pk}/status/",
+            {"status": "CANCELADA"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+        solicitacao.refresh_from_db()
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PENDENTE)
 
     def test_nova_ativacao_da_mesma_loja_rotaciona_token_e_invalida_anterior(self):
         _ativacao, codigo = self._criar_codigo()
