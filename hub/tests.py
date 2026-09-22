@@ -643,6 +643,7 @@ class SysvarHubApiTests(TestCase):
         self.loja.estado = None
         self.loja.cep = None
         self.loja.codigo_municipio_ibge = None
+        self.loja.emite_nfce = False
         self.loja.save()
         self._hub_autenticado()
 
@@ -663,6 +664,7 @@ class SysvarHubApiTests(TestCase):
         self.assertIsNone(fiscal["uf"])
         self.assertIsNone(fiscal["cep"])
         self.assertIsNone(fiscal["codigo_municipio_ibge"])
+        self.assertFalse(fiscal["emite_nfce"])
 
     def test_bootstrap_nao_cria_empresa_ou_loja(self):
         empresas_antes = Empresa.objects.count()

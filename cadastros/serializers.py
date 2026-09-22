@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -152,6 +154,14 @@ class LojaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Informe a UF com duas letras.")
         return value or None
 
+    def validate_codigo_municipio_ibge(self, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        if not re.fullmatch(r"\d{7}", value):
+            raise serializers.ValidationError("Informe o código IBGE do município com 7 dígitos.")
+        return value
+
     def validate(self, attrs):
         empresa = attrs.get("empresa", getattr(self.instance, "empresa", None))
         request = self.context.get("request")
@@ -181,6 +191,15 @@ class LojaSerializer(serializers.ModelSerializer):
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
                 raise serializers.ValidationError({"cnpj": "Já existe estabelecimento com este CNPJ nesta empresa."})
+        emite_nfce = attrs.get("emite_nfce", getattr(self.instance, "emite_nfce", True))
+        codigo_municipio_ibge = attrs.get(
+            "codigo_municipio_ibge",
+            getattr(self.instance, "codigo_municipio_ibge", None),
+        )
+        if emite_nfce is True and not codigo_municipio_ibge:
+            raise serializers.ValidationError({
+                "codigo_municipio_ibge": "Informe o código IBGE do município para emitir NFC-e."
+            })
         return attrs
 
 # ---------------------------

@@ -37,8 +37,8 @@ class OperacionalBaseTest(TestCase):
         )[0]
         self.empresa = Empresa.objects.create(nome="Empresa Operacional", nome_fantasia="Operacional", documento="11222333000181", plano_completo=True)
         self.outra = Empresa.objects.create(nome="Outra Empresa", documento="22333444000102", plano_completo=True)
-        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 1", apelido_loja="L1", cnpj="11222333000181")
-        self.loja2 = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 2", apelido_loja="L2", cnpj="11222333000262")
+        self.loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 1", apelido_loja="L1", cnpj="11222333000181", codigo_municipio_ibge="3550308")
+        self.loja2 = Loja.objects.create(empresa=self.empresa, nome_loja="Loja 2", apelido_loja="L2", cnpj="11222333000262", codigo_municipio_ibge="3550308")
         self.superuser = User.objects.create_superuser(username="root", password="senha12345", email="root@example.com")
         self.master = User.objects.create_user(username="master", password="senha12345", empresa=self.empresa, loja=self.loja)
         self.view_profile = PerfilAcesso.objects.create(empresa=self.empresa, nome="View")
@@ -131,6 +131,18 @@ class EmpresaSuspensaoTests(OperacionalBaseTest):
 
 
 class LojaOperacionalTests(OperacionalBaseTest):
+    def loja_payload(self, **overrides):
+        payload = {
+            "empresa": self.empresa.pk,
+            "nome_loja": "Loja Fiscal",
+            "apelido_loja": "LF",
+            "cnpj": "11222333000343",
+            "emite_nfce": True,
+            "codigo_municipio_ibge": "3550308",
+        }
+        payload.update(overrides)
+        return payload
+
     def test_permissoes_view_edit_none_e_escopo_loja(self):
         self.client.force_authenticate(self.user_view)
         self.assertEqual(self.client.get("/api/cadastros/lojas/").status_code, 200)
@@ -146,9 +158,74 @@ class LojaOperacionalTests(OperacionalBaseTest):
         self.assertEqual(res.status_code, 400)
         res = self.client.post("/api/cadastros/lojas/", {"empresa": self.empresa.pk, "nome_loja": "Duplicada", "apelido_loja": "D", "cnpj": "11222333000181"}, format="json")
         self.assertEqual(res.status_code, 400)
-        res = self.client.post("/api/cadastros/lojas/", {"empresa": self.empresa.pk, "nome_loja": "Matriz", "apelido_loja": "M", "cnpj": "11222333000343", "tipo_unidade": Loja.TIPO_MATRIZ}, format="json")
+        res = self.client.post("/api/cadastros/lojas/", self.loja_payload(nome_loja="Matriz", apelido_loja="M", tipo_unidade=Loja.TIPO_MATRIZ), format="json")
         self.assertEqual(res.status_code, 201)
         self.assertEqual(Loja.objects.get(pk=res.data["id"]).Matriz, "SIM")
+
+    def test_codigo_municipio_ibge_obrigatorio_para_nfce(self):
+        self.client.force_authenticate(self.superuser)
+        casos_invalidos = (None, "", "355030", "35503088", "355A308")
+        cnpjs = (
+            "11222333000424",
+            "11222333000505",
+            "11222333000696",
+            "11222333000777",
+            "11222333000858",
+        )
+        for idx, (codigo, cnpj) in enumerate(zip(casos_invalidos, cnpjs), start=4):
+            res = self.client.post(
+                "/api/cadastros/lojas/",
+                self.loja_payload(
+                    nome_loja=f"Loja Fiscal {idx}",
+                    apelido_loja=f"LF{idx}",
+                    cnpj=cnpj,
+                    codigo_municipio_ibge=codigo,
+                ),
+                format="json",
+            )
+            self.assertEqual(res.status_code, 400, (codigo, res.data))
+            self.assertIn("codigo_municipio_ibge", res.data)
+
+    def test_codigo_municipio_ibge_opcional_sem_nfce_e_valido_quando_preenchido(self):
+        self.client.force_authenticate(self.superuser)
+        res = self.client.post(
+            "/api/cadastros/lojas/",
+            self.loja_payload(emite_nfce=False, codigo_municipio_ibge=None),
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertIsNone(Loja.objects.get(pk=res.data["id"]).codigo_municipio_ibge)
+
+        res = self.client.post(
+            "/api/cadastros/lojas/",
+            self.loja_payload(nome_loja="Loja Fiscal 2", apelido_loja="LF2", cnpj="11222333000424", emite_nfce=False),
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Loja.objects.get(pk=res.data["id"]).codigo_municipio_ibge, "3550308")
+
+    def test_patch_loja_nfce_preserva_exige_e_bloqueia_remocao_do_codigo_ibge(self):
+        self.client.force_authenticate(self.superuser)
+
+        res = self.client.patch(f"/api/cadastros/lojas/{self.loja.pk}/", {"apelido_loja": "L1X"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.loja.refresh_from_db()
+        self.assertEqual(self.loja.codigo_municipio_ibge, "3550308")
+
+        res = self.client.patch(
+            f"/api/cadastros/lojas/{self.loja.pk}/",
+            {"codigo_municipio_ibge": None},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("codigo_municipio_ibge", res.data)
+
+        self.loja2.emite_nfce = False
+        self.loja2.codigo_municipio_ibge = None
+        self.loja2.save(update_fields=["emite_nfce", "codigo_municipio_ibge"])
+        res = self.client.patch(f"/api/cadastros/lojas/{self.loja2.pk}/", {"emite_nfce": True}, format="json")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("codigo_municipio_ibge", res.data)
 
     def test_ciclo_de_vida_usuarios_indicadores_e_auditoria(self):
         self.client.force_authenticate(self.user_edit)
