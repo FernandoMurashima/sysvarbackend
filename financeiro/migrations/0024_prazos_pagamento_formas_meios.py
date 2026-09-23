@@ -57,8 +57,8 @@ def criar_prazos_e_formas(apps, schema_editor):
             ("DIN", "Dinheiro", "DINHEIRO", False, None, "AVISTA", Decimal("0.0000"), Decimal("0.00"), [0]),
             ("PIX", "Pix", "PIX", bool(conta), conta, "AVISTA", Decimal("0.0000"), Decimal("0.00"), [0]),
             ("DEB", "Cartao de debito", "DEBITO", bool(conta), conta, "AVISTA", Decimal("0.0000"), Decimal("0.00"), [1]),
-            ("CCR", "Cartao credito rotativo", "CREDITO_ROTATIVO", bool(conta), conta, "30D", Decimal("0.0000"), Decimal("0.00"), [30]),
-            ("CCP", "Cartao credito parcelado", "CREDITO_PARCELADO", bool(conta), conta, "6X30", Decimal("0.0000"), Decimal("0.00"), [30, 60, 90, 120, 150, 180]),
+            ("CCR", "Cartao credito rotativo", "CREDITO", bool(conta), conta, "30D", Decimal("0.0000"), Decimal("0.00"), [30]),
+            ("CCP", "Cartao credito parcelado", "CREDITO", bool(conta), conta, "6X30", Decimal("0.0000"), Decimal("0.00"), [30, 60, 90, 120, 150, 180]),
             ("BOL", "Boleto", "BOLETO", bool(conta), conta, "30D", Decimal("0.0000"), Decimal("0.00"), [30]),
             ("TRF", "Transferencia", "TRANSFERENCIA", bool(conta), conta, "AVISTA", Decimal("0.0000"), Decimal("0.00"), [0]),
         ]
@@ -96,8 +96,8 @@ def criar_prazos_e_formas(apps, schema_editor):
                 )
 
         legado_tipo = {
-            "CRE": "CREDITO_ROTATIVO",
-            "CRE2": "CREDITO_PARCELADO",
+            "CRE": "CREDITO",
+            "CRE2": "CREDITO",
             "15D": "OUTRO",
             "15_30": "OUTRO",
             "15_30_45": "OUTRO",
@@ -156,7 +156,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="formapagamento",
             name="tipo",
-            field=models.CharField(choices=[("DINHEIRO", "Dinheiro"), ("PIX", "Pix"), ("DEBITO", "Cartão de débito"), ("CREDITO_ROTATIVO", "Cartão crédito rotativo"), ("CREDITO_PARCELADO", "Cartão crédito parcelado"), ("BOLETO", "Boleto"), ("TRANSFERENCIA", "Transferência"), ("OUTRO", "Outro")], default="OUTRO", max_length=24),
+            field=models.CharField(choices=[("DINHEIRO", "Dinheiro"), ("PIX", "Pix"), ("DEBITO", "Cartão de débito"), ("CREDITO", "Cartão de crédito"), ("BOLETO", "Boleto"), ("TRANSFERENCIA", "Transferência"), ("OUTRO", "Outro")], default="OUTRO", max_length=24),
         ),
         migrations.AddField(
             model_name="formapagamento",

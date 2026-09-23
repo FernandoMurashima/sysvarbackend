@@ -29,7 +29,7 @@
   {
     "codigo": "CCR",
     "descricao": "Crédito à vista / rotativo",
-    "tipo": "CREDITO_ROTATIVO",
+    "tipo": "CREDITO",
     "num_parcelas": 1,
     "prazo_codigo": "30D",
     "gera_recebivel_bancario": true,
@@ -38,7 +38,7 @@
   {
     "codigo": "CC2",
     "descricao": "Crédito parcelado 2x",
-    "tipo": "CREDITO_PARCELADO",
+    "tipo": "CREDITO",
     "num_parcelas": 2,
     "prazo_codigo": "30-60",
     "gera_recebivel_bancario": true,
@@ -47,7 +47,7 @@
   {
     "codigo": "CC3",
     "descricao": "Crédito parcelado 3x",
-    "tipo": "CREDITO_PARCELADO",
+    "tipo": "CREDITO",
     "num_parcelas": 3,
     "prazo_codigo": "30-60-90",
     "gera_recebivel_bancario": true,
@@ -56,7 +56,7 @@
   {
     "codigo": "CC4",
     "descricao": "Crédito parcelado 4x",
-    "tipo": "CREDITO_PARCELADO",
+    "tipo": "CREDITO",
     "num_parcelas": 4,
     "prazo_codigo": "30-60-90-120",
     "gera_recebivel_bancario": true,

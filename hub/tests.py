@@ -1733,7 +1733,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         credito = self._forma(
             "002",
             descricao="Cartão Crédito",
-            tipo=FormaPagamento.TIPO_CREDITO_PARCELADO,
+            tipo=FormaPagamento.TIPO_CREDITO,
             num_parcelas=2,
             prazo_pagamento=prazo,
             adquirente="Rede",
@@ -1824,7 +1824,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         credito_payload = response.data["formas_pagamento"][1]
         self.assertEqual(credito_payload["id"], credito.pk)
         self.assertEqual(credito_payload["descricao"], "Cartão Crédito")
-        self.assertEqual(credito_payload["tipo"], FormaPagamento.TIPO_CREDITO_PARCELADO)
+        self.assertEqual(credito_payload["tipo"], FormaPagamento.TIPO_CREDITO)
         self.assertEqual(credito_payload["num_parcelas"], 2)
         self.assertEqual(credito_payload["prazo_pagamento"], {
             "id": prazo.pk,

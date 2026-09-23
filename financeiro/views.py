@@ -272,10 +272,16 @@ class PrazoPagamentoViewSet(BaseViewSet):
         qs = super().get_queryset()
         ativo = self.request.query_params.get('ativo')
         codigo = self.request.query_params.get('codigo')
+        finalidade = self.request.query_params.get('finalidade')
         if ativo in ('true', 'false', '1', '0'):
             qs = qs.filter(ativo=ativo in ('true', '1'))
         if codigo:
             qs = qs.filter(codigo=codigo)
+        if finalidade in ('PAGAR', 'RECEBER', 'AMBOS'):
+            if finalidade == 'AMBOS':
+                qs = qs.filter(finalidade='AMBOS')
+            else:
+                qs = qs.filter(finalidade__in=(finalidade, 'AMBOS'))
         return qs
 
 

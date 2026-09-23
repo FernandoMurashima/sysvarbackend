@@ -12,8 +12,7 @@ class FormaPagamento(models.Model):
     TIPO_DINHEIRO = 'DINHEIRO'
     TIPO_PIX = 'PIX'
     TIPO_DEBITO = 'DEBITO'
-    TIPO_CREDITO_ROTATIVO = 'CREDITO_ROTATIVO'
-    TIPO_CREDITO_PARCELADO = 'CREDITO_PARCELADO'
+    TIPO_CREDITO = 'CREDITO'
     TIPO_BOLETO = 'BOLETO'
     TIPO_TRANSFERENCIA = 'TRANSFERENCIA'
     TIPO_OUTRO = 'OUTRO'
@@ -21,8 +20,7 @@ class FormaPagamento(models.Model):
         (TIPO_DINHEIRO, 'Dinheiro'),
         (TIPO_PIX, 'Pix'),
         (TIPO_DEBITO, 'Cartão de débito'),
-        (TIPO_CREDITO_ROTATIVO, 'Cartão crédito rotativo'),
-        (TIPO_CREDITO_PARCELADO, 'Cartão crédito parcelado'),
+        (TIPO_CREDITO, 'Cartão de crédito'),
         (TIPO_BOLETO, 'Boleto'),
         (TIPO_TRANSFERENCIA, 'Transferência'),
         (TIPO_OUTRO, 'Outro'),
@@ -93,10 +91,20 @@ class FormaPagamentoParcela(models.Model):
 
 
 class PrazoPagamento(models.Model):
+    FINALIDADE_PAGAR = 'PAGAR'
+    FINALIDADE_RECEBER = 'RECEBER'
+    FINALIDADE_AMBOS = 'AMBOS'
+    FINALIDADE_CHOICES = [
+        (FINALIDADE_PAGAR, 'Pagar'),
+        (FINALIDADE_RECEBER, 'Receber'),
+        (FINALIDADE_AMBOS, 'Ambos'),
+    ]
+
     Idprazo = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='prazos_pagamento', db_index=True)
     codigo = models.CharField(max_length=12)
     descricao = models.CharField(max_length=120)
+    finalidade = models.CharField(max_length=8, choices=FINALIDADE_CHOICES, default=FINALIDADE_AMBOS)
     num_parcelas = models.PositiveIntegerField(default=1)
     intervalo_dias = models.PositiveIntegerField(default=30)
     ativo = models.BooleanField(default=True)
