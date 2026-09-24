@@ -152,7 +152,7 @@ class ReceberRateioAdmin(admin.ModelAdmin):
 
 @admin.register(FormaPagamento)
 class FormaPagamentoAdmin(admin.ModelAdmin):
-    list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "num_parcelas", "prazo_pagamento", "ativo", "data_cadastro")
+    list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "prazo_pagamento", "ativo", "data_cadastro")
     list_filter = ("ativo", "tipo")
     search_fields = ("codigo", "descricao")
     readonly_fields = ("data_cadastro",)

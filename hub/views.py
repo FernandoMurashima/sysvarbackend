@@ -460,7 +460,7 @@ class HubFormasPagamentoView(APIView):
                 "codigo": forma.codigo,
                 "descricao": forma.descricao,
                 "tipo": forma.tipo,
-                "num_parcelas": forma.num_parcelas,
+                "num_parcelas": prazo.num_parcelas if prazo else None,
                 "ativo": forma.ativo,
                 "prazo_pagamento": {
                     "id": prazo.pk,

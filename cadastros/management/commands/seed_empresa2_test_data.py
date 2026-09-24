@@ -214,7 +214,6 @@ class Command(BaseCommand):
                 defaults={
                     "empresa": empresa,
                     "descricao": descricao,
-                    "num_parcelas": len(dias),
                     "prazo_pagamento": prazo,
                     "ativo": True,
                 },

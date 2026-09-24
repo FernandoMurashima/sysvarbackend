@@ -429,22 +429,21 @@ class Command(BaseCommand):
                 PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=ordem, dias=dia, percentual=percentual)
             prazos[codigo] = prazo
         formas = [
-            ("DIN", "Dinheiro", "DINHEIRO", 1, [0], False, None, "AVISTA", Decimal("0.0000")),
-            ("PIX", "Pix", "PIX", 1, [0], True, conta_padrao, "AVISTA", Decimal("0.0000")),
-            ("DEB", "Cartao de debito", "DEBITO", 1, [1], True, conta_padrao, "AVISTA", Decimal("0.0000")),
-            ("CCR", "Cartao credito rotativo", "CREDITO", 1, [30], True, conta_padrao, "30D", Decimal("0.0000")),
-            ("CCP", "Cartao credito parcelado", "CREDITO", 6, [30, 60, 90, 120, 150, 180], True, conta_padrao, "6X30", Decimal("0.0000")),
-            ("BOL", "Boleto", "BOLETO", 1, [30], True, conta_padrao, "30D", Decimal("0.0000")),
-            ("TRC", "Vale troca", "OUTRO", 1, [0], False, None, "AVISTA", Decimal("0.0000")),
+            ("DIN", "Dinheiro", "DINHEIRO", [0], False, None, "AVISTA", Decimal("0.0000")),
+            ("PIX", "Pix", "PIX", [0], True, conta_padrao, "AVISTA", Decimal("0.0000")),
+            ("DEB", "Cartao de debito", "DEBITO", [1], True, conta_padrao, "AVISTA", Decimal("0.0000")),
+            ("CCR", "Cartao credito rotativo", "CREDITO", [30], True, conta_padrao, "30D", Decimal("0.0000")),
+            ("CCP", "Cartao credito parcelado", "CREDITO", [30, 60, 90, 120, 150, 180], True, conta_padrao, "6X30", Decimal("0.0000")),
+            ("BOL", "Boleto", "BOLETO", [30], True, conta_padrao, "30D", Decimal("0.0000")),
+            ("TRC", "Vale troca", "OUTRO", [0], False, None, "AVISTA", Decimal("0.0000")),
         ]
         formas_criadas = []
-        for codigo, descricao, tipo, parcelas, dias, recebivel, conta_liq, prazo_codigo, taxa in formas:
+        for codigo, descricao, tipo, dias, recebivel, conta_liq, prazo_codigo, taxa in formas:
             forma = FormaPagamento.objects.create(
                 empresa=empresa,
                 codigo=codigo,
                 descricao=descricao,
                 tipo=tipo,
-                num_parcelas=parcelas,
                 ativo=True,
                 gera_recebivel_bancario=recebivel,
                 adquirente=None,

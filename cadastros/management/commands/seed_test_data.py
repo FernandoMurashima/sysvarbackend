@@ -227,7 +227,6 @@ class Command(BaseCommand):
                 codigo=codigo,
                 defaults={
                     "descricao": descricao,
-                    "num_parcelas": len(parcelas),
                     "prazo_pagamento": prazo,
                     "ativo": True,
                 },

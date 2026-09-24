@@ -185,7 +185,7 @@ class CotacaoBaseTests(TestCase):
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30D", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOL", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOL", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(
             cotacao=cotacao,
             cotacao_fornecedor=participante,
@@ -452,7 +452,7 @@ class CotacaoBaseTests(TestCase):
         item = self.criar_item_cotacao(cotacao)
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.criar_fornecedor())
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30DPROP", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLPROP", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLPROP", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         resp = client.post(
             "/api/compras/cotacao-propostas/",
             self.proposta_payload(cotacao, participante, item, forma_pagamento=forma.codigo, prazo_pagamento=prazo.Idprazo, prazo_entrega_dias=15),
@@ -670,7 +670,7 @@ class CotacaoBaseTests(TestCase):
         proposta = self.criar_proposta_com_item(cotacao, item, "44688888000191", "12.00", qtd="2.000", frete=frete)
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"30D{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"BOL{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"BOL{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta.outras_despesas = Decimal("4.00")
         proposta.desconto_geral = Decimal("3.00")
         proposta.forma_pagamento = forma.codigo
@@ -765,7 +765,7 @@ class CotacaoBaseTests(TestCase):
         proposta = self.criar_proposta_com_item(cotacao, item, "44699999000191", "12.00")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="30DFALHA", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLFALHA", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo="BOLFALHA", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta.forma_pagamento = forma.codigo
         proposta.prazo_pagamento = prazo
         proposta.condicao_pagamento = prazo.descricao
@@ -1477,7 +1477,6 @@ class PedidoCompraUnificadoTests(TestCase):
             codigo="BOL",
             descricao="Boleto",
             tipo=FormaPagamento.TIPO_BOLETO,
-            num_parcelas=2,
             prazo_pagamento=prazo,
         )
         return forma, prazo
@@ -2511,7 +2510,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"PCI{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FPCI{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FPCI{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, forma_pagamento=forma.codigo, prazo_pagamento=prazo, total_proposta=Decimal("120.00"))
         for cot_item in cot_itens:
             CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=cot_item, quantidade_ofertada=Decimal("6.000"), preco_unitario=Decimal("10.00"), total_item=Decimal("60.00"))
@@ -2591,7 +2590,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"PRP{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FRP{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FRP{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, forma_pagamento=forma.codigo, prazo_pagamento=prazo, total_proposta=Decimal("20.00"))
         CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=cot_item, quantidade_ofertada=Decimal("2.000"), preco_unitario=Decimal("10.00"), total_item=Decimal("20.00"))
         cotacao.proposta_vencedora = proposta
@@ -2636,7 +2635,7 @@ class RequisicaoCompraTests(PedidoCompraUnificadoTests):
         participante = CotacaoFornecedor.objects.create(cotacao=cotacao, fornecedor=self.fornecedor, status_participacao="PROPOSTA_RECEBIDA")
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo=f"PRR{cotacao.id}", descricao="30 dias", num_parcelas=1, intervalo_dias=30)
         PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("1.000000"))
-        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FRR{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, num_parcelas=1, prazo_pagamento=prazo)
+        forma = FormaPagamento.objects.create(empresa=self.empresa, codigo=f"FRR{cotacao.id}", descricao="Boleto", tipo=FormaPagamento.TIPO_BOLETO, prazo_pagamento=prazo)
         proposta = CotacaoProposta.objects.create(cotacao=cotacao, cotacao_fornecedor=participante, forma_pagamento=forma.codigo, prazo_pagamento=prazo, total_proposta=Decimal("30.00"))
         CotacaoPropostaItem.objects.create(proposta=proposta, cotacao_item=cot_item, quantidade_ofertada=Decimal("3.000"), preco_unitario=Decimal("10.00"), total_item=Decimal("30.00"))
         cotacao.proposta_vencedora = proposta

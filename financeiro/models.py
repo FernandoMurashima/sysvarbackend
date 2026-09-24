@@ -31,7 +31,6 @@ class FormaPagamento(models.Model):
     codigo = models.CharField(max_length=10)
     descricao = models.CharField(max_length=120)
     tipo = models.CharField(max_length=24, choices=TIPO_CHOICES, default=TIPO_OUTRO)
-    num_parcelas = models.IntegerField(default=1)
     ativo = models.BooleanField(default=True)
     prazo_pagamento = models.ForeignKey(
         'financeiro.PrazoPagamento',

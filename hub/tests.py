@@ -1700,7 +1700,6 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             "codigo": codigo,
             "descricao": f"Forma {codigo}",
             "tipo": FormaPagamento.TIPO_OUTRO,
-            "num_parcelas": 1,
         }
         defaults.update(kwargs)
         return FormaPagamento.objects.create(**defaults)
@@ -1734,7 +1733,6 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             "002",
             descricao="Cartão Crédito",
             tipo=FormaPagamento.TIPO_CREDITO,
-            num_parcelas=2,
             prazo_pagamento=prazo,
             adquirente="Rede",
             conta_liquidacao=conta,
@@ -1760,8 +1758,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         prazo_dinheiro = PrazoPagamento.objects.create(empresa=self.empresa, codigo="AV", descricao="À vista", num_parcelas=1)
         PrazoPagamentoParcela.objects.create(prazo=prazo_dinheiro, ordem=1, dias=0, percentual=Decimal("1.000000"))
         dinheiro.prazo_pagamento = prazo_dinheiro
-        dinheiro.num_parcelas = 1
-        dinheiro.save(update_fields=["prazo_pagamento", "num_parcelas"])
+        dinheiro.save(update_fields=["prazo_pagamento"])
         FormaPagamentoFiscalMap.objects.create(
             empresa=self.empresa,
             forma_pagamento=dinheiro,

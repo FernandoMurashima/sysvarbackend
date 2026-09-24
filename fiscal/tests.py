@@ -2653,7 +2653,6 @@ class NotaFiscalEntradaXmlImportacaoTests(TestCase):
             codigo=codigo,
             descricao="Boleto",
             tipo=FormaPagamento.TIPO_BOLETO,
-            num_parcelas=1,
             ativo=True,
         )
 
