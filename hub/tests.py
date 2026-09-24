@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
+from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
@@ -1734,24 +1734,28 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             descricao="Cartão Crédito",
             tipo=FormaPagamento.TIPO_CREDITO,
             prazo_pagamento=prazo,
-            adquirente="Rede",
             conta_liquidacao=conta,
             gera_recebivel_bancario=True,
             prazo_credito_dias=30,
-            taxa_percentual=Decimal("2.5000"),
-            taxa_fixa=Decimal("1.20"),
             tef_habilitado=True,
             tef_modalidade="CREDITO",
             tef_adquirente_codigo="REDE",
             tef_terminal_logico="TERM01",
+        )
+        adquirente = Adquirente.objects.create(empresa=self.empresa, codigo="REDE", descricao="Rede")
+        CondicaoAdquirente.objects.create(
+            empresa=self.empresa,
+            adquirente=adquirente,
+            forma_pagamento=credito,
+            prazo_pagamento=prazo,
+            taxa_percentual=Decimal("2.5000"),
+            taxa_fixa=Decimal("1.20"),
         )
         dinheiro = self._forma(
             "001",
             descricao="Dinheiro",
             tipo=FormaPagamento.TIPO_DINHEIRO,
             ativo=False,
-            taxa_percentual=Decimal("0"),
-            taxa_fixa=Decimal("0"),
         )
         self._forma("003", empresa=self.outra_empresa, descricao="Outra Empresa")
         FormaPagamento.objects.create(empresa=None, codigo="000", descricao="Sem Empresa", tipo=FormaPagamento.TIPO_OUTRO)
@@ -1882,7 +1886,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         for idx in range(3):
             self._forma(f"{idx:03d}", prazo_pagamento=prazo)
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             response = self._formas_pagamento()
 
         self.assertEqual(response.status_code, 200, response.data)

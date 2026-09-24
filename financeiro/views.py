@@ -19,7 +19,7 @@ from .models import (
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     AntecipacaoRecebivel, AntecipacaoRecebivelItem,
-    FormaPagamento, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, Adquirente, CondicaoAdquirente, PrazoPagamento, PrazoPagamentoParcela
 )
 from .serializers import (
     ConfigFinanceiraSerializer, TipoDespesaPdvSerializer,
@@ -30,7 +30,7 @@ from .serializers import (
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     AntecipacaoRecebivelSerializer,
-    FormaPagamentoSerializer,
+    FormaPagamentoSerializer, AdquirenteSerializer, CondicaoAdquirenteSerializer,
     PrazoPagamentoSerializer, PrazoPagamentoParcelaSerializer
 )
 from .services import (
@@ -193,6 +193,12 @@ class BaseViewSet(viewsets.ModelViewSet):
         forma = data.get('forma')
         if forma and getattr(forma, 'empresa_id', None) and forma.empresa_id != empresa_id:
             raise ValidationError({'forma': 'A forma de pagamento pertence a outra empresa.'})
+        forma_pagamento = data.get('forma_pagamento')
+        if forma_pagamento and getattr(forma_pagamento, 'empresa_id', None) and forma_pagamento.empresa_id != empresa_id:
+            raise ValidationError({'forma_pagamento': 'A forma de pagamento pertence a outra empresa.'})
+        adquirente = data.get('adquirente')
+        if adquirente and getattr(adquirente, 'empresa_id', None) and adquirente.empresa_id != empresa_id:
+            raise ValidationError({'adquirente': 'A adquirente pertence a outra empresa.'})
         caixa = data.get('caixa')
         if caixa and getattr(caixa, 'empresa_id', None) and caixa.empresa_id != empresa_id:
             raise ValidationError({'caixa': 'O caixa informado pertence a outra empresa.'})
@@ -239,6 +245,46 @@ class FormaPagamentoViewSet(BaseViewSet):
             qs = qs.filter(ativo=v)
         if codigo:
             qs = qs.filter(codigo=codigo)
+        return qs
+
+
+class AdquirenteViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = Adquirente.objects.all().order_by('codigo')
+    serializer_class = AdquirenteSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        codigo = self.request.query_params.get('codigo')
+        if ativo in ('true', 'false', '1', '0'):
+            qs = qs.filter(ativo=ativo in ('true', '1'))
+        if codigo:
+            qs = qs.filter(codigo=codigo)
+        return qs
+
+
+class CondicaoAdquirenteViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = CondicaoAdquirente.objects.select_related('adquirente', 'forma_pagamento', 'prazo_pagamento').all()
+    serializer_class = CondicaoAdquirenteSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        adquirente = self.request.query_params.get('adquirente')
+        forma = self.request.query_params.get('forma_pagamento')
+        prazo = self.request.query_params.get('prazo_pagamento')
+        if ativo in ('true', 'false', '1', '0'):
+            qs = qs.filter(ativo=ativo in ('true', '1'))
+        if adquirente:
+            qs = qs.filter(adquirente_id=adquirente)
+        if forma:
+            qs = qs.filter(forma_pagamento_id=forma)
+        if prazo:
+            qs = qs.filter(prazo_pagamento_id=prazo)
         return qs
 
 

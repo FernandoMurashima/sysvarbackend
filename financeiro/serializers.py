@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    FormaPagamento,
+    FormaPagamento, Adquirente, CondicaoAdquirente,
     PrazoPagamento, PrazoPagamentoParcela,
     ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
@@ -67,7 +67,6 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
         prazo = attrs.get('prazo_pagamento', getattr(self.instance, 'prazo_pagamento', None))
         tef = attrs.get('tef_habilitado', getattr(self.instance, 'tef_habilitado', False))
-        adquirente = attrs.get('adquirente', getattr(self.instance, 'adquirente', ''))
         modalidade = attrs.get('tef_modalidade', getattr(self.instance, 'tef_modalidade', ''))
         if gera and not conta:
             raise serializers.ValidationError({'conta_liquidacao': 'Informe a conta de liquidação.'})
@@ -75,10 +74,43 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'conta_liquidacao': 'A conta de liquidação pertence a outra empresa.'})
         if prazo and empresa and getattr(prazo, 'empresa_id', None) and prazo.empresa_id != empresa.id:
             raise serializers.ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
-        if tef and not str(adquirente or '').strip():
-            raise serializers.ValidationError({'adquirente': 'Informe a adquirente do TEF.'})
         if tef and not str(modalidade or '').strip():
             raise serializers.ValidationError({'tef_modalidade': 'Informe a modalidade do TEF.'})
+        return attrs
+
+
+class AdquirenteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Adquirente
+        fields = '__all__'
+        read_only_fields = ('data_cadastro',)
+
+
+class CondicaoAdquirenteSerializer(serializers.ModelSerializer):
+    adquirente_codigo = serializers.CharField(source='adquirente.codigo', read_only=True)
+    adquirente_descricao = serializers.CharField(source='adquirente.descricao', read_only=True)
+    forma_codigo = serializers.CharField(source='forma_pagamento.codigo', read_only=True)
+    forma_descricao = serializers.CharField(source='forma_pagamento.descricao', read_only=True)
+    prazo_codigo = serializers.CharField(source='prazo_pagamento.codigo', read_only=True)
+    prazo_descricao = serializers.CharField(source='prazo_pagamento.descricao', read_only=True)
+
+    class Meta:
+        model = CondicaoAdquirente
+        fields = '__all__'
+        read_only_fields = ('data_cadastro',)
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        adquirente = attrs.get('adquirente', getattr(self.instance, 'adquirente', None))
+        forma = attrs.get('forma_pagamento', getattr(self.instance, 'forma_pagamento', None))
+        prazo = attrs.get('prazo_pagamento', getattr(self.instance, 'prazo_pagamento', None))
+        for campo, obj in (('adquirente', adquirente), ('forma_pagamento', forma), ('prazo_pagamento', prazo)):
+            if empresa and obj and getattr(obj, 'empresa_id', None) and obj.empresa_id != empresa.id:
+                raise serializers.ValidationError({campo: 'O cadastro pertence a outra empresa.'})
+        if attrs.get('taxa_percentual', getattr(self.instance, 'taxa_percentual', 0)) < 0:
+            raise serializers.ValidationError({'taxa_percentual': 'A taxa percentual não pode ser negativa.'})
+        if attrs.get('taxa_fixa', getattr(self.instance, 'taxa_fixa', 0)) < 0:
+            raise serializers.ValidationError({'taxa_fixa': 'A taxa fixa não pode ser negativa.'})
         return attrs
 
 

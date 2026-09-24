@@ -16,6 +16,7 @@ from financeiro.models import (
     Caixa,
     CashbackConfig,
     CashbackMovimento,
+    CondicaoAdquirente,
     ContaBancaria,
     FormaPagamento,
     LancamentoContabil,
@@ -429,16 +430,16 @@ class Command(BaseCommand):
                 PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=ordem, dias=dia, percentual=percentual)
             prazos[codigo] = prazo
         formas = [
-            ("DIN", "Dinheiro", "DINHEIRO", [0], False, None, "AVISTA", Decimal("0.0000")),
-            ("PIX", "Pix", "PIX", [0], True, conta_padrao, "AVISTA", Decimal("0.0000")),
-            ("DEB", "Cartao de debito", "DEBITO", [1], True, conta_padrao, "AVISTA", Decimal("0.0000")),
-            ("CCR", "Cartao credito rotativo", "CREDITO", [30], True, conta_padrao, "30D", Decimal("0.0000")),
-            ("CCP", "Cartao credito parcelado", "CREDITO", [30, 60, 90, 120, 150, 180], True, conta_padrao, "6X30", Decimal("0.0000")),
-            ("BOL", "Boleto", "BOLETO", [30], True, conta_padrao, "30D", Decimal("0.0000")),
-            ("TRC", "Vale troca", "OUTRO", [0], False, None, "AVISTA", Decimal("0.0000")),
+            ("DIN", "Dinheiro", "DINHEIRO", [0], False, None, "AVISTA"),
+            ("PIX", "Pix", "PIX", [0], True, conta_padrao, "AVISTA"),
+            ("DEB", "Cartao de debito", "DEBITO", [1], True, conta_padrao, "AVISTA"),
+            ("CCR", "Cartao credito rotativo", "CREDITO", [30], True, conta_padrao, "30D"),
+            ("CCP", "Cartao credito parcelado", "CREDITO", [30, 60, 90, 120, 150, 180], True, conta_padrao, "6X30"),
+            ("BOL", "Boleto", "BOLETO", [30], True, conta_padrao, "30D"),
+            ("TRC", "Vale troca", "OUTRO", [0], False, None, "AVISTA"),
         ]
         formas_criadas = []
-        for codigo, descricao, tipo, dias, recebivel, conta_liq, prazo_codigo, taxa in formas:
+        for codigo, descricao, tipo, dias, recebivel, conta_liq, prazo_codigo in formas:
             forma = FormaPagamento.objects.create(
                 empresa=empresa,
                 codigo=codigo,
@@ -446,11 +447,9 @@ class Command(BaseCommand):
                 tipo=tipo,
                 ativo=True,
                 gera_recebivel_bancario=recebivel,
-                adquirente=None,
                 conta_liquidacao=conta_liq,
                 prazo_pagamento=prazos[prazo_codigo],
                 prazo_credito_dias=max(dias),
-                taxa_percentual=taxa,
                 tef_habilitado=False,
             )
             formas_criadas.append(forma)
@@ -868,7 +867,10 @@ class Command(BaseCommand):
             )
 
     def _movimento_bancario_previsto(self, venda, natureza, pagamento, forma, valor_bruto, item):
-        taxa = money((valor_bruto * Decimal(forma.taxa_percentual or 0) / Decimal("100")) + Decimal(forma.taxa_fixa or 0))
+        condicao = self._condicao_adquirente(venda.empresa, forma)
+        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
+        taxa_fixa = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
+        taxa = money((valor_bruto * taxa_percentual / Decimal("100")) + taxa_fixa)
         valor_liquido = money(max(Decimal("0.00"), valor_bruto - taxa))
         data_prevista = timezone.localdate() + timedelta(days=int(forma.prazo_credito_dias or 0))
         conta_liquidacao = (
@@ -892,12 +894,23 @@ class Command(BaseCommand):
             status=status_movimento,
             origem=origem_movimento,
             valor=valor_liquido,
-            historico=f"Recebivel {forma.descricao} PDV {venda.documento} - {forma.adquirente or ''} | bruto {valor_bruto} taxa {taxa}"[:255],
+            historico=f"Recebivel {forma.descricao} PDV {venda.documento} - {(condicao.adquirente.descricao if condicao else '')} | bruto {valor_bruto} taxa {taxa}"[:255],
             documento=venda.documento,
             Idnatureza=natureza,
             FormaPagamento=pagamento.forma,
             conta_bancaria=conta_liquidacao,
             receber_item=item,
+        )
+
+    def _condicao_adquirente(self, empresa, forma):
+        if not forma.prazo_pagamento_id:
+            return None
+        return (
+            CondicaoAdquirente.objects
+            .select_related("adquirente")
+            .filter(empresa=empresa, forma_pagamento=forma, prazo_pagamento=forma.prazo_pagamento, ativo=True)
+            .order_by("Idcondicaoadquirente")
+            .first()
         )
 
     def _cashback_venda(self, venda):

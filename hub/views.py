@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -445,6 +445,13 @@ class HubFormasPagamentoView(APIView):
             .prefetch_related(Prefetch("prazo_pagamento__parcelas", queryset=parcelas_ordenadas))
             .order_by("codigo", "Idformapagamento")
         )
+        condicoes = {
+            (cond.forma_pagamento_id, cond.prazo_pagamento_id): cond
+            for cond in CondicaoAdquirente.objects
+            .filter(empresa=empresa, ativo=True)
+            .select_related("adquirente")
+            .order_by("forma_pagamento_id", "prazo_pagamento_id", "Idcondicaoadquirente")
+        }
         mapas_fiscais = (
             FormaPagamentoFiscalMap.objects
             .filter(empresa=empresa, ativo=True, forma_pagamento__empresa=empresa)
@@ -455,6 +462,7 @@ class HubFormasPagamentoView(APIView):
         formas_pagamento = []
         for forma in formas:
             prazo = forma.prazo_pagamento
+            condicao = condicoes.get((forma.pk, forma.prazo_pagamento_id))
             formas_pagamento.append({
                 "id": forma.pk,
                 "codigo": forma.codigo,
@@ -469,12 +477,12 @@ class HubFormasPagamentoView(APIView):
                     "num_parcelas": prazo.num_parcelas,
                     "intervalo_dias": prazo.intervalo_dias,
                 } if prazo else None,
-                "adquirente": forma.adquirente,
+                "adquirente": condicao.adquirente.descricao if condicao else None,
                 "conta_liquidacao_id": forma.conta_liquidacao_id,
                 "gera_recebivel_bancario": forma.gera_recebivel_bancario,
                 "prazo_credito_dias": forma.prazo_credito_dias,
-                "taxa_percentual": _decimal_string(forma.taxa_percentual, 4),
-                "taxa_fixa": _decimal_string(forma.taxa_fixa, 2),
+                "taxa_percentual": _decimal_string(condicao.taxa_percentual if condicao else 0, 4),
+                "taxa_fixa": _decimal_string(condicao.taxa_fixa if condicao else 0, 2),
                 "tef_habilitado": forma.tef_habilitado,
                 "tef_modalidade": forma.tef_modalidade,
                 "tef_adquirente_codigo": forma.tef_adquirente_codigo,

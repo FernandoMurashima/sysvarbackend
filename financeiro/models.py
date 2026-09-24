@@ -39,7 +39,6 @@ class FormaPagamento(models.Model):
         blank=True,
         related_name='formas_pagamento',
     )
-    adquirente = models.CharField(max_length=80, null=True, blank=True)
     conta_liquidacao = models.ForeignKey(
         'financeiro.ContaBancaria',
         on_delete=models.PROTECT,
@@ -49,8 +48,6 @@ class FormaPagamento(models.Model):
     )
     gera_recebivel_bancario = models.BooleanField(default=False)
     prazo_credito_dias = models.PositiveIntegerField(default=0)
-    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
-    taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     tef_habilitado = models.BooleanField(default=False)
     tef_modalidade = models.CharField(max_length=20, blank=True, default='')
     tef_adquirente_codigo = models.CharField(max_length=40, blank=True, default='')
@@ -66,6 +63,51 @@ class FormaPagamento(models.Model):
 
     def __str__(self):
         return f"{self.codigo} - {self.descricao}"
+
+
+class Adquirente(models.Model):
+    Idadquirente = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='adquirentes', db_index=True)
+    codigo = models.CharField(max_length=20)
+    descricao = models.CharField(max_length=120)
+    ativo = models.BooleanField(default=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_adquirente'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'codigo'], name='uq_empresa_adquirente_codigo')
+        ]
+        ordering = ['codigo']
+
+    def __str__(self):
+        return f"{self.codigo} - {self.descricao}"
+
+
+class CondicaoAdquirente(models.Model):
+    Idcondicaoadquirente = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='condicoes_adquirente', db_index=True)
+    adquirente = models.ForeignKey(Adquirente, on_delete=models.PROTECT, related_name='condicoes')
+    forma_pagamento = models.ForeignKey(FormaPagamento, on_delete=models.PROTECT, related_name='condicoes_adquirente')
+    prazo_pagamento = models.ForeignKey('financeiro.PrazoPagamento', on_delete=models.PROTECT, related_name='condicoes_adquirente')
+    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    ativo = models.BooleanField(default=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_condicao_adquirente'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'adquirente', 'forma_pagamento', 'prazo_pagamento'], name='uq_empresa_adq_forma_prazo')
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'ativo'], name='financeiro__empresa_f3ebba_idx'),
+            models.Index(fields=['forma_pagamento', 'prazo_pagamento'], name='financeiro__forma_p_6c9cbd_idx'),
+        ]
+        ordering = ['adquirente__codigo', 'forma_pagamento__codigo', 'prazo_pagamento__codigo']
+
+    def __str__(self):
+        return f"{self.adquirente} - {self.forma_pagamento} - {self.prazo_pagamento}"
 
 
 class PrazoPagamento(models.Model):

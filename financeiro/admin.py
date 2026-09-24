@@ -5,7 +5,7 @@ from .models import (
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
-    FormaPagamento, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, Adquirente, CondicaoAdquirente, PrazoPagamento, PrazoPagamentoParcela
 )
 
 class PagarRateioInline(admin.TabularInline):
@@ -155,6 +155,22 @@ class FormaPagamentoAdmin(admin.ModelAdmin):
     list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "prazo_pagamento", "ativo", "data_cadastro")
     list_filter = ("ativo", "tipo")
     search_fields = ("codigo", "descricao")
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(Adquirente)
+class AdquirenteAdmin(admin.ModelAdmin):
+    list_display = ("Idadquirente", "empresa", "codigo", "descricao", "ativo", "data_cadastro")
+    list_filter = ("empresa", "ativo")
+    search_fields = ("codigo", "descricao")
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(CondicaoAdquirente)
+class CondicaoAdquirenteAdmin(admin.ModelAdmin):
+    list_display = ("Idcondicaoadquirente", "empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "taxa_percentual", "taxa_fixa", "ativo")
+    list_filter = ("empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "ativo")
+    search_fields = ("adquirente__codigo", "adquirente__descricao", "forma_pagamento__codigo", "prazo_pagamento__codigo")
     readonly_fields = ("data_cadastro",)
 
 

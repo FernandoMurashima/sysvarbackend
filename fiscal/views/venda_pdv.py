@@ -18,6 +18,7 @@ from financeiro.models import (
     CashbackConfig,
     CashbackMovimento,
     FormaPagamento,
+    CondicaoAdquirente,
     MovimentacaoFinanceira,
     Receber,
     ReceberItem,
@@ -1336,14 +1337,15 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         self._consolidar_caixa_master(venda, natureza, valor)
 
     def _registrar_recebivel_bancario(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, forma: FormaPagamento, valor_bruto: Decimal, item: ReceberItem):
-        taxa_percentual = Decimal(forma.taxa_percentual or 0)
-        taxa_fixa = Decimal(forma.taxa_fixa or 0)
+        condicao = self._condicao_adquirente(venda, forma)
+        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
+        taxa_fixa = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
         taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa)
         valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - taxa))
         data_prevista = timezone.localdate() + timedelta(days=int(forma.prazo_credito_dias or 0))
         historico = f"Recebivel {forma.descricao} PDV {venda.documento}"
-        if forma.adquirente:
-            historico = f"{historico} - {forma.adquirente}"
+        if condicao:
+            historico = f"{historico} - {condicao.adquirente.descricao}"
         if taxa > 0:
             historico = f"{historico} | bruto {money(valor_bruto)} taxa {taxa}"
         prazo = int(forma.prazo_credito_dias or 0)
@@ -1370,6 +1372,22 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             receber_item=item,
         )
         gerar_lancamento_contabil_movimentacao(movimento)
+
+    def _condicao_adquirente(self, venda: VendaPdv, forma: FormaPagamento):
+        if not forma.prazo_pagamento_id:
+            return None
+        return (
+            CondicaoAdquirente.objects
+            .select_related("adquirente")
+            .filter(
+                empresa=venda.empresa,
+                forma_pagamento=forma,
+                prazo_pagamento=forma.prazo_pagamento,
+                ativo=True,
+            )
+            .order_by("Idcondicaoadquirente")
+            .first()
+        )
 
     def _consolidar_caixa_master(self, venda: VendaPdv, natureza: Nat_Lancamento, valor: Decimal):
         master = (
