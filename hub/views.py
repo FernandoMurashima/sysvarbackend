@@ -478,6 +478,8 @@ class HubFormasPagamentoView(APIView):
                     "intervalo_dias": prazo.intervalo_dias,
                 } if prazo else None,
                 "adquirente": condicao.adquirente.descricao if condicao else None,
+                "adquirente_id": condicao.adquirente_id if condicao else None,
+                "condicao_adquirente_id": condicao.pk if condicao else None,
                 "conta_liquidacao_id": forma.conta_liquidacao_id,
                 "gera_recebivel_bancario": forma.gera_recebivel_bancario,
                 "prazo_credito_dias": forma.prazo_credito_dias,

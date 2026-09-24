@@ -1241,10 +1241,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         valor_financeiro = money(max(Decimal("0.00"), valor_venda - total_beneficios))
         if valor_financeiro <= 0:
             return
-        formas_liquidacao = {
+        formas_config = {
             forma.codigo.upper(): forma
-            for forma in FormaPagamento.objects.select_related("conta_liquidacao")
-            .filter(empresa=venda.empresa, ativo=True, gera_recebivel_bancario=True, conta_liquidacao__isnull=False)
+            for forma in FormaPagamento.objects.select_related("conta_liquidacao", "prazo_pagamento")
+            .prefetch_related("prazo_pagamento__parcelas")
+            .filter(empresa=venda.empresa, ativo=True)
         }
         receber = Receber.objects.create(
             empresa=venda.empresa,
@@ -1269,14 +1270,31 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             if valor_pagamento <= 0:
                 continue
             saldo_financeiro = money(saldo_financeiro - valor_pagamento)
-            forma_config = formas_liquidacao.get(str(pagamento.forma or "").upper())
-            if forma_config:
+            forma_config = formas_config.get(str(pagamento.forma or "").upper())
+            if self._eh_cartao(forma_config):
+                parcela_n = self._registrar_recebiveis_cartao(
+                    venda,
+                    receber,
+                    natureza,
+                    pagamento,
+                    forma_config,
+                    valor_pagamento,
+                    parcela_n,
+                )
+                continue
+            if forma_config and forma_config.gera_recebivel_bancario and forma_config.conta_liquidacao_id:
                 item = ReceberItem.objects.create(
                     Idreceber=receber,
+                    venda_pagamento=pagamento,
+                    forma_pagamento_ref=forma_config,
+                    prazo_pagamento=forma_config.prazo_pagamento,
                     parcela_n=parcela_n,
+                    parcela_total=1,
                     status=ReceberItem.STATUS_EFETIVO,
                     Data_vencimento=timezone.localdate() + timedelta(days=int(forma_config.prazo_credito_dias or 0)),
                     valor_parcela=valor_pagamento,
+                    valor_bruto=valor_pagamento,
+                    valor_liquido_previsto=valor_pagamento,
                     FormaPagamento=pagamento.forma,
                     Previsao=True,
                     Idnatureza=natureza,
@@ -1285,10 +1303,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             else:
                 item = ReceberItem.objects.create(
                     Idreceber=receber,
+                    venda_pagamento=pagamento,
+                    forma_pagamento_ref=forma_config,
+                    prazo_pagamento=forma_config.prazo_pagamento if forma_config else None,
                     parcela_n=parcela_n,
+                    parcela_total=1,
                     status=ReceberItem.STATUS_BAIXADO,
                     Data_vencimento=timezone.localdate(),
                     valor_parcela=valor_pagamento,
+                    valor_bruto=valor_pagamento,
+                    valor_liquido_previsto=valor_pagamento,
                     FormaPagamento=pagamento.forma,
                     Previsao=False,
                     Idnatureza=natureza,
@@ -1302,15 +1326,96 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             ReceberItem.objects.create(
                 Idreceber=receber,
                 parcela_n=1,
+                parcela_total=1,
                 status=ReceberItem.STATUS_BAIXADO,
                 Data_vencimento=timezone.localdate(),
                 valor_parcela=saldo_financeiro,
+                valor_bruto=saldo_financeiro,
+                valor_liquido_previsto=saldo_financeiro,
                 FormaPagamento=venda.forma_pagamento,
                 Previsao=False,
                 Idnatureza=natureza,
                 data_baixa=timezone.localdate(),
                 valor_baixa=saldo_financeiro,
             )
+
+    def _eh_cartao(self, forma):
+        return bool(forma and forma.tipo in (FormaPagamento.TIPO_DEBITO, FormaPagamento.TIPO_CREDITO))
+
+    def _parcelas_do_prazo(self, forma: FormaPagamento):
+        prazo = forma.prazo_pagamento
+        if not prazo:
+            return []
+        return list(prazo.parcelas.all().order_by("ordem", "Idprazoparcela"))
+
+    def _distribuir_valor(self, total: Decimal, quantidade: int) -> List[Decimal]:
+        if quantidade <= 1:
+            return [money(total)]
+        base = money(money(total) / Decimal(quantidade))
+        valores = [base for _ in range(quantidade)]
+        valores[-1] = money(money(total) - sum(valores[:-1], Decimal("0.00")))
+        return valores
+
+    def _valores_parcelas(self, valor_total: Decimal, parcelas) -> List[Decimal]:
+        if not parcelas:
+            return [money(valor_total)]
+        percentuais = [Decimal(parcela.percentual or 0) for parcela in parcelas]
+        total_percentual = sum(percentuais, Decimal("0"))
+        if total_percentual <= 0:
+            return self._distribuir_valor(valor_total, len(parcelas))
+        divisor = Decimal("1") if total_percentual <= 1 else Decimal("100")
+        valores = [money(money(valor_total) * percentual / divisor) for percentual in percentuais]
+        valores[-1] = money(money(valor_total) - sum(valores[:-1], Decimal("0.00")))
+        return valores
+
+    def _registrar_recebiveis_cartao(
+        self,
+        venda: VendaPdv,
+        receber: Receber,
+        natureza: Nat_Lancamento,
+        pagamento: VendaPdvPagamento,
+        forma: FormaPagamento,
+        valor_pagamento: Decimal,
+        parcela_inicial: int,
+    ) -> int:
+        parcelas = self._parcelas_do_prazo(forma)
+        if not parcelas:
+            parcelas = [None]
+        valores_brutos = self._valores_parcelas(valor_pagamento, parcelas)
+        condicao = self._condicao_adquirente(venda, forma)
+        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
+        taxa_fixa_total = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
+        taxas_fixas = self._distribuir_valor(taxa_fixa_total, len(valores_brutos))
+        hoje = timezone.localdate()
+
+        for idx, (parcela, valor_bruto) in enumerate(zip(parcelas, valores_brutos), start=1):
+            dias = int(getattr(parcela, "dias", 0) or 0)
+            taxa_fixa_parcela = taxas_fixas[idx - 1]
+            valor_taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa_parcela)
+            valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - valor_taxa))
+            ReceberItem.objects.create(
+                Idreceber=receber,
+                venda_pagamento=pagamento,
+                forma_pagamento_ref=forma,
+                prazo_pagamento=forma.prazo_pagamento,
+                adquirente=condicao.adquirente if condicao else None,
+                condicao_adquirente=condicao,
+                parcela_n=parcela_inicial,
+                parcela_total=len(valores_brutos),
+                status=ReceberItem.STATUS_PREVISTO,
+                Data_vencimento=hoje + timedelta(days=dias),
+                valor_parcela=valor_bruto,
+                valor_bruto=valor_bruto,
+                taxa_percentual=taxa_percentual,
+                taxa_fixa=taxa_fixa_parcela,
+                valor_taxa=valor_taxa,
+                valor_liquido_previsto=valor_liquido,
+                FormaPagamento=pagamento.forma,
+                Previsao=True,
+                Idnatureza=natureza,
+            )
+            parcela_inicial += 1
+        return parcela_inicial
 
     def _registrar_recebimento_imediato(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, valor: Decimal, item: ReceberItem):
         caixa = venda.caixa
@@ -1342,6 +1447,13 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         taxa_fixa = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
         taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa)
         valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - taxa))
+        item.adquirente = condicao.adquirente if condicao else None
+        item.condicao_adquirente = condicao
+        item.taxa_percentual = taxa_percentual
+        item.taxa_fixa = taxa_fixa
+        item.valor_taxa = taxa
+        item.valor_liquido_previsto = valor_liquido
+        item.save(update_fields=["adquirente", "condicao_adquirente", "taxa_percentual", "taxa_fixa", "valor_taxa", "valor_liquido_previsto"])
         data_prevista = timezone.localdate() + timedelta(days=int(forma.prazo_credito_dias or 0))
         historico = f"Recebivel {forma.descricao} PDV {venda.documento}"
         if condicao:

@@ -731,12 +731,23 @@ class ReceberItem(models.Model):
 
     Idreceberitem = models.BigAutoField(primary_key=True)
     Idreceber = models.ForeignKey(Receber, on_delete=models.CASCADE, related_name='itens', db_index=True)
+    venda_pagamento = models.ForeignKey('fiscal.VendaPdvPagamento', on_delete=models.PROTECT, null=True, blank=True, related_name='recebiveis')
+    forma_pagamento_ref = models.ForeignKey('financeiro.FormaPagamento', on_delete=models.PROTECT, null=True, blank=True, related_name='recebiveis')
+    prazo_pagamento = models.ForeignKey('financeiro.PrazoPagamento', on_delete=models.PROTECT, null=True, blank=True, related_name='recebiveis')
+    adquirente = models.ForeignKey('financeiro.Adquirente', on_delete=models.PROTECT, null=True, blank=True, related_name='recebiveis')
+    condicao_adquirente = models.ForeignKey('financeiro.CondicaoAdquirente', on_delete=models.PROTECT, null=True, blank=True, related_name='recebiveis')
 
     parcela_n = models.PositiveIntegerField()
+    parcela_total = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PREVISTO)
 
     Data_vencimento = models.DateField()
     valor_parcela = models.DecimalField(max_digits=18, decimal_places=2)
+    valor_bruto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_taxa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    valor_liquido_previsto = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     FormaPagamento = models.CharField(max_length=30, null=True, blank=True)
     idconta = models.IntegerField(null=True, blank=True)
