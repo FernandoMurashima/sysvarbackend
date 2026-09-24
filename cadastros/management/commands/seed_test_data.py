@@ -11,10 +11,11 @@ from financeiro.models import (
     Caixa,
     ContaBancaria,
     FormaPagamento,
-    FormaPagamentoParcela,
     MovimentacaoFinanceira,
     Pagar,
     PagarItem,
+    PrazoPagamento,
+    PrazoPagamentoParcela,
     Receber,
     ReceberItem,
 )
@@ -213,18 +214,28 @@ class Command(BaseCommand):
             ("CC", "Cartao de credito", [30]),
         ]
         for codigo, descricao, parcelas in formas:
+            prazo, _ = PrazoPagamento.objects.update_or_create(
+                codigo=codigo,
+                defaults={
+                    "descricao": descricao,
+                    "num_parcelas": len(parcelas),
+                    "intervalo_dias": parcelas[0] if len(parcelas) == 1 else 30,
+                    "ativo": True,
+                },
+            )
             forma, _ = FormaPagamento.objects.update_or_create(
                 codigo=codigo,
                 defaults={
                     "descricao": descricao,
                     "num_parcelas": len(parcelas),
+                    "prazo_pagamento": prazo,
                     "ativo": True,
                 },
             )
             percentual = Decimal("1") / Decimal(len(parcelas))
             for ordem, dias in enumerate(parcelas, start=1):
-                FormaPagamentoParcela.objects.update_or_create(
-                    forma=forma,
+                PrazoPagamentoParcela.objects.update_or_create(
+                    prazo=prazo,
                     ordem=ordem,
                     defaults={"dias": dias, "percentual": percentual},
                 )

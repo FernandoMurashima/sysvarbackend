@@ -10,7 +10,7 @@ from accounts.models import UserFieldPermission, UserModulePermission
 from cadastros.models import Empresa, Fornecedor, Funcionarios, Loja, Nat_Lancamento, PlanoContabil
 from compras.models import PedidoCompra, PedidoCompraEntrega, PedidoCompraItem
 from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem, RegraTributaria, Tributo
-from financeiro.models import FormaPagamentoParcela
+from financeiro.models import PrazoPagamentoParcela
 from produto.models import (
     Colecao,
     ConfigEan,

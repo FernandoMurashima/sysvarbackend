@@ -7,7 +7,7 @@ from .views import (
     PagarViewSet, PagarItemViewSet, PagarRateioViewSet,
     ReceberViewSet, ReceberItemViewSet, ReceberRateioViewSet,
     AntecipacaoRecebivelViewSet,
-    FormaPagamentoViewSet, FormaPagamentoParcelaViewSet,
+    FormaPagamentoViewSet,
     PrazoPagamentoViewSet, PrazoPagamentoParcelaViewSet
 )
 
@@ -15,7 +15,6 @@ router = DefaultRouter()
 router.register('config-financeira', ConfigFinanceiraViewSet)
 router.register('tipos-despesa-pdv', TipoDespesaPdvViewSet)
 router.register('formas', FormaPagamentoViewSet)
-router.register('formas-parcelas', FormaPagamentoParcelaViewSet)
 router.register('prazos', PrazoPagamentoViewSet)
 router.register('prazos-parcelas', PrazoPagamentoParcelaViewSet)
 router.register('cashback-config', CashbackConfigViewSet)

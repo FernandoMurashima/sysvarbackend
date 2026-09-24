@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, FormaPagamento, FormaPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
@@ -437,12 +437,12 @@ class HubFormasPagamentoView(APIView):
         hub = request.sysvar_hub
         loja = hub.loja
         empresa = loja.empresa
-        parcelas_ordenadas = FormaPagamentoParcela.objects.order_by("ordem", "Idformapagparcela")
+        parcelas_ordenadas = PrazoPagamentoParcela.objects.order_by("ordem", "Idprazoparcela")
         formas = (
             FormaPagamento.objects
             .filter(empresa=empresa)
             .select_related("prazo_pagamento")
-            .prefetch_related(Prefetch("parcelas", queryset=parcelas_ordenadas))
+            .prefetch_related(Prefetch("prazo_pagamento__parcelas", queryset=parcelas_ordenadas))
             .order_by("codigo", "Idformapagamento")
         )
         mapas_fiscais = (
@@ -484,9 +484,8 @@ class HubFormasPagamentoView(APIView):
                         "ordem": parcela.ordem,
                         "dias": parcela.dias,
                         "percentual": _decimal_string(parcela.percentual, 6),
-                        "valor_fixo": _decimal_string(parcela.valor_fixo, 2),
                     }
-                    for parcela in forma.parcelas.all()
+                    for parcela in (prazo.parcelas.all() if prazo else [])
                 ],
             })
 

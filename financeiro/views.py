@@ -19,7 +19,7 @@ from .models import (
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     AntecipacaoRecebivel, AntecipacaoRecebivelItem,
-    FormaPagamento, FormaPagamentoParcela, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, PrazoPagamento, PrazoPagamentoParcela
 )
 from .serializers import (
     ConfigFinanceiraSerializer, TipoDespesaPdvSerializer,
@@ -30,7 +30,7 @@ from .serializers import (
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     AntecipacaoRecebivelSerializer,
-    FormaPagamentoSerializer, FormaPagamentoParcelaSerializer,
+    FormaPagamentoSerializer,
     PrazoPagamentoSerializer, PrazoPagamentoParcelaSerializer
 )
 from .services import (
@@ -239,26 +239,6 @@ class FormaPagamentoViewSet(BaseViewSet):
             qs = qs.filter(ativo=v)
         if codigo:
             qs = qs.filter(codigo=codigo)
-        return qs
-
-
-class FormaPagamentoParcelaViewSet(BaseViewSet):
-    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
-    write_roles = ["Admin", "Diretor", "Gerente"]
-    queryset = FormaPagamentoParcela.objects.select_related('forma').all().order_by('forma__codigo', 'ordem')
-    serializer_class = FormaPagamentoParcelaSerializer
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        empresa_id = self._empresa_id_usuario()
-        forma = self.request.query_params.get('forma')
-        codigo = self.request.query_params.get('codigo')
-        if empresa_id:
-            qs = qs.filter(forma__empresa_id=empresa_id)
-        if forma:
-            qs = qs.filter(forma_id=forma)
-        if codigo:
-            qs = qs.filter(forma__codigo=codigo)
         return qs
 
 

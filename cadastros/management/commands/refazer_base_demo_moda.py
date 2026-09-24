@@ -18,7 +18,6 @@ from financeiro.models import (
     CashbackMovimento,
     ContaBancaria,
     FormaPagamento,
-    FormaPagamentoParcela,
     LancamentoContabil,
     MovimentacaoFinanceira,
     Pagar,
@@ -189,7 +188,6 @@ class Command(BaseCommand):
         Ncm.objects.filter(empresa_id__in=empresa_ids).delete()
         ConfigEan.objects.filter(empresa_id__in=empresa_ids).delete()
 
-        FormaPagamentoParcela.objects.filter(forma__empresa_id__in=empresa_ids).delete()
         FormaPagamento.objects.filter(empresa_id__in=empresa_ids).delete()
         CashbackConfig.objects.filter(empresa_id__in=empresa_ids).delete()
         ContaBancaria.objects.filter(empresa_id__in=empresa_ids).delete()
@@ -456,9 +454,6 @@ class Command(BaseCommand):
                 taxa_percentual=taxa,
                 tef_habilitado=False,
             )
-            percentual = Decimal("100.000000") / Decimal(parcelas)
-            for ordem, prazo in enumerate(dias, start=1):
-                FormaPagamentoParcela.objects.create(forma=forma, ordem=ordem, dias=prazo, percentual=percentual)
             formas_criadas.append(forma)
         CashbackConfig.objects.create(
             empresa=empresa,
@@ -1010,7 +1005,7 @@ class Command(BaseCommand):
         self._parcelas_pedido(pedido_uso, forma)
 
     def _parcelas_pedido(self, pedido, forma):
-        parcelas = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
+        parcelas = list(PrazoPagamentoParcela.objects.filter(prazo=forma.prazo_pagamento).order_by("ordem"))
         total = money(pedido.total_pedido)
         restante = total
         for idx, parcela in enumerate(parcelas, start=1):

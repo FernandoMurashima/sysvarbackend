@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from financeiro.models import FormaPagamento, FormaPagamentoParcela
+from financeiro.models import FormaPagamento, PrazoPagamento, PrazoPagamentoParcela
 
 
 class Command(BaseCommand):
@@ -30,11 +30,21 @@ class Command(BaseCommand):
         parcelas_total = 0
 
         for codigo, descricao, dias_parcelas in formas:
+            prazo, _ = PrazoPagamento.objects.update_or_create(
+                codigo=codigo,
+                defaults={
+                    "descricao": descricao,
+                    "num_parcelas": len(dias_parcelas),
+                    "intervalo_dias": dias_parcelas[0] if len(dias_parcelas) == 1 else 30,
+                    "ativo": True,
+                },
+            )
             forma, created = FormaPagamento.objects.update_or_create(
                 codigo=codigo,
                 defaults={
                     "descricao": descricao,
                     "num_parcelas": len(dias_parcelas),
+                    "prazo_pagamento": prazo,
                     "ativo": True,
                 },
             )
@@ -43,19 +53,18 @@ class Command(BaseCommand):
 
             percentual = Decimal("1") / Decimal(len(dias_parcelas))
             for ordem, dias in enumerate(dias_parcelas, start=1):
-                FormaPagamentoParcela.objects.update_or_create(
-                    forma=forma,
+                PrazoPagamentoParcela.objects.update_or_create(
+                    prazo=prazo,
                     ordem=ordem,
                     defaults={
                         "dias": dias,
                         "percentual": percentual,
-                        "valor_fixo": None,
                     },
                 )
                 parcelas_total += 1
 
-            FormaPagamentoParcela.objects.filter(
-                forma=forma,
+            PrazoPagamentoParcela.objects.filter(
+                prazo=prazo,
                 ordem__gt=len(dias_parcelas),
             ).delete()
 

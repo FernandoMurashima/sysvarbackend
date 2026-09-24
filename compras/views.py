@@ -77,13 +77,12 @@ try:
         Pagar,
         PagarItem,
         FormaPagamento,
-        FormaPagamentoParcela,
         PrazoPagamento,
         PrazoPagamentoParcela,
     )
 except Exception:
     FIN_OK = False
-    Pagar = PagarItem = FormaPagamento = FormaPagamentoParcela = PrazoPagamento = PrazoPagamentoParcela = None
+    Pagar = PagarItem = FormaPagamento = PrazoPagamento = PrazoPagamentoParcela = None
 
 # Natureza para aprovar
 from cadastros.models import Nat_Lancamento
@@ -336,11 +335,10 @@ def _parcelas_configuradas(pedido: PedidoCompra):
         .first()
     )
     prazo = pedido.prazo_pagamento
+    if not prazo and forma:
+        prazo = forma.prazo_pagamento
     if prazo:
         cfg = list(PrazoPagamentoParcela.objects.filter(prazo=prazo).order_by("ordem"))
-    elif forma:
-        prazo = forma.prazo_pagamento
-        cfg = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
     else:
         cfg = []
     return forma, prazo, cfg
@@ -1391,7 +1389,7 @@ class PedidoCompraViewSet(BaseViewSet):
     def set_forma_pagamento(self, request, pk=None):
         """
         Seta forma de pagamento (por id ou codigo) e RECRIA as parcelas planejadas (PLAN)
-        em compras_pedido_compra_parcela com base em FormaPagamentoParcela.
+        em compras_pedido_compra_parcela com base em PrazoPagamentoParcela.
         Body: {"id_forma": 2} ou {"codigo_forma":"30/60", "id_prazo": 1}.
         """
         obj: PedidoCompra = self.get_object()
@@ -1429,10 +1427,9 @@ class PedidoCompraViewSet(BaseViewSet):
         else:
             prazo = forma.prazo_pagamento
 
-        if prazo:
-            cfg = list(PrazoPagamentoParcela.objects.filter(prazo=prazo).order_by("ordem"))
-        else:
-            cfg = list(FormaPagamentoParcela.objects.filter(forma=forma).order_by("ordem"))
+        if not prazo:
+            return Response({"detail": "Informe um prazo de pagamento para gerar parcelas"}, status=status.HTTP_400_BAD_REQUEST)
+        cfg = list(PrazoPagamentoParcela.objects.filter(prazo=prazo).order_by("ordem"))
         if not cfg:
             return Response({"detail": "Prazo sem parcelas configuradas"}, status=status.HTTP_400_BAD_REQUEST)
 

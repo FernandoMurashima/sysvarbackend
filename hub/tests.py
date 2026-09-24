@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, ContaBancaria, FormaPagamento, FormaPagamentoParcela, PrazoPagamento, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
@@ -1757,9 +1757,11 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         )
         self._forma("003", empresa=self.outra_empresa, descricao="Outra Empresa")
         FormaPagamento.objects.create(empresa=None, codigo="000", descricao="Sem Empresa", tipo=FormaPagamento.TIPO_OUTRO)
-        FormaPagamentoParcela.objects.create(forma=credito, ordem=2, dias=60, percentual=None, valor_fixo=Decimal("100.00"))
-        FormaPagamentoParcela.objects.create(forma=credito, ordem=1, dias=30, percentual=Decimal("0.500000"), valor_fixo=None)
-        FormaPagamentoParcela.objects.create(forma=dinheiro, ordem=1, dias=0, percentual=Decimal("1.000000"), valor_fixo=None)
+        prazo_dinheiro = PrazoPagamento.objects.create(empresa=self.empresa, codigo="AV", descricao="À vista", num_parcelas=1)
+        PrazoPagamentoParcela.objects.create(prazo=prazo_dinheiro, ordem=1, dias=0, percentual=Decimal("1.000000"))
+        dinheiro.prazo_pagamento = prazo_dinheiro
+        dinheiro.num_parcelas = 1
+        dinheiro.save(update_fields=["prazo_pagamento", "num_parcelas"])
         FormaPagamentoFiscalMap.objects.create(
             empresa=self.empresa,
             forma_pagamento=dinheiro,
@@ -1815,11 +1817,10 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         dinheiro_payload = response.data["formas_pagamento"][0]
         self.assertEqual(dinheiro_payload["id"], dinheiro.pk)
         self.assertFalse(dinheiro_payload["ativo"])
-        self.assertIsNone(dinheiro_payload["prazo_pagamento"])
+        self.assertEqual(dinheiro_payload["prazo_pagamento"]["codigo"], "AV")
         self.assertEqual(dinheiro_payload["taxa_percentual"], "0.0000")
         self.assertEqual(dinheiro_payload["taxa_fixa"], "0.00")
         self.assertEqual(dinheiro_payload["parcelas"][0]["percentual"], "1.000000")
-        self.assertIsNone(dinheiro_payload["parcelas"][0]["valor_fixo"])
 
         credito_payload = response.data["formas_pagamento"][1]
         self.assertEqual(credito_payload["id"], credito.pk)
@@ -1845,8 +1846,8 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         self.assertEqual(credito_payload["tef_adquirente_codigo"], "REDE")
         self.assertEqual(credito_payload["tef_terminal_logico"], "TERM01")
         self.assertEqual(credito_payload["parcelas"], [
-            {"ordem": 1, "dias": 30, "percentual": "0.500000", "valor_fixo": None},
-            {"ordem": 2, "dias": 60, "percentual": None, "valor_fixo": "100.00"},
+            {"ordem": 1, "dias": 30, "percentual": "50.000000"},
+            {"ordem": 2, "dias": 60, "percentual": "50.000000"},
         ])
         payload_texto = str(response.data).lower()
         for termo in ["token", "password", "secret"]:
@@ -1880,9 +1881,9 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
     def test_formas_pagamento_evita_n_mais_um_em_cenario_controlado(self):
         self._hub_autenticado()
         prazo = PrazoPagamento.objects.create(empresa=self.empresa, codigo="AV", descricao="À vista")
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=0, percentual=Decimal("1.000000"))
         for idx in range(3):
-            forma = self._forma(f"{idx:03d}", prazo_pagamento=prazo)
-            FormaPagamentoParcela.objects.create(forma=forma, ordem=1, dias=0, percentual=Decimal("1.000000"))
+            self._forma(f"{idx:03d}", prazo_pagamento=prazo)
 
         with self.assertNumQueries(4):
             response = self._formas_pagamento()

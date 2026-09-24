@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    FormaPagamento, FormaPagamentoParcela,
+    FormaPagamento,
     PrazoPagamento, PrazoPagamentoParcela,
     ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
@@ -42,11 +42,6 @@ class TipoDespesaPdvSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class FormaPagamentoParcelaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = FormaPagamentoParcela
-        fields = '__all__'
-
 class PrazoPagamentoParcelaSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrazoPagamentoParcela
@@ -62,8 +57,6 @@ class PrazoPagamentoSerializer(serializers.ModelSerializer):
 
 
 class FormaPagamentoSerializer(serializers.ModelSerializer):
-    parcelas = FormaPagamentoParcelaSerializer(many=True, read_only=True)
-
     class Meta:
         model = FormaPagamento
         fields = '__all__'

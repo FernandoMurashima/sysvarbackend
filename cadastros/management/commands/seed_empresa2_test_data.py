@@ -11,7 +11,8 @@ from financeiro.models import (
     CashbackConfig,
     ContaBancaria,
     FormaPagamento,
-    FormaPagamentoParcela,
+    PrazoPagamento,
+    PrazoPagamentoParcela,
 )
 from produto.models import (
     Colecao,
@@ -198,23 +199,32 @@ class Command(BaseCommand):
             ("E23060", "30/60 dias Empresa 2", [30, 60]),
         ]
         for codigo, descricao, dias in formas:
+            prazo, _ = PrazoPagamento.objects.update_or_create(
+                empresa=empresa,
+                codigo=codigo,
+                defaults={
+                    "descricao": descricao,
+                    "num_parcelas": len(dias),
+                    "intervalo_dias": dias[0] if len(dias) == 1 else 30,
+                    "ativo": True,
+                },
+            )
             forma, _ = FormaPagamento.objects.update_or_create(
                 codigo=codigo,
                 defaults={
                     "empresa": empresa,
                     "descricao": descricao,
                     "num_parcelas": len(dias),
+                    "prazo_pagamento": prazo,
                     "ativo": True,
                 },
             )
-            FormaPagamentoParcela.objects.filter(forma=forma).delete()
             percentual = Decimal("100.000000") / Decimal(len(dias))
             for idx, prazo in enumerate(dias, start=1):
-                FormaPagamentoParcela.objects.create(
-                    forma=forma,
+                PrazoPagamentoParcela.objects.update_or_create(
+                    prazo=forma.prazo_pagamento,
                     ordem=idx,
-                    dias=prazo,
-                    percentual=percentual,
+                    defaults={"dias": prazo, "percentual": percentual},
                 )
         CashbackConfig.objects.update_or_create(
             empresa=empresa,

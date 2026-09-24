@@ -5,7 +5,7 @@ from .models import (
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
-    FormaPagamento, FormaPagamentoParcela, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, PrazoPagamento, PrazoPagamentoParcela
 )
 
 class PagarRateioInline(admin.TabularInline):
@@ -150,26 +150,11 @@ class ReceberRateioAdmin(admin.ModelAdmin):
     list_filter = ("Idnatureza",)
     search_fields = ("Idrateio", "Idreceberitem__Idreceberitem")
 
-class FormaPagamentoParcelaInline(admin.TabularInline):
-    model = FormaPagamentoParcela
-    extra = 0
-    fields = ("ordem", "dias", "percentual", "valor_fixo", "data_cadastro")
-    readonly_fields = ("data_cadastro",)
-    show_change_link = True
-
 @admin.register(FormaPagamento)
 class FormaPagamentoAdmin(admin.ModelAdmin):
     list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "num_parcelas", "prazo_pagamento", "ativo", "data_cadastro")
     list_filter = ("ativo", "tipo")
     search_fields = ("codigo", "descricao")
-    readonly_fields = ("data_cadastro",)
-    inlines = [FormaPagamentoParcelaInline]
-
-@admin.register(FormaPagamentoParcela)
-class FormaPagamentoParcelaAdmin(admin.ModelAdmin):
-    list_display = ("Idformapagparcela", "forma", "ordem", "dias", "percentual", "valor_fixo", "data_cadastro")
-    list_filter = ("forma",)
-    search_fields = ("forma__codigo", "forma__descricao")
     readonly_fields = ("data_cadastro",)
 
 

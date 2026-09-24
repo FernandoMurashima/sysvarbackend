@@ -28,7 +28,7 @@ class FormaPagamento(models.Model):
 
     Idformapagamento = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='formas_pagamento', db_index=True)
-    codigo = models.CharField(max_length=10)   # ex.: 'AV', '30/60', '01'
+    codigo = models.CharField(max_length=10)
     descricao = models.CharField(max_length=120)
     tipo = models.CharField(max_length=24, choices=TIPO_CHOICES, default=TIPO_OUTRO)
     num_parcelas = models.IntegerField(default=1)
@@ -67,27 +67,6 @@ class FormaPagamento(models.Model):
 
     def __str__(self):
         return f"{self.codigo} - {self.descricao}"
-
-
-class FormaPagamentoParcela(models.Model):
-    Idformapagparcela = models.BigAutoField(primary_key=True)
-    forma = models.ForeignKey(FormaPagamento, on_delete=models.CASCADE, related_name='parcelas')
-    ordem = models.IntegerField()                           # 1,2,3...
-    dias = models.IntegerField()                            # prazo em dias
-    percentual = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    valor_fixo = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
-    data_cadastro = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'financeiro_forma_pagamento_parcela'
-        constraints = [
-            models.UniqueConstraint(fields=['forma', 'ordem'], name='uq_formapag_parcela_ordem')
-        ]
-        indexes = [models.Index(fields=['forma', 'ordem'])]
-        ordering = ['forma', 'ordem']
-
-    def __str__(self):
-        return f"{self.forma.codigo} - Parcela {self.ordem} ({self.dias} dias)"
 
 
 class PrazoPagamento(models.Model):

@@ -15,7 +15,7 @@ from cadastros.models import Empresa, EmpresaContrato, Fornecedor, Loja, ModuloS
 from compras.models import Cotacao, CotacaoFornecedor, CotacaoItem, CotacaoProposta, CotacaoPropostaItem, CotacaoRequisicao, OrdemServico, OrdemServicoMaterial, PedidoCompra, PedidoCompraEntrega, PedidoCompraItem, PedidoCompraParcela, Requisicao, RequisicaoFinalidadeAquisicao, RequisicaoHistorico, RequisicaoItem, RequisicaoMaterialCategoria, RequisicaoMatrizResponsabilidade, RequisicaoServicoCategoria, RequisicaoSetor
 from compras.serializers import CotacaoSerializer
 from compras.views import CotacaoViewSet
-from financeiro.models import FormaPagamento, FormaPagamentoParcela, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
+from financeiro.models import FormaPagamento, Pagar, PagarItem, PrazoPagamento, PrazoPagamentoParcela
 from fiscal.models import NotaFiscalEntrada, NotaFiscalEntradaItem, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from produto.models import Colecao, ConfigEan, Cor, Grade, Grupo, Pack, PackItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Tamanho, Unidade
 from auditoria.models import AuditLog
@@ -1480,8 +1480,6 @@ class PedidoCompraUnificadoTests(TestCase):
             num_parcelas=2,
             prazo_pagamento=prazo,
         )
-        FormaPagamentoParcela.objects.create(forma=forma, ordem=1, dias=30, percentual=Decimal("50.000000"))
-        FormaPagamentoParcela.objects.create(forma=forma, ordem=2, dias=60, percentual=Decimal("50.000000"))
         return forma, prazo
 
     def criar_pedido(self, **extras):
