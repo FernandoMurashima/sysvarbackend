@@ -12,8 +12,8 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import CashbackConfig, ConfigFinanceira, MovimentacaoFinanceira, Pagar, Receber
-from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
+from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, Receber
+from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
 from fiscal.models.venda_pdv import VendaPdv
 from produto.models import ConfigEan, Estoque, EstoqueMovimentacao, FichaTecnica, FichaTecnicaItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Promocao
@@ -60,6 +60,24 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(CashbackConfig.objects.count(), 1)
         for model in [EstoqueMovimentacao, ProdutoUsoConsumoMovimentacao, Requisicao, Cotacao, PedidoCompra, Distribuicao, MercadoriaTransito, MovimentacaoFinanceira, Pagar, Receber, AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, XmlFornecedorRecebido, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaTermo, RecebimentoMercadoriaEfetivacaoEstoque, NotaFiscalEntrada, NotaFiscalSaida, VendaPdv]:
             self.assertFalse(model.objects.exists(), model.__name__)
+
+    def test_reset_recria_mapas_fiscais_das_formas_pdv(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+
+        mapas = {
+            (mapa.forma_pagamento.tipo, mapa.codigo_tpag)
+            for mapa in FormaPagamentoFiscalMap.objects.select_related("forma_pagamento").filter(
+                empresa=empresa,
+                ativo=True,
+                forma_pagamento__empresa=empresa,
+            )
+        }
+
+        self.assertIn((FormaPagamento.TIPO_DINHEIRO, "01"), mapas)
+        self.assertIn((FormaPagamento.TIPO_CREDITO, "03"), mapas)
+        self.assertIn((FormaPagamento.TIPO_DEBITO, "04"), mapas)
+        self.assertIn((FormaPagamento.TIPO_PIX, "17"), mapas)
 
     def test_reset_remove_registros_runtime_de_agente_e_configuracao_xml(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)

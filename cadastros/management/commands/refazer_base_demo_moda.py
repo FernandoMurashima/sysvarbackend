@@ -35,7 +35,8 @@ from financeiro.models import (
     ValeTrocaMovimento,
 )
 from fiscal.models.venda_pdv import money
-from fiscal.models.nota_fiscal_entrada import NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.models.nota_fiscal_entrada import FormaPagamentoFiscalMap, NotaFiscalEntrada, NotaFiscalEntradaItem
+from fiscal.services.nfe_xml import TPAG_DESCRICOES
 from fiscal.models.venda_pdv import (
     NFCe,
     NFeDevolucao,
@@ -77,6 +78,15 @@ from produto.models import (
 
 class Command(BaseCommand):
     help = "Refaz a base demonstrativa de moda preservando empresas, usuarios, plano contabil e naturezas."
+    TPAG_POR_TIPO_FORMA = {
+        FormaPagamento.TIPO_DINHEIRO: "01",
+        FormaPagamento.TIPO_CREDITO: "03",
+        FormaPagamento.TIPO_DEBITO: "04",
+        FormaPagamento.TIPO_PIX: "17",
+        FormaPagamento.TIPO_BOLETO: "15",
+        FormaPagamento.TIPO_TRANSFERENCIA: "18",
+        FormaPagamento.TIPO_OUTRO: "99",
+    }
 
     def add_arguments(self, parser):
         parser.add_argument("--confirmar", action="store_true", help="Confirma a limpeza e recriacao da base demo.")
@@ -189,6 +199,7 @@ class Command(BaseCommand):
         Ncm.objects.filter(empresa_id__in=empresa_ids).delete()
         ConfigEan.objects.filter(empresa_id__in=empresa_ids).delete()
 
+        FormaPagamentoFiscalMap.objects.filter(empresa_id__in=empresa_ids).delete()
         FormaPagamento.objects.filter(empresa_id__in=empresa_ids).delete()
         CashbackConfig.objects.filter(empresa_id__in=empresa_ids).delete()
         ContaBancaria.objects.filter(empresa_id__in=empresa_ids).delete()
@@ -452,6 +463,7 @@ class Command(BaseCommand):
                 prazo_credito_dias=max(dias),
                 tef_habilitado=False,
             )
+            self._criar_mapa_fiscal_forma_pagamento(forma)
             formas_criadas.append(forma)
         CashbackConfig.objects.create(
             empresa=empresa,
@@ -471,6 +483,20 @@ class Command(BaseCommand):
             "contas_por_loja": contas_por_loja,
             "formas": formas_criadas,
         }
+
+    def _criar_mapa_fiscal_forma_pagamento(self, forma):
+        codigo_tpag = self.TPAG_POR_TIPO_FORMA.get(forma.tipo)
+        if not codigo_tpag:
+            return
+        FormaPagamentoFiscalMap.objects.get_or_create(
+            empresa=forma.empresa,
+            codigo_tpag=codigo_tpag,
+            defaults={
+                "forma_pagamento": forma,
+                "descricao_fiscal": TPAG_DESCRICOES.get(codigo_tpag, forma.descricao),
+                "ativo": True,
+            },
+        )
 
     def _base_produtos(self, empresa, idx):
         ncm = Ncm.objects.create(empresa=empresa, ncm="6204.62.00", descricao="Vestuário feminino", aliquota=Decimal("18.00"))
