@@ -88,6 +88,11 @@ class HubSincronizacaoSolicitacao(models.Model):
 
 
 class AtivacaoSysvarHub(models.Model):
+    ESTADO_PENDENTE = "PENDENTE"
+    ESTADO_UTILIZADA = "UTILIZADA"
+    ESTADO_EXPIRADA = "EXPIRADA"
+    ESTADO_REVOGADA = "REVOGADA"
+
     TEMPO_EXPIRACAO = timedelta(minutes=15)
     ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -141,6 +146,16 @@ class AtivacaoSysvarHub(models.Model):
     def esta_utilizavel(self, agora=None) -> bool:
         agora = agora or timezone.now()
         return self.usado_em is None and self.revogado_em is None and self.expira_em > agora
+
+    def estado_administrativo(self, agora=None) -> str:
+        agora = agora or timezone.now()
+        if self.usado_em is not None:
+            return self.ESTADO_UTILIZADA
+        if self.revogado_em is not None:
+            return self.ESTADO_REVOGADA
+        if self.expira_em <= agora:
+            return self.ESTADO_EXPIRADA
+        return self.ESTADO_PENDENTE
 
 
 class HubEventoRecebido(models.Model):

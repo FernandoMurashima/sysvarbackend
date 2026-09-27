@@ -20,6 +20,8 @@ from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, HubSincronizacaoSolicitacao, SysvarHub
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
+    hubs_no_escopo,
+    lojas_no_escopo,
     montar_painel_sincronizacao,
     obter_comando_para_hub,
     serializar_solicitacao,
@@ -51,6 +53,66 @@ def _decimal_string(valor, casas):
     if valor is None:
         return None
     return f"{valor:.{casas}f}"
+
+
+def _validar_usuario_admin_hub(user):
+    if user.is_superuser:
+        return
+    if getattr(user, "type", "") not in ADMIN_CONFIG_ROLES:
+        raise PermissionDenied("Usuário sem permissão para administrar o Sysvar Hub.")
+    if not getattr(user, "empresa_id", None):
+        raise PermissionDenied("Usuário sem empresa vinculada.")
+
+
+def _loja_no_escopo_usuario(user, loja_id):
+    loja = Loja.objects.select_related("empresa").filter(pk=loja_id).first()
+    if not loja:
+        raise ValidationError({"loja": "Loja inválida."})
+    user_empresa_id = getattr(user, "empresa_id", None)
+    if user_empresa_id and loja.empresa_id != int(user_empresa_id):
+        raise PermissionDenied("Loja fora do escopo do usuário.")
+    if not user_empresa_id and not user.is_superuser:
+        raise PermissionDenied("Usuário sem empresa vinculada.")
+    return loja
+
+
+def _hub_no_escopo_usuario(user, hub_id, for_update=False):
+    qs = SysvarHub.objects.select_related("loja", "loja__empresa")
+    if for_update:
+        qs = qs.select_for_update()
+    hub = qs.filter(pk=hub_id).first()
+    if not hub:
+        raise Http404
+    user_empresa_id = getattr(user, "empresa_id", None)
+    if user_empresa_id and hub.loja.empresa_id != int(user_empresa_id):
+        raise PermissionDenied("Hub fora do escopo do usuário.")
+    if not user_empresa_id and not user.is_superuser:
+        raise PermissionDenied("Usuário sem empresa vinculada.")
+    return hub
+
+
+def _serializar_ativacao_admin(ativacao, agora=None):
+    return {
+        "id": ativacao.pk,
+        "loja_id": ativacao.loja_id,
+        "loja_nome": ativacao.loja.nome_loja,
+        "empresa_id": ativacao.loja.empresa_id,
+        "codigo_prefixo": ativacao.codigo_prefixo,
+        "criada_em": ativacao.criado_em,
+        "expira_em": ativacao.expira_em,
+        "estado": ativacao.estado_administrativo(agora),
+        "hub_id": ativacao.hub_id,
+    }
+
+
+def _revogar_ativacoes_pendentes(loja, agora=None):
+    agora = agora or timezone.now()
+    return AtivacaoSysvarHub.objects.filter(
+        loja=loja,
+        usado_em__isnull=True,
+        revogado_em__isnull=True,
+        expira_em__gt=agora,
+    ).update(revogado_em=agora)
 
 
 def _serializar_fiscal_loja(loja, empresa):
@@ -99,28 +161,26 @@ def _serializar_natureza_despesa_pdv(natureza):
 class HubAtivacaoAdminView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def _validar_usuario_admin(self, request):
-        user = request.user
-        if not user.is_superuser and getattr(user, "type", "") not in ADMIN_CONFIG_ROLES:
-            raise PermissionDenied("Usuário sem permissão para administrar ativações do Sysvar Hub.")
+    def get(self, request):
+        _validar_usuario_admin_hub(request.user)
+        agora = timezone.now()
+        ativacoes = (
+            AtivacaoSysvarHub.objects.select_related("loja", "loja__empresa", "hub")
+            .filter(loja__in=lojas_no_escopo(request.user))
+            .order_by("-criado_em", "-id")
+        )
+        return Response([_serializar_ativacao_admin(ativacao, agora) for ativacao in ativacoes], status=status.HTTP_200_OK)
 
     def post(self, request):
-        self._validar_usuario_admin(request)
+        _validar_usuario_admin_hub(request.user)
         loja_id = request.data.get("loja") or request.data.get("loja_id")
         if not loja_id:
             raise ValidationError({"loja": "Informe a loja."})
 
-        loja = Loja.objects.select_related("empresa").filter(pk=loja_id).first()
-        if not loja:
-            raise ValidationError({"loja": "Loja inválida."})
-
-        user_empresa_id = getattr(request.user, "empresa_id", None)
-        if user_empresa_id and loja.empresa_id != int(user_empresa_id):
-            raise PermissionDenied("Loja fora do escopo do usuário.")
-        if not user_empresa_id and not request.user.is_superuser:
-            raise PermissionDenied("Usuário sem empresa vinculada.")
-
-        ativacao, codigo = AtivacaoSysvarHub.criar(loja=loja, criado_por=request.user)
+        loja = _loja_no_escopo_usuario(request.user, loja_id)
+        with transaction.atomic():
+            _revogar_ativacoes_pendentes(loja)
+            ativacao, codigo = AtivacaoSysvarHub.criar(loja=loja, criado_por=request.user)
         return Response(
             {
                 "id": ativacao.pk,
@@ -133,6 +193,87 @@ class HubAtivacaoAdminView(APIView):
                 "empresa_nome": loja.empresa.nome,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class HubAtivacaoRevogarView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, ativacao_id):
+        _validar_usuario_admin_hub(request.user)
+        ativacao = (
+            AtivacaoSysvarHub.objects.select_for_update()
+            .select_related("loja", "loja__empresa", "hub")
+            .filter(pk=ativacao_id)
+            .first()
+        )
+        if not ativacao:
+            raise Http404
+        _loja_no_escopo_usuario(request.user, ativacao.loja_id)
+        if ativacao.usado_em is None and ativacao.revogado_em is None and ativacao.expira_em > timezone.now():
+            ativacao.revogado_em = timezone.now()
+            ativacao.save(update_fields=["revogado_em"])
+        return Response(_serializar_ativacao_admin(ativacao), status=status.HTTP_200_OK)
+
+
+class HubAdministracaoView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _validar_usuario_admin_hub(request.user)
+        linhas = montar_painel_sincronizacao(request.user)
+        agora = timezone.now()
+        pendentes = {}
+        ativacoes = (
+            AtivacaoSysvarHub.objects.select_related("loja")
+            .filter(loja__in=lojas_no_escopo(request.user), usado_em__isnull=True, revogado_em__isnull=True, expira_em__gt=agora)
+            .order_by("loja_id", "-criado_em", "-id")
+        )
+        for ativacao in ativacoes:
+            pendentes.setdefault(ativacao.loja_id, ativacao)
+        hubs = {hub.pk: hub for hub in hubs_no_escopo(request.user)}
+        for linha in linhas:
+            hub = hubs.get(linha["hub_id"])
+            ativacao = pendentes.get(linha["loja_id"])
+            linha["hub_nome"] = hub.nome if hub else ""
+            linha["ativacao_pendente"] = _serializar_ativacao_admin(ativacao, agora) if ativacao else None
+        return Response(linhas, status=status.HTTP_200_OK)
+
+
+class HubAdministracaoAcaoView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    acao = None
+
+    @transaction.atomic
+    def post(self, request, hub_id):
+        _validar_usuario_admin_hub(request.user)
+        hub = _hub_no_escopo_usuario(request.user, hub_id, for_update=True)
+        if self.acao == "desativar":
+            hub.ativo = False
+            hub.save(update_fields=["ativo", "atualizado_em"])
+        elif self.acao == "reativar":
+            if not hub.token_hash:
+                raise ValidationError({"hub": "Hub sem credencial ativa. Gere uma nova ativação."})
+            hub.ativo = True
+            hub.save(update_fields=["ativo", "atualizado_em"])
+        elif self.acao == "desvincular":
+            hub.ativo = False
+            hub.token_hash = None
+            hub.token_prefixo = ""
+            hub.save(update_fields=["ativo", "token_hash", "token_prefixo", "atualizado_em"])
+            _revogar_ativacoes_pendentes(hub.loja)
+        else:
+            raise ValidationError({"acao": "Ação administrativa inválida."})
+        return Response(
+            {
+                "hub_id": hub.pk,
+                "loja_id": hub.loja_id,
+                "empresa_id": hub.loja.empresa_id,
+                "ativo": hub.ativo,
+                "possui_credencial": bool(hub.token_hash),
+            },
+            status=status.HTTP_200_OK,
         )
 
 

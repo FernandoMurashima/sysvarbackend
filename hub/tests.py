@@ -229,6 +229,142 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(resp.status_code, 403, resp.data)
         self.assertFalse(AtivacaoSysvarHub.objects.exists())
 
+    def test_nova_ativacao_revoga_pendente_anterior_da_mesma_loja(self):
+        self._admin()
+        primeira = self.client.post("/api/hub/ativacoes/", {"loja_id": self.loja.id}, format="json")
+        segunda = self.client.post("/api/hub/ativacoes/", {"loja_id": self.loja.id}, format="json")
+
+        self.assertEqual(primeira.status_code, 201, primeira.data)
+        self.assertEqual(segunda.status_code, 201, segunda.data)
+        ativacao_anterior = AtivacaoSysvarHub.objects.get(pk=primeira.data["id"])
+        ativacao_nova = AtivacaoSysvarHub.objects.get(pk=segunda.data["id"])
+        self.assertEqual(ativacao_anterior.estado_administrativo(), AtivacaoSysvarHub.ESTADO_REVOGADA)
+        self.assertEqual(ativacao_nova.estado_administrativo(), AtivacaoSysvarHub.ESTADO_PENDENTE)
+
+    def test_listagem_de_ativacoes_expõe_estados_sem_codigo_secreto(self):
+        pendente, _codigo_pendente = self._criar_codigo()
+        utilizada, _codigo_utilizada = self._criar_codigo()
+        utilizada.usado_em = timezone.now()
+        utilizada.save(update_fields=["usado_em"])
+        expirada, _codigo_expirada = self._criar_codigo()
+        expirada.expira_em = timezone.now() - timedelta(minutes=1)
+        expirada.save(update_fields=["expira_em"])
+        revogada, _codigo_revogada = self._criar_codigo()
+        revogada.revogado_em = timezone.now()
+        revogada.save(update_fields=["revogado_em"])
+        self._admin()
+
+        resp = self.client.get("/api/hub/ativacoes/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        por_id = {item["id"]: item for item in resp.data}
+        self.assertEqual(por_id[pendente.pk]["estado"], "PENDENTE")
+        self.assertEqual(por_id[utilizada.pk]["estado"], "UTILIZADA")
+        self.assertEqual(por_id[expirada.pk]["estado"], "EXPIRADA")
+        self.assertEqual(por_id[revogada.pk]["estado"], "REVOGADA")
+        self.assertTrue(all("codigo" not in item for item in resp.data))
+
+    def test_revogacao_manual_de_ativacao_pendente_e_idempotente(self):
+        ativacao, _codigo = self._criar_codigo()
+        self._admin()
+
+        resp = self.client.post(f"/api/hub/ativacoes/{ativacao.pk}/revogar/", {}, format="json")
+        repetida = self.client.post(f"/api/hub/ativacoes/{ativacao.pk}/revogar/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(repetida.status_code, 200, repetida.data)
+        ativacao.refresh_from_db()
+        self.assertEqual(ativacao.estado_administrativo(), AtivacaoSysvarHub.ESTADO_REVOGADA)
+
+    def test_revogacao_nao_converte_ativacao_utilizada_em_revogada(self):
+        ativacao, _codigo = self._criar_codigo()
+        ativacao.usado_em = timezone.now()
+        ativacao.save(update_fields=["usado_em"])
+        self._admin()
+
+        resp = self.client.post(f"/api/hub/ativacoes/{ativacao.pk}/revogar/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        ativacao.refresh_from_db()
+        self.assertEqual(ativacao.estado_administrativo(), AtivacaoSysvarHub.ESTADO_UTILIZADA)
+        self.assertIsNone(ativacao.revogado_em)
+
+    def test_painel_administrativo_respeita_escopo_e_inclui_hub_sync_e_ativacao(self):
+        hub_a, _token = self._hub_autenticado(hub_uuid="51515151-5151-4151-8151-515151515151")
+        hub_b = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="52525252-5252-4252-8252-525252525252", ativo=True)
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_a, status=HubSincronizacaoSolicitacao.STATUS_ERRO, etapa_atual="CATALOGO", mensagem_erro="falha")
+        HubSincronizacaoSolicitacao.objects.create(hub=hub_b, status=HubSincronizacaoSolicitacao.STATUS_PENDENTE)
+        ativacao, _codigo = self._criar_codigo()
+        self._admin()
+
+        resp = self.client.get("/api/hub/administracao/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual({linha["loja_id"] for linha in resp.data}, {self.loja.pk})
+        linha = resp.data[0]
+        self.assertEqual(linha["hub_id"], hub_a.pk)
+        self.assertEqual(linha["hub_uuid"], str(hub_a.hub_uuid))
+        self.assertEqual(linha["hub_nome"], hub_a.nome)
+        self.assertEqual(linha["sincronizacao_status"], HubSincronizacaoSolicitacao.STATUS_ERRO)
+        self.assertEqual(linha["etapa_atual"], "CATALOGO")
+        self.assertEqual(linha["mensagem_erro"], "falha")
+        self.assertEqual(linha["ativacao_pendente"]["id"], ativacao.pk)
+        self.assertEqual(linha["ativacao_pendente"]["estado"], "PENDENTE")
+
+    def test_desativar_reativar_e_desvincular_hub_preservam_registro(self):
+        hub, token = self._hub_autenticado()
+        ativacao, _codigo = self._criar_codigo()
+        self._admin()
+
+        desativar = self.client.post(f"/api/hub/administracao/{hub.pk}/desativar/", {}, format="json")
+        self.assertEqual(desativar.status_code, 200, desativar.data)
+        hub.refresh_from_db()
+        self.assertFalse(hub.ativo)
+        self.assertEqual(hub.token_hash, SysvarHub.hash_token(token))
+
+        reativar = self.client.post(f"/api/hub/administracao/{hub.pk}/reativar/", {}, format="json")
+        self.assertEqual(reativar.status_code, 200, reativar.data)
+        hub.refresh_from_db()
+        self.assertTrue(hub.ativo)
+
+        desvincular = self.client.post(f"/api/hub/administracao/{hub.pk}/desvincular/", {}, format="json")
+        self.assertEqual(desvincular.status_code, 200, desvincular.data)
+        hub.refresh_from_db()
+        ativacao.refresh_from_db()
+        self.assertFalse(hub.ativo)
+        self.assertIsNone(hub.token_hash)
+        self.assertEqual(hub.token_prefixo, "")
+        self.assertTrue(SysvarHub.objects.filter(pk=hub.pk).exists())
+        self.assertEqual(ativacao.estado_administrativo(), AtivacaoSysvarHub.ESTADO_REVOGADA)
+
+    def test_reativar_hub_sem_token_retorna_erro_controlado(self):
+        hub = SysvarHub.objects.create(loja=self.loja, token_hash=None, token_prefixo="", ativo=False)
+        self._admin()
+
+        resp = self.client.post(f"/api/hub/administracao/{hub.pk}/reativar/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+        hub.refresh_from_db()
+        self.assertFalse(hub.ativo)
+
+    def test_usuario_de_outra_empresa_nao_administra_hub_e_nao_admin_nao_tem_permissao(self):
+        hub, _token = self._hub_autenticado()
+        self._admin(self.outro_user)
+
+        fora_escopo = self.client.post(f"/api/hub/administracao/{hub.pk}/desativar/", {}, format="json")
+        self.assertEqual(fora_escopo.status_code, 403, fora_escopo.data)
+
+        operador = get_user_model().objects.create_user(
+            "hub-operador",
+            "hub-operador@sysvar.test",
+            "123",
+            empresa=self.empresa,
+            type="Operador",
+        )
+        self._admin(operador)
+        sem_permissao = self.client.get("/api/hub/administracao/")
+        self.assertEqual(sem_permissao.status_code, 403, sem_permissao.data)
+
     def test_ativacao_valida_cria_e_vincula_hub_sem_permitir_loja_por_payload(self):
         ativacao, codigo = self._criar_codigo()
         self.client.force_authenticate(user=None)

@@ -1,7 +1,10 @@
 from django.urls import path
 
 from hub.views import (
+    HubAdministracaoAcaoView,
+    HubAdministracaoView,
     HubAtivacaoAdminView,
+    HubAtivacaoRevogarView,
     HubAtivarView,
     HubBootstrapView,
     HubCatalogoView,
@@ -20,7 +23,24 @@ from hub.views import (
 )
 
 urlpatterns = [
+    path("administracao/", HubAdministracaoView.as_view(), name="hub-administracao"),
+    path(
+        "administracao/<int:hub_id>/desativar/",
+        HubAdministracaoAcaoView.as_view(acao="desativar"),
+        name="hub-administracao-desativar",
+    ),
+    path(
+        "administracao/<int:hub_id>/reativar/",
+        HubAdministracaoAcaoView.as_view(acao="reativar"),
+        name="hub-administracao-reativar",
+    ),
+    path(
+        "administracao/<int:hub_id>/desvincular/",
+        HubAdministracaoAcaoView.as_view(acao="desvincular"),
+        name="hub-administracao-desvincular",
+    ),
     path("ativacoes/", HubAtivacaoAdminView.as_view(), name="hub-ativacoes"),
+    path("ativacoes/<int:ativacao_id>/revogar/", HubAtivacaoRevogarView.as_view(), name="hub-ativacoes-revogar"),
     path("ativar/", HubAtivarView.as_view(), name="hub-ativar"),
     path("bootstrap/", HubBootstrapView.as_view(), name="hub-bootstrap"),
     path("catalogo/", HubCatalogoView.as_view(), name="hub-catalogo"),
