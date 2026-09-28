@@ -18,6 +18,7 @@ from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
     AtivacaoSysvarHub,
     HubClienteMapeamento,
+    HubComandoAdministrativo,
     HubDevolucaoMapeamento,
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
@@ -728,6 +729,98 @@ class SysvarHubApiTests(TestCase):
         isolado = self.client.post("/api/hub/heartbeat/", {}, format="json")
         self.assertEqual(isolado.status_code, 200, isolado.data)
         self.assertIsNone(isolado.data["comando_sincronizacao"])
+
+    def test_administracao_cria_configurar_terminal_e_heartbeat_entrega_comando(self):
+        hub, token = self._hub_autenticado()
+        caixa = Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            codigo="CX-01",
+            descricao="Caixa 01",
+            ativo=True,
+        )
+        self._admin()
+
+        resp = self.client.post(
+            f"/api/hub/administracao/{hub.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk, "hostname": "PDV-LOCAL"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        comando = HubComandoAdministrativo.objects.get(pk=resp.data["id"])
+        self.assertEqual(comando.tipo, HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL)
+        self.assertEqual(comando.payload["caixa_retaguarda_id"], caixa.pk)
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        heartbeat = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(heartbeat.status_code, 200, heartbeat.data)
+        self.assertEqual(heartbeat.data["comando_administrativo"]["id"], comando.pk)
+        self.assertEqual(heartbeat.data["comando_administrativo"]["tipo"], HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL)
+
+    def test_administracao_bloqueia_configuracao_sem_hub_credencial_ou_hub_inativo(self):
+        caixa = Caixa.objects.create(empresa=self.empresa, idloja=self.loja, codigo="CX-01", descricao="Caixa 01", ativo=True)
+        self._admin()
+        sem_hub = self.client.post(
+            "/api/hub/administracao/99999/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+        self.assertEqual(sem_hub.status_code, 404)
+        hub_sem_credencial = SysvarHub.objects.create(loja=self.loja, ativo=True, token_hash=None, token_prefixo="")
+        sem_credencial = self.client.post(
+            f"/api/hub/administracao/{hub_sem_credencial.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+        self.assertEqual(sem_credencial.status_code, 400, sem_credencial.data)
+        hub_sem_credencial.gerar_token()
+        hub_sem_credencial.ativo = False
+        hub_sem_credencial.save(update_fields=["ativo", "atualizado_em"])
+        inativo = self.client.post(
+            f"/api/hub/administracao/{hub_sem_credencial.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+        self.assertEqual(inativo.status_code, 400, inativo.data)
+
+    def test_administracao_cria_pareamento_e_resultado_sanitizado(self):
+        hub, token = self._hub_autenticado()
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": True, "pareado": False}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+        self._admin()
+
+        resp = self.client.post(
+            f"/api/hub/administracao/{hub.pk}/terminais/pareamento/",
+            {"terminal_uuid": "terminal-1"},
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        comando_id = resp.data["id"]
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        resultado = self.client.post(
+            f"/api/hub/comandos/{comando_id}/resultado/",
+            {
+                "status": "CONCLUIDO",
+                "resultado": {
+                    "terminal": {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "token_hash": "x"},
+                    "codigo": "ABCD-EFGH-IJKL",
+                    "codigo_hash": "nao",
+                    "expira_em": "2026-09-28T10:15:00-03:00",
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(resultado.status_code, 200, resultado.data)
+        self.assertEqual(resultado.data["resultado"]["codigo"], "ABCD-EFGH-IJKL")
+        self.assertNotIn("codigo_hash", resultado.data["resultado"])
+        self.assertNotIn("token_hash", resultado.data["resultado"]["terminal"])
 
     def test_transicoes_status_timestamps_e_terminais_idempotentes(self):
         hub, _token = self._hub_autenticado()

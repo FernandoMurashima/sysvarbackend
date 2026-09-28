@@ -89,6 +89,50 @@ class HubSincronizacaoSolicitacao(models.Model):
         return f"{self.hub_id} - {self.tipo} - {self.status}"
 
 
+class HubComandoAdministrativo(models.Model):
+    TIPO_CONFIGURAR_TERMINAL = "CONFIGURAR_TERMINAL"
+    TIPO_GERAR_PAREAMENTO = "GERAR_PAREAMENTO"
+    TIPO_CHOICES = [
+        (TIPO_CONFIGURAR_TERMINAL, "Configurar terminal"),
+        (TIPO_GERAR_PAREAMENTO, "Gerar pareamento"),
+    ]
+
+    STATUS_PENDENTE = "PENDENTE"
+    STATUS_PROCESSANDO = "PROCESSANDO"
+    STATUS_CONCLUIDO = "CONCLUIDO"
+    STATUS_ERRO = "ERRO"
+    STATUS_CHOICES = [
+        (STATUS_PENDENTE, "Pendente"),
+        (STATUS_PROCESSANDO, "Processando"),
+        (STATUS_CONCLUIDO, "Concluído"),
+        (STATUS_ERRO, "Erro"),
+    ]
+    STATUS_ATIVOS = (STATUS_PENDENTE, STATUS_PROCESSANDO)
+    STATUS_TERMINAIS = (STATUS_CONCLUIDO, STATUS_ERRO)
+
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="comandos_administrativos")
+    tipo = models.CharField(max_length=40, choices=TIPO_CHOICES, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    resultado = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDENTE, db_index=True)
+    mensagem_erro = models.CharField(max_length=500, blank=True, default="")
+    solicitado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    solicitado_em = models.DateTimeField(auto_now_add=True)
+    iniciado_em = models.DateTimeField(null=True, blank=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["solicitado_em", "id"]
+        indexes = [
+            models.Index(fields=["hub", "status", "tipo"], name="ix_hub_cmd_hub_status_tipo"),
+            models.Index(fields=["hub", "tipo", "solicitado_em"], name="ix_hub_cmd_hub_tipo_sol"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.hub_id} - {self.tipo} - {self.status}"
+
+
 class AtivacaoSysvarHub(models.Model):
     ESTADO_PENDENTE = "PENDENTE"
     ESTADO_UTILIZADA = "UTILIZADA"

@@ -3,7 +3,8 @@ from django.db.models import Prefetch
 from django.utils import timezone
 
 from cadastros.models import Loja
-from hub.models import HubSincronizacaoSolicitacao, SysvarHub
+from hub.administracao import estados_administrativos
+from hub.models import HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
 
 
 ROLES_SINCRONIZACAO = {"Admin", "Diretor", "Gerente"}
@@ -138,8 +139,10 @@ def atualizar_status_sincronizacao(solicitacao, *, status, etapa_atual="", mensa
 def montar_painel_sincronizacao(user):
     ultimas = HubSincronizacaoSolicitacao.objects.order_by("-solicitado_em", "-id")
     linhas = []
+    comandos = HubComandoAdministrativo.objects.order_by("-solicitado_em", "-id")
     qs = lojas_no_escopo(user).select_related("sysvar_hub").prefetch_related(
-        Prefetch("sysvar_hub__sincronizacoes", queryset=ultimas)
+        Prefetch("sysvar_hub__sincronizacoes", queryset=ultimas),
+        Prefetch("sysvar_hub__comandos_administrativos", queryset=comandos),
     )
     for loja in qs:
         try:
@@ -152,14 +155,21 @@ def montar_painel_sincronizacao(user):
             sincronizacoes = list(hub.sincronizacoes.all())
             ultima = sincronizacoes[0] if sincronizacoes else None
             ativa = next((s for s in sincronizacoes if s.status in HubSincronizacaoSolicitacao.STATUS_ATIVOS), None)
+            comandos_admin = list(hub.comandos_administrativos.all())
+            comando_ativo = next((c for c in comandos_admin if c.status in HubComandoAdministrativo.STATUS_ATIVOS), None)
+            ultimo_config = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL), None)
+            ultimo_pareamento = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO), None)
+        else:
+            comando_ativo = None
+            ultimo_config = None
+            ultimo_pareamento = None
         referencia = ativa or ultima
         status_visual = "VERMELHO"
         if ativa:
             status_visual = "AMARELO"
         elif hub and hub.ativo and ultima and ultima.status == HubSincronizacaoSolicitacao.STATUS_CONCLUIDA:
             status_visual = "VERDE"
-        linhas.append(
-            {
+        linha = {
                 "loja_id": loja.pk,
                 "loja_nome": loja.nome_loja,
                 "empresa_id": loja.empresa_id,
@@ -181,8 +191,24 @@ def montar_painel_sincronizacao(user):
                 "etapa_atual": referencia.etapa_atual if referencia else "",
                 "mensagem_erro": referencia.mensagem_erro if referencia else "",
                 "status_visual": status_visual,
+                "comando_administrativo_ativo": serializar_comando_admin(ativo) if (ativo := comando_ativo) else None,
+                "ultimo_comando_configuracao": serializar_comando_admin(ultimo_config),
+                "ultimo_comando_pareamento": serializar_comando_admin(ultimo_pareamento),
             }
-        )
+        linha.update(estados_administrativos(linha))
+        if comando_ativo:
+            if comando_ativo.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL:
+                linha["configuracao_estado"] = "CONFIGURANDO" if comando_ativo.status == HubComandoAdministrativo.STATUS_PROCESSANDO else "AGUARDANDO"
+            elif comando_ativo.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO:
+                linha["pareamento_estado"] = "CODIGO_SOLICITADO"
+        if ultimo_config and ultimo_config.status == HubComandoAdministrativo.STATUS_ERRO:
+            linha["configuracao_estado"] = "ERRO"
+        if ultimo_pareamento:
+            if ultimo_pareamento.status == HubComandoAdministrativo.STATUS_CONCLUIDO and linha["pareamento_estado"] != "PAREADO":
+                linha["pareamento_estado"] = "CODIGO_DISPONIVEL"
+            elif ultimo_pareamento.status == HubComandoAdministrativo.STATUS_ERRO:
+                linha["pareamento_estado"] = "ERRO"
+        linhas.append(linha)
     return linhas
 
 
@@ -198,4 +224,21 @@ def serializar_solicitacao(solicitacao):
         "etapa_atual": solicitacao.etapa_atual,
         "mensagem_erro": solicitacao.mensagem_erro,
         "atualizado_em": solicitacao.atualizado_em,
+    }
+
+
+def serializar_comando_admin(comando):
+    if not comando:
+        return None
+    return {
+        "id": comando.pk,
+        "tipo": comando.tipo,
+        "payload": comando.payload,
+        "resultado": comando.resultado,
+        "status": comando.status,
+        "mensagem_erro": comando.mensagem_erro,
+        "solicitado_em": comando.solicitado_em,
+        "iniciado_em": comando.iniciado_em,
+        "concluido_em": comando.concluido_em,
+        "atualizado_em": comando.atualizado_em,
     }

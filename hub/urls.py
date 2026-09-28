@@ -2,6 +2,9 @@ from django.urls import path
 
 from hub.views import (
     HubAdministracaoAcaoView,
+    HubAdministracaoComandoView,
+    HubAdministracaoConfigurarTerminalView,
+    HubAdministracaoPareamentoView,
     HubAdministracaoView,
     HubAtivacaoAdminView,
     HubAtivacaoRevogarView,
@@ -12,6 +15,7 @@ from hub.views import (
     HubClientesView,
     HubFormasPagamentoView,
     HubHeartbeatView,
+    HubComandoAdministrativoResultadoView,
     HubOperadoresView,
     HubSincronizacaoPainelView,
     HubSincronizacaoSolicitarView,
@@ -39,6 +43,17 @@ urlpatterns = [
         HubAdministracaoAcaoView.as_view(acao="desvincular"),
         name="hub-administracao-desvincular",
     ),
+    path(
+        "administracao/<int:hub_id>/terminais/configurar/",
+        HubAdministracaoConfigurarTerminalView.as_view(),
+        name="hub-administracao-configurar-terminal",
+    ),
+    path(
+        "administracao/<int:hub_id>/terminais/pareamento/",
+        HubAdministracaoPareamentoView.as_view(),
+        name="hub-administracao-pareamento",
+    ),
+    path("administracao/comandos/<int:comando_id>/", HubAdministracaoComandoView.as_view(), name="hub-administracao-comando"),
     path("ativacoes/", HubAtivacaoAdminView.as_view(), name="hub-ativacoes"),
     path("ativacoes/<int:ativacao_id>/revogar/", HubAtivacaoRevogarView.as_view(), name="hub-ativacoes-revogar"),
     path("ativar/", HubAtivarView.as_view(), name="hub-ativar"),
@@ -48,6 +63,7 @@ urlpatterns = [
     path("clientes/", HubClientesView.as_view(), name="hub-clientes"),
     path("formas-pagamento/", HubFormasPagamentoView.as_view(), name="hub-formas-pagamento"),
     path("heartbeat/", HubHeartbeatView.as_view(), name="hub-heartbeat"),
+    path("comandos/<int:comando_id>/resultado/", HubComandoAdministrativoResultadoView.as_view(), name="hub-comando-resultado"),
     path("sincronizacoes/", HubSincronizacaoPainelView.as_view(), name="hub-sincronizacoes"),
     path("sincronizacoes/solicitar/", HubSincronizacaoSolicitarView.as_view(), name="hub-sincronizacoes-solicitar"),
     path("sincronizacoes/todas/", HubSincronizacaoTodasView.as_view(), name="hub-sincronizacoes-todas"),

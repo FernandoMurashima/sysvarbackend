@@ -15,9 +15,17 @@ from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from fiscal.models import FormaPagamentoFiscalMap
+from hub.administracao import (
+    atualizar_resultado_comando,
+    listar_caixas_loja,
+    obter_comando_administrativo_para_hub,
+    serializar_comando,
+    solicitar_configurar_terminal,
+    solicitar_gerar_pareamento,
+)
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
-from hub.models import AtivacaoSysvarHub, HubSincronizacaoSolicitacao, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
@@ -239,6 +247,7 @@ class HubAdministracaoView(APIView):
             ativacao = pendentes.get(linha["loja_id"])
             linha["hub_nome"] = hub.nome if hub else ""
             linha["ativacao_pendente"] = _serializar_ativacao_admin(ativacao, agora) if ativacao else None
+            linha["caixas"] = listar_caixas_loja(hub.loja if hub else Loja.objects.get(pk=linha["loja_id"]))
         return Response(linhas, status=status.HTTP_200_OK)
 
 
@@ -276,6 +285,38 @@ class HubAdministracaoAcaoView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class HubAdministracaoConfigurarTerminalView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, hub_id):
+        _validar_usuario_admin_hub(request.user)
+        hub = _hub_no_escopo_usuario(request.user, hub_id)
+        comando, criada = solicitar_configurar_terminal(hub, request.user, request.data)
+        return Response(serializar_comando(comando), status=status.HTTP_201_CREATED if criada else status.HTTP_200_OK)
+
+
+class HubAdministracaoPareamentoView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, hub_id):
+        _validar_usuario_admin_hub(request.user)
+        hub = _hub_no_escopo_usuario(request.user, hub_id)
+        comando, criada = solicitar_gerar_pareamento(hub, request.user, request.data)
+        return Response(serializar_comando(comando), status=status.HTTP_201_CREATED if criada else status.HTTP_200_OK)
+
+
+class HubAdministracaoComandoView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, comando_id):
+        _validar_usuario_admin_hub(request.user)
+        comando = HubComandoAdministrativo.objects.select_related("hub", "hub__loja", "hub__loja__empresa").filter(pk=comando_id).first()
+        if not comando:
+            raise Http404
+        _hub_no_escopo_usuario(request.user, comando.hub_id)
+        return Response(serializar_comando(comando), status=status.HTTP_200_OK)
 
 
 class HubAtivarView(APIView):
@@ -383,9 +424,21 @@ class HubHeartbeatView(APIView):
                 "empresa_id": hub.loja.empresa_id,
                 "servidor_em": timezone.now(),
                 "comando_sincronizacao": obter_comando_para_hub(hub),
+                "comando_administrativo": obter_comando_administrativo_para_hub(hub),
             },
             status=status.HTTP_200_OK,
         )
+
+
+class HubComandoAdministrativoResultadoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, comando_id):
+        comando = atualizar_resultado_comando(request.sysvar_hub, comando_id, request.data)
+        if not comando:
+            raise Http404
+        return Response(serializar_comando(comando), status=status.HTTP_200_OK)
 
 
 class HubSincronizacaoPainelView(APIView):
