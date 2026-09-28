@@ -155,11 +155,13 @@ def montar_painel_sincronizacao(user):
             sincronizacoes = list(hub.sincronizacoes.all())
             ultima = sincronizacoes[0] if sincronizacoes else None
             ativa = next((s for s in sincronizacoes if s.status in HubSincronizacaoSolicitacao.STATUS_ATIVOS), None)
+            primeira_concluida = any(s.status == HubSincronizacaoSolicitacao.STATUS_CONCLUIDA for s in sincronizacoes)
             comandos_admin = list(hub.comandos_administrativos.all())
             comando_ativo = next((c for c in comandos_admin if c.status in HubComandoAdministrativo.STATUS_ATIVOS), None)
             ultimo_config = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL), None)
             ultimo_pareamento = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO), None)
         else:
+            primeira_concluida = False
             comando_ativo = None
             ultimo_config = None
             ultimo_pareamento = None
@@ -191,6 +193,7 @@ def montar_painel_sincronizacao(user):
                 "etapa_atual": referencia.etapa_atual if referencia else "",
                 "mensagem_erro": referencia.mensagem_erro if referencia else "",
                 "status_visual": status_visual,
+                "primeira_sincronizacao_concluida": primeira_concluida,
                 "comando_administrativo_ativo": serializar_comando_admin(ativo) if (ativo := comando_ativo) else None,
                 "ultimo_comando_configuracao": serializar_comando_admin(ultimo_config),
                 "ultimo_comando_pareamento": serializar_comando_admin(ultimo_pareamento),

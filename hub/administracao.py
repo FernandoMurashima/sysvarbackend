@@ -3,7 +3,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from financeiro.models import Caixa
-from hub.models import HubComandoAdministrativo, SysvarHub
+from hub.models import HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
 
 
 def listar_caixas_loja(loja):
@@ -20,6 +20,7 @@ def listar_caixas_loja(loja):
 
 def solicitar_configurar_terminal(hub, usuario, payload):
     _validar_hub_operavel(hub)
+    _validar_primeira_carga_concluida(hub)
     codigo = _texto(payload.get("codigo"), 30)
     nome = _texto(payload.get("nome"), 100)
     hostname = _texto(payload.get("hostname"), 150)
@@ -159,6 +160,9 @@ def estados_administrativos(linha):
     if not hub_id or not hub_ativo or not possui_credencial:
         configuracao = "NAO_DISPONIVEL"
         pareamento = "NAO_DISPONIVEL"
+    elif not linha.get("primeira_sincronizacao_concluida"):
+        configuracao = "NAO_DISPONIVEL"
+        pareamento = "NAO_DISPONIVEL"
     elif not total:
         pareamento = "NAO_DISPONIVEL"
     return {
@@ -188,6 +192,21 @@ def _validar_hub_operavel(hub):
         raise ValidationError({"hub": "Hub desativado."})
     if not hub.token_hash:
         raise ValidationError({"hub": "Hub sem credencial ativa."})
+
+
+def _validar_primeira_carga_concluida(hub):
+    if not HubSincronizacaoSolicitacao.objects.filter(
+        hub=hub,
+        status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+    ).exists():
+        raise ValidationError(
+            {
+                "sincronizacao": (
+                    "Aguarde a primeira sincronização do Hub ser concluída "
+                    "antes de configurar terminais."
+                )
+            }
+        )
 
 
 def _criar_ou_reusar_comando(hub, tipo, payload, usuario, *, chave):

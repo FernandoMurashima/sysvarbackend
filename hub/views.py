@@ -34,6 +34,7 @@ from hub.sincronizacao import (
     montar_painel_sincronizacao,
     obter_comando_para_hub,
     serializar_solicitacao,
+    solicitar_sincronizacao_hub,
     solicitar_sincronizacao_loja,
     solicitar_sincronizacao_todas,
     validar_usuario_sincronizacao,
@@ -384,6 +385,7 @@ class HubAtivarView(APIView):
         ativacao.usado_em = agora
         ativacao.hub = hub
         ativacao.save(update_fields=["usado_em", "hub"])
+        solicitar_sincronizacao_hub(hub)
 
         loja = ativacao.loja
         return Response(

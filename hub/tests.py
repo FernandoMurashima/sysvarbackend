@@ -439,6 +439,8 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(hub.hostname, "HOST-HUB")
         self.assertEqual(hub.versao, "1.0.0")
         self.assertEqual(hub.ultimo_ip, "10.0.0.10")
+        solicitacao = HubSincronizacaoSolicitacao.objects.get(hub=hub)
+        self.assertEqual(solicitacao.status, HubSincronizacaoSolicitacao.STATUS_PENDENTE)
 
     def test_codigo_invalido_expirado_usado_e_revogado_sao_rejeitados(self):
         self.client.force_authenticate(user=None)
@@ -732,6 +734,12 @@ class SysvarHubApiTests(TestCase):
 
     def test_administracao_cria_configurar_terminal_e_heartbeat_entrega_comando(self):
         hub, token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
         caixa = Caixa.objects.create(
             empresa=self.empresa,
             idloja=self.loja,
@@ -757,6 +765,54 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(heartbeat.status_code, 200, heartbeat.data)
         self.assertEqual(heartbeat.data["comando_administrativo"]["id"], comando.pk)
         self.assertEqual(heartbeat.data["comando_administrativo"]["tipo"], HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL)
+
+    def test_administracao_bloqueia_configuracao_antes_da_primeira_sincronizacao_concluida(self):
+        hub, _token = self._hub_autenticado()
+        caixa = Caixa.objects.create(
+            empresa=self.empresa,
+            idloja=self.loja,
+            codigo="CX-01",
+            descricao="Caixa 01",
+            ativo=True,
+        )
+        self._admin()
+
+        sem_sincronizacao = self.client.post(
+            f"/api/hub/administracao/{hub.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+
+        self.assertEqual(sem_sincronizacao.status_code, 400, sem_sincronizacao.data)
+        self.assertIn("primeira sincronização", str(sem_sincronizacao.data))
+        self.assertFalse(HubComandoAdministrativo.objects.exists())
+
+        solicitacao = HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_PROCESSANDO,
+            iniciado_em=timezone.now(),
+        )
+        processando = self.client.post(
+            f"/api/hub/administracao/{hub.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+
+        self.assertEqual(processando.status_code, 400, processando.data)
+        self.assertFalse(HubComandoAdministrativo.objects.exists())
+
+        solicitacao.status = HubSincronizacaoSolicitacao.STATUS_CONCLUIDA
+        solicitacao.concluido_em = timezone.now()
+        solicitacao.save(update_fields=["status", "concluido_em"])
+        concluida = self.client.post(
+            f"/api/hub/administracao/{hub.pk}/terminais/configurar/",
+            {"codigo": "PDV-01", "nome": "PDV 01", "caixa_retaguarda_id": caixa.pk},
+            format="json",
+        )
+
+        self.assertEqual(concluida.status_code, 201, concluida.data)
+        self.assertEqual(HubComandoAdministrativo.objects.count(), 1)
 
     def test_administracao_bloqueia_configuracao_sem_hub_credencial_ou_hub_inativo(self):
         caixa = Caixa.objects.create(empresa=self.empresa, idloja=self.loja, codigo="CX-01", descricao="Caixa 01", ativo=True)
