@@ -166,6 +166,7 @@ def montar_painel_sincronizacao(user):
                 "hub_id": hub.pk if hub else None,
                 "hub_uuid": str(hub.hub_uuid) if hub else None,
                 "hub_ativo": bool(hub and hub.ativo),
+                "possui_credencial": bool(hub and hub.token_hash),
                 "hostname": hub.hostname if hub else "",
                 "versao": hub.versao if hub else "",
                 "ultimo_ip": str(hub.ultimo_ip) if hub and hub.ultimo_ip else None,

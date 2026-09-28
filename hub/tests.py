@@ -305,11 +305,65 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(linha["hub_id"], hub_a.pk)
         self.assertEqual(linha["hub_uuid"], str(hub_a.hub_uuid))
         self.assertEqual(linha["hub_nome"], hub_a.nome)
+        self.assertTrue(linha["hub_ativo"])
+        self.assertTrue(linha["possui_credencial"])
         self.assertEqual(linha["sincronizacao_status"], HubSincronizacaoSolicitacao.STATUS_ERRO)
         self.assertEqual(linha["etapa_atual"], "CATALOGO")
         self.assertEqual(linha["mensagem_erro"], "falha")
         self.assertEqual(linha["ativacao_pendente"]["id"], ativacao.pk)
         self.assertEqual(linha["ativacao_pendente"]["estado"], "PENDENTE")
+
+    def test_painel_administrativo_distingue_hub_desativado_desvinculado_e_sem_hub(self):
+        loja_desativada = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja Hub Desativado",
+            apelido_loja="HDES",
+            cnpj="31222333000182",
+            estado="SP",
+        )
+        loja_desvinculada = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja Hub Desvinculado",
+            apelido_loja="HDESV",
+            cnpj="31222333000183",
+            estado="SP",
+        )
+        loja_sem_hub = Loja.objects.create(
+            empresa=self.empresa,
+            nome_loja="Loja Sem Hub",
+            apelido_loja="SEMH",
+            cnpj="31222333000184",
+            estado="SP",
+        )
+        hub_ativo, _token = self._hub_autenticado(hub_uuid="61616161-6161-4161-8161-616161616161")
+        hub_desativado = SysvarHub.objects.create(
+            loja=loja_desativada,
+            hub_uuid="62626262-6262-4262-8262-626262626262",
+            ativo=False,
+        )
+        hub_desativado.gerar_token()
+        SysvarHub.objects.create(
+            loja=loja_desvinculada,
+            hub_uuid="63636363-6363-4363-8363-636363636363",
+            ativo=False,
+            token_hash=None,
+            token_prefixo="",
+        )
+        self._admin()
+
+        resp = self.client.get("/api/hub/administracao/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        por_loja = {linha["loja_id"]: linha for linha in resp.data}
+        self.assertTrue(por_loja[self.loja.pk]["hub_ativo"])
+        self.assertTrue(por_loja[self.loja.pk]["possui_credencial"])
+        self.assertEqual(por_loja[self.loja.pk]["hub_id"], hub_ativo.pk)
+        self.assertFalse(por_loja[loja_desativada.pk]["hub_ativo"])
+        self.assertTrue(por_loja[loja_desativada.pk]["possui_credencial"])
+        self.assertFalse(por_loja[loja_desvinculada.pk]["hub_ativo"])
+        self.assertFalse(por_loja[loja_desvinculada.pk]["possui_credencial"])
+        self.assertIsNone(por_loja[loja_sem_hub.pk]["hub_id"])
+        self.assertFalse(por_loja[loja_sem_hub.pk]["possui_credencial"])
 
     def test_desativar_reativar_e_desvincular_hub_preservam_registro(self):
         hub, token = self._hub_autenticado()
@@ -344,6 +398,7 @@ class SysvarHubApiTests(TestCase):
         resp = self.client.post(f"/api/hub/administracao/{hub.pk}/reativar/", {}, format="json")
 
         self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Hub sem credencial ativa", str(resp.data))
         hub.refresh_from_db()
         self.assertFalse(hub.ativo)
 
