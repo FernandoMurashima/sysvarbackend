@@ -171,6 +171,8 @@ def montar_painel_sincronizacao(user):
                 "versao": hub.versao if hub else "",
                 "ultimo_ip": str(hub.ultimo_ip) if hub and hub.ultimo_ip else None,
                 "ultimo_contato": hub.ultimo_contato if hub else None,
+                "snapshot_operacional": hub.snapshot_operacional if hub else None,
+                "snapshot_operacional_em": hub.snapshot_operacional_em if hub else None,
                 "sincronizacao_id": referencia.pk if referencia else None,
                 "sincronizacao_status": referencia.status if referencia else "",
                 "solicitado_em": referencia.solicitado_em if referencia else None,

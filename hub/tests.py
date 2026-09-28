@@ -479,6 +479,94 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(hub.hostname, "HOST-2")
         self.assertEqual(hub.versao, "1.0.1")
 
+    def test_heartbeat_armazena_snapshot_operacional_sanitizado(self):
+        hub, token = self._hub_autenticado()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+        payload = {
+            "hostname": "HOST-2",
+            "versao": "1.0.1",
+            "snapshot_operacional": {
+                "gerado_em": "2026-09-28T10:00:00-03:00",
+                "token_hash": "nao-deve-entrar",
+                "terminais": [
+                    {
+                        "terminal_uuid": "terminal-uuid",
+                        "codigo": "PDV-01",
+                        "nome": "PDV 01",
+                        "ativo": True,
+                        "pareado": True,
+                        "pareado_em": "2026-09-28T09:00:00-03:00",
+                        "hostname": "PDV-LOCAL",
+                        "ultimo_ip": "10.0.0.20",
+                        "ultima_conexao_em": "2026-09-28T10:00:00-03:00",
+                        "online": True,
+                        "token_prefixo": "secreto",
+                        "caixa": {"id": 29, "codigo": "CX-01", "descricao": "Caixa 01", "ativo": True},
+                        "caixa_status": "ABERTO",
+                        "sessao_caixa": {
+                            "uuid": "sessao-uuid",
+                            "status": "ABERTO",
+                            "aberto_em": "2026-09-28T08:00:00-03:00",
+                            "valor_abertura": "100.00",
+                            "operador": {"codigo": "op.caixa", "nome": "Operador Caixa", "senha": "1234"},
+                            "terminal_abertura": {"codigo": "PDV-01", "nome": "PDV 01"},
+                        },
+                    }
+                ],
+            },
+        }
+
+        resp = self.client.post("/api/hub/heartbeat/", payload, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        hub.refresh_from_db()
+        self.assertIsNotNone(hub.snapshot_operacional_em)
+        terminal = hub.snapshot_operacional["terminais"][0]
+        self.assertEqual(terminal["codigo"], "PDV-01")
+        self.assertEqual(terminal["caixa_status"], "ABERTO")
+        self.assertEqual(terminal["sessao_caixa"]["operador"]["codigo"], "op.caixa")
+        self.assertNotIn("token_hash", hub.snapshot_operacional)
+        self.assertNotIn("token_prefixo", terminal)
+        self.assertNotIn("valor_abertura", terminal["sessao_caixa"])
+        self.assertNotIn("senha", terminal["sessao_caixa"]["operador"])
+
+    def test_heartbeat_sem_snapshot_nao_apaga_snapshot_existente(self):
+        hub, token = self._hub_autenticado()
+        hub.snapshot_operacional = {"terminais": [{"codigo": "PDV-01"}]}
+        hub.snapshot_operacional_em = timezone.now()
+        hub.save(update_fields=["snapshot_operacional", "snapshot_operacional_em"])
+        snapshot_em = hub.snapshot_operacional_em
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+
+        resp = self.client.post("/api/hub/heartbeat/", {"hostname": "HOST-3"}, format="json")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        hub.refresh_from_db()
+        self.assertEqual(hub.snapshot_operacional, {"terminais": [{"codigo": "PDV-01"}]})
+        self.assertEqual(hub.snapshot_operacional_em, snapshot_em)
+
+    def test_heartbeat_rejeita_snapshot_operacional_invalido(self):
+        _hub, token = self._hub_autenticado()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+
+        resp = self.client.post("/api/hub/heartbeat/", {"snapshot_operacional": []}, format="json")
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_painel_administrativo_retorna_snapshot_operacional(self):
+        hub, _token = self._hub_autenticado()
+        hub.snapshot_operacional = {"gerado_em": "2026-09-28T10:00:00-03:00", "terminais": [{"codigo": "PDV-01"}]}
+        hub.snapshot_operacional_em = timezone.now()
+        hub.save(update_fields=["snapshot_operacional", "snapshot_operacional_em"])
+        self._admin()
+
+        resp = self.client.get("/api/hub/sincronizacoes/")
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        linha = next(item for item in resp.data if item["hub_id"] == hub.pk)
+        self.assertEqual(linha["snapshot_operacional"]["terminais"][0]["codigo"], "PDV-01")
+        self.assertIsNotNone(linha["snapshot_operacional_em"])
+
     def test_token_invalido_e_heartbeat_sem_autenticacao_sao_rejeitados(self):
         self.client.force_authenticate(user=None)
         self.client.credentials()

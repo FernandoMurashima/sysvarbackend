@@ -21,6 +21,8 @@ class SysvarHub(models.Model):
     versao = models.CharField(max_length=40, blank=True, default="")
     hostname = models.CharField(max_length=120, blank=True, default="")
     ultimo_ip = models.GenericIPAddressField(null=True, blank=True)
+    snapshot_operacional = models.JSONField(default=dict, blank=True)
+    snapshot_operacional_em = models.DateTimeField(null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 

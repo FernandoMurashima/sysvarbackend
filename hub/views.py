@@ -18,6 +18,7 @@ from fiscal.models import FormaPagamentoFiscalMap
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, HubSincronizacaoSolicitacao, SysvarHub
+from hub.operacional import normalizar_snapshot_operacional
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
     hubs_no_escopo,
@@ -368,7 +369,12 @@ class HubHeartbeatView(APIView):
         hub.hostname = _texto(request.data, "hostname", "", 120)
         hub.versao = _texto(request.data, "versao", "", 40)
         hub.ultimo_ip = _client_ip(request)
-        hub.save(update_fields=["ultimo_contato", "hostname", "versao", "ultimo_ip", "atualizado_em"])
+        update_fields = ["ultimo_contato", "hostname", "versao", "ultimo_ip", "atualizado_em"]
+        if "snapshot_operacional" in request.data:
+            hub.snapshot_operacional = normalizar_snapshot_operacional(request.data.get("snapshot_operacional"))
+            hub.snapshot_operacional_em = hub.ultimo_contato
+            update_fields.extend(["snapshot_operacional", "snapshot_operacional_em"])
+        hub.save(update_fields=update_fields)
         return Response(
             {
                 "status": "ok",
