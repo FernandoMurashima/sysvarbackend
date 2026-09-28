@@ -83,6 +83,7 @@ class UserSerializer(serializers.ModelSerializer):
         source="perfil_principal", queryset=PerfilAcesso.objects.filter(ativo=True), allow_null=True, required=False
     )
     permissoes_efetivas_detalhadas = serializers.SerializerMethodField()
+    credencial_pdv = serializers.SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -109,7 +110,7 @@ class UserSerializer(serializers.ModelSerializer):
             "type", "Idempresa", "empresa", "Idloja", "loja", "Idlojas", "lojas",
             "perfil_principal", "perfil_principal_id",
             "permissoes_modulos", "permissoes_campos",
-            "permissoes_efetivas_detalhadas",
+            "permissoes_efetivas_detalhadas", "credencial_pdv",
             "is_active", "is_staff", "is_superuser", "deve_trocar_senha", "date_joined",
             "password",
         )
@@ -201,6 +202,14 @@ class UserSerializer(serializers.ModelSerializer):
             }
             for key in available
         ]
+
+    def get_credencial_pdv(self, obj):
+        credencial = getattr(obj, "credencial_pdv", None)
+        return {
+            "configurada": bool(credencial),
+            "habilitada": bool(credencial and credencial.habilitado),
+            "atualizado_em": credencial.atualizado_em if credencial else None,
+        }
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)

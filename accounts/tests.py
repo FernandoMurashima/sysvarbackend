@@ -336,6 +336,12 @@ class CredencialPdvUsuarioApiTests(TestCase):
         self.assertTrue(metadata.data["habilitada"])
         self.assertNotIn("senha_hash", metadata.data)
 
+        detalhe = self.client.get(f"/api/accounts/users/{self.usuario.pk}/")
+        self.assertEqual(detalhe.status_code, 200, detalhe.data)
+        self.assertTrue(detalhe.data["credencial_pdv"]["configurada"])
+        self.assertTrue(detalhe.data["credencial_pdv"]["habilitada"])
+        self.assertNotIn("senha_hash", detalhe.data["credencial_pdv"])
+
     def test_senha_curta_e_confirmacao_divergente_sao_rejeitadas(self):
         curta = self.client.put(
             f"/api/accounts/users/{self.usuario.pk}/credencial-pdv/",

@@ -91,7 +91,7 @@ class UserViewSet(viewsets.ModelViewSet):
     """
     queryset = (
         User.objects
-        .select_related("empresa", "loja")
+        .select_related("empresa", "loja", "credencial_pdv")
         .prefetch_related("lojas", "module_permissions", "field_permissions")
         .all()
         .order_by("id")
