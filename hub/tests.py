@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
+from cadastros.services import ClientePadraoService
 from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
@@ -2788,6 +2789,10 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload.update(extras)
         return payload
 
+    def _cliente_padrao(self, empresa=None):
+        cliente, _created = ClientePadraoService.obter_ou_criar(empresa or self.empresa)
+        return cliente
+
     def test_sync_push_exige_hub_autenticado_e_ativo(self):
         response = self._push([])
         self.assertIn(response.status_code, (401, 403))
@@ -2933,6 +2938,139 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_venda_finalizada_sem_cliente_usa_cliente_padrao_da_empresa(self):
+        self._hub_autenticado()
+        cliente_padrao = self._cliente_padrao()
+        payload = self._payload_venda(cliente_retaguarda_id=None, cliente_uuid=None)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-anonima")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(pk=response.data["resultados"][0]["mapeamento"]["venda_retaguarda_id"])
+        self.assertEqual(venda.cliente_id, cliente_padrao.pk)
+        self.assertTrue(HubVendaMapeamento.objects.filter(venda=venda, venda_uuid=payload["venda_uuid"]).exists())
+
+    def test_venda_finalizada_com_cliente_retaguarda_valido_preserva_cliente_informado(self):
+        self._hub_autenticado()
+        cliente_padrao = self._cliente_padrao()
+        payload = self._payload_venda()
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cliente-id")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(pk=response.data["resultados"][0]["mapeamento"]["venda_retaguarda_id"])
+        self.assertEqual(venda.cliente_id, self.cliente.pk)
+        self.assertNotEqual(venda.cliente_id, cliente_padrao.pk)
+
+    def test_venda_finalizada_com_cliente_uuid_mapeado_preserva_cliente_mapeado(self):
+        self._hub_autenticado()
+        cliente_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        HubClienteMapeamento.objects.create(hub=self.hub, cliente_uuid=cliente_uuid, cliente=self.cliente)
+        payload = self._payload_venda(cliente_retaguarda_id=None, cliente_uuid=cliente_uuid)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cliente-uuid")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(pk=response.data["resultados"][0]["mapeamento"]["venda_retaguarda_id"])
+        self.assertEqual(venda.cliente_id, self.cliente.pk)
+
+    def test_venda_finalizada_cliente_retaguarda_invalido_nao_cai_no_cliente_padrao(self):
+        self._hub_autenticado()
+        self._cliente_padrao()
+        cliente_outra_empresa = Cliente.objects.create(
+            empresa=self.outra_empresa,
+            tipo_pessoa="PF",
+            documento="64427516030",
+            cpf="64427516030",
+            nome_cliente="Cliente Outra Empresa",
+        )
+        payload = self._payload_venda(cliente_retaguarda_id=cliente_outra_empresa.pk)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cliente-invalido")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertIn("Cliente da venda pertence a outra empresa", response.data["resultados"][0]["mensagem"])
+        self.assertEqual(VendaPdv.objects.count(), 0)
+
+    def test_venda_finalizada_cliente_uuid_sem_mapeamento_nao_cai_no_cliente_padrao(self):
+        self._hub_autenticado()
+        self._cliente_padrao()
+        payload = self._payload_venda(
+            cliente_retaguarda_id=None,
+            cliente_uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-uuid-invalido")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertIn("Cliente da venda não localizado", response.data["resultados"][0]["mensagem"])
+        self.assertEqual(VendaPdv.objects.count(), 0)
+
+    def test_venda_finalizada_sem_cliente_e_sem_cliente_padrao_retorna_erro_controlado(self):
+        self._hub_autenticado()
+        payload = self._payload_venda(cliente_retaguarda_id=None, cliente_uuid=None)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-sem-cliente-padrao")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertIn("Cliente padrão/Consumidor Final não configurado", response.data["resultados"][0]["mensagem"])
+        self.assertEqual(VendaPdv.objects.count(), 0)
+
+    def test_venda_finalizada_sem_cliente_reprocessa_evento_erro_apos_cliente_padrao(self):
+        self._hub_autenticado()
+        evento = self._evento(
+            "VENDA_FINALIZADA",
+            self._payload_venda(cliente_retaguarda_id=None, cliente_uuid=None),
+            chave="venda-anonima-retry",
+        )
+        response = self._push([evento])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+
+        cliente_padrao = self._cliente_padrao()
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(pk=response.data["resultados"][0]["mapeamento"]["venda_retaguarda_id"])
+        self.assertEqual(venda.cliente_id, cliente_padrao.pk)
+        self.assertEqual(HubEventoRecebido.objects.get(chave_idempotencia="venda-anonima-retry").status, HubEventoRecebido.STATUS_PROCESSADO)
+
+        response = self._push([evento])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(VendaPdv.objects.count(), 1)
+
+    def test_nfce_atualizada_apos_venda_anonima_sincronizada_processa_normalmente(self):
+        self._hub_autenticado()
+        self._cliente_padrao()
+        venda_uuid = "56565656-5656-4656-8656-565656565656"
+        payload_venda = self._payload_venda(
+            venda_uuid=venda_uuid,
+            cliente_retaguarda_id=None,
+            cliente_uuid=None,
+        )
+        self.assertEqual(
+            self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-anonima-nfce")]).data["resultados"][0]["status"],
+            HubEventoRecebido.STATUS_PROCESSADO,
+        )
+
+        payload_nfce = self._payload_nfce(venda_uuid=venda_uuid)
+        response = self._push([self._evento("NFCE_ATUALIZADA", payload_nfce, chave="nfce-venda-anonima")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertEqual(NFCe.objects.count(), 1)
+        self.assertEqual(HubNFCeMapeamento.objects.count(), 1)
+
+    def test_venda_finalizada_sem_cliente_nao_usa_cliente_padrao_de_outra_empresa(self):
+        self._hub_autenticado()
+        cliente_outra_empresa = self._cliente_padrao(self.outra_empresa)
+        payload = self._payload_venda(cliente_retaguarda_id=None, cliente_uuid=None)
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-anonima-outra-empresa")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertEqual(VendaPdv.objects.count(), 0)
+        self.assertFalse(HubVendaMapeamento.objects.exists())
+        self.assertEqual(cliente_outra_empresa.empresa_id, self.outra_empresa.pk)
 
     def test_venda_hub_normaliza_cashback_por_tipo_e_nao_gera_recebivel_comum(self):
         self._hub_autenticado()

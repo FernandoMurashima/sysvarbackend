@@ -9,6 +9,7 @@ from django.db import IntegrityError, transaction
 from django.utils import dateparse, timezone
 
 from cadastros.models import Cliente, Funcionarios
+from cadastros.services import ClientePadraoService
 from fiscal.models import NFCe, VendaDevolucao, VendaPdv
 from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
@@ -443,17 +444,21 @@ class HubSyncProcessor:
 
     def _cliente_venda(self, payload):
         cliente_id = payload.get("cliente_retaguarda_id")
-        if cliente_id:
+        if cliente_id not in (None, ""):
             cliente = Cliente.objects.filter(pk=cliente_id, empresa=self.empresa).first()
             if cliente:
                 return cliente
             raise HubSyncError("Cliente da venda pertence a outra empresa.")
         cliente_uuid = payload.get("cliente_uuid")
-        if cliente_uuid:
+        if cliente_uuid not in (None, ""):
             mapping = HubClienteMapeamento.objects.filter(hub=self.hub, cliente_uuid=uuid_value(cliente_uuid, "cliente_uuid")).first()
             if mapping and mapping.cliente.empresa_id == self.empresa.pk:
                 return mapping.cliente
-        raise HubSyncError("Cliente da venda não localizado.")
+            raise HubSyncError("Cliente da venda não localizado.")
+        cliente_padrao, _created = ClientePadraoService.obter_ou_criar(self.empresa, request=self.request, aplicar=False)
+        if cliente_padrao:
+            return cliente_padrao
+        raise HubSyncError("Cliente padrão/Consumidor Final não configurado para a empresa.")
 
     def _vendedor(self, vendedor_id):
         vendedor = Funcionarios.objects.filter(pk=vendedor_id, empresa=self.empresa, ativo=True).first()
