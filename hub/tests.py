@@ -576,7 +576,25 @@ class SysvarHubApiTests(TestCase):
         self.assertIn(self.client.post("/api/hub/heartbeat/", {}, format="json").status_code, (401, 403))
 
         self.client.credentials(HTTP_AUTHORIZATION="Hub token-invalido")
-        self.assertIn(self.client.post("/api/hub/heartbeat/", {}, format="json").status_code, (401, 403))
+        resp = self.client.post("/api/hub/heartbeat/", {}, format="json")
+        self.assertEqual(resp.status_code, 401, resp.data)
+        self.assertEqual(resp.data["code"], "HUB_CREDENTIAL_INVALID")
+        self.assertIn("revogada", resp.data["detail"])
+
+    def test_heartbeat_com_token_desvinculado_retorna_credencial_invalida(self):
+        hub, token = self._hub_autenticado()
+        hub.ativo = False
+        hub.token_hash = None
+        hub.token_prefixo = ""
+        hub.save(update_fields=["ativo", "token_hash", "token_prefixo", "atualizado_em"])
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
+
+        resp = self.client.post("/api/hub/heartbeat/", {}, format="json")
+
+        self.assertEqual(resp.status_code, 401, resp.data)
+        self.assertEqual(resp.data["code"], "HUB_CREDENTIAL_INVALID")
+        self.assertIn("revogada", resp.data["detail"])
 
     def test_hub_nao_pode_regredir_sincronizacao_para_pendente(self):
         hub, token = self._hub_autenticado()
