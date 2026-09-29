@@ -152,9 +152,10 @@ def estados_administrativos(linha):
     terminais = snapshot.get("terminais") if isinstance(snapshot, dict) else []
     if not isinstance(terminais, list):
         terminais = []
-    total = len(terminais)
+    terminais_ativos = [terminal for terminal in terminais if terminal.get("ativo")]
+    total = len(terminais_ativos)
     ativos = sum(1 for terminal in terminais if terminal.get("ativo"))
-    pareados = sum(1 for terminal in terminais if terminal.get("pareado"))
+    pareados = sum(1 for terminal in terminais_ativos if terminal.get("pareado"))
     configuracao = "CONFIGURADO" if total else "NAO_CONFIGURADO"
     pareamento = "PAREADO" if total and pareados == total else "NAO_PAREADO"
     if not hub_id or not hub_ativo or not possui_credencial:

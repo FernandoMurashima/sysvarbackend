@@ -515,6 +515,50 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(linha["configuracao_estado"], "CONFIGURADO")
         self.assertEqual(linha["pareamento_estado"], "PAREADO")
 
+    def test_painel_administrativo_ignora_terminal_inativo_com_pareamento_historico(self):
+        hub, _token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": False, "pareado": True}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+
+        linha = self._linha_administracao()
+
+        self.assertEqual(linha["configuracao_estado"], "NAO_CONFIGURADO")
+        self.assertEqual(linha["pareamento_estado"], "NAO_DISPONIVEL")
+        self.assertEqual(linha["total_terminais"], 0)
+        self.assertEqual(linha["terminais_ativos"], 0)
+
+    def test_painel_administrativo_terminal_ativo_nao_pareado_fica_configurado_nao_pareado(self):
+        hub, _token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": True, "pareado": False}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+
+        linha = self._linha_administracao()
+
+        self.assertEqual(linha["configuracao_estado"], "CONFIGURADO")
+        self.assertEqual(linha["pareamento_estado"], "NAO_PAREADO")
+        self.assertEqual(linha["total_terminais"], 1)
+        self.assertEqual(linha["terminais_ativos"], 1)
+
     def test_reativar_hub_sem_token_retorna_erro_controlado(self):
         hub = SysvarHub.objects.create(loja=self.loja, token_hash=None, token_prefixo="", ativo=False)
         self._admin()
