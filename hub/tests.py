@@ -209,6 +209,13 @@ class SysvarHubApiTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
         return hub, token
 
+    def _linha_administracao(self, loja=None):
+        self._admin()
+        resp = self.client.get("/api/hub/administracao/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        loja_id = (loja or self.loja).pk
+        return next(linha for linha in resp.data if linha["loja_id"] == loja_id)
+
     def test_usuario_autorizado_consegue_gerar_codigo_para_sua_loja(self):
         self._admin()
 
@@ -391,6 +398,122 @@ class SysvarHubApiTests(TestCase):
         self.assertEqual(hub.token_prefixo, "")
         self.assertTrue(SysvarHub.objects.filter(pk=hub.pk).exists())
         self.assertEqual(ativacao.estado_administrativo(), AtivacaoSysvarHub.ESTADO_REVOGADA)
+
+    def test_desvincular_nao_expoe_pareamento_historico_como_codigo_atual(self):
+        hub, _token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": True, "pareado": False}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+        comando = HubComandoAdministrativo.objects.create(
+            hub=hub,
+            tipo=HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO,
+            payload={"terminal_uuid": "terminal-1", "codigo": "PDV-01"},
+            resultado={"codigo": "ABCD-EFGH-IJKL"},
+            status=HubComandoAdministrativo.STATUS_CONCLUIDO,
+            concluido_em=timezone.now(),
+            solicitado_por=self.user,
+        )
+
+        linha_ativa = self._linha_administracao()
+        self.assertEqual(linha_ativa["pareamento_estado"], "CODIGO_DISPONIVEL")
+        self.assertEqual(linha_ativa["ultimo_comando_pareamento"]["id"], comando.pk)
+
+        desvincular = self.client.post(f"/api/hub/administracao/{hub.pk}/desvincular/", {}, format="json")
+        self.assertEqual(desvincular.status_code, 200, desvincular.data)
+
+        linha_desvinculada = self._linha_administracao()
+        self.assertEqual(linha_desvinculada["hub_estado"], "DESVINCULADO")
+        self.assertFalse(linha_desvinculada["possui_credencial"])
+        self.assertEqual(linha_desvinculada["configuracao_estado"], "NAO_DISPONIVEL")
+        self.assertEqual(linha_desvinculada["pareamento_estado"], "NAO_DISPONIVEL")
+        self.assertIsNone(linha_desvinculada["ultimo_comando_pareamento"])
+        self.assertTrue(HubComandoAdministrativo.objects.filter(pk=comando.pk).exists())
+
+    def test_nova_ativacao_nao_ressuscita_codigo_de_pareamento_anterior(self):
+        hub, _token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": True, "pareado": False}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+        comando_antigo = HubComandoAdministrativo.objects.create(
+            hub=hub,
+            tipo=HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO,
+            payload={"terminal_uuid": "terminal-1", "codigo": "PDV-01"},
+            resultado={"codigo": "ABCD-EFGH-IJKL"},
+            status=HubComandoAdministrativo.STATUS_CONCLUIDO,
+            concluido_em=timezone.now(),
+            solicitado_por=self.user,
+        )
+        self._admin()
+        self.client.post(f"/api/hub/administracao/{hub.pk}/desvincular/", {}, format="json")
+        nova_ativacao, codigo = self._criar_codigo()
+        self.client.force_authenticate(user=None)
+
+        ativar = self._ativar(codigo, hub_uuid=str(hub.hub_uuid))
+
+        self.assertEqual(ativar.status_code, 200, ativar.data)
+        nova_ativacao.refresh_from_db()
+        self.assertIsNotNone(nova_ativacao.usado_em)
+        linha_reativada = self._linha_administracao()
+        self.assertNotEqual(linha_reativada["pareamento_estado"], "CODIGO_DISPONIVEL")
+        self.assertIsNone(linha_reativada["ultimo_comando_pareamento"])
+        self.assertTrue(HubComandoAdministrativo.objects.filter(pk=comando_antigo.pk).exists())
+
+        sync_ciclo_atual = HubSincronizacaoSolicitacao.objects.filter(hub=hub).latest("solicitado_em")
+        sync_ciclo_atual.status = HubSincronizacaoSolicitacao.STATUS_CONCLUIDA
+        sync_ciclo_atual.concluido_em = timezone.now()
+        sync_ciclo_atual.save(update_fields=["status", "concluido_em", "atualizado_em"])
+        comando_novo = HubComandoAdministrativo.objects.create(
+            hub=hub,
+            tipo=HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO,
+            payload={"terminal_uuid": "terminal-1", "codigo": "PDV-01"},
+            resultado={"codigo": "WXYZ-2345-6789"},
+            status=HubComandoAdministrativo.STATUS_CONCLUIDO,
+            concluido_em=timezone.now(),
+            solicitado_por=self.user,
+        )
+
+        linha_com_codigo_novo = self._linha_administracao()
+        self.assertEqual(linha_com_codigo_novo["pareamento_estado"], "CODIGO_DISPONIVEL")
+        self.assertEqual(linha_com_codigo_novo["ultimo_comando_pareamento"]["id"], comando_novo.pk)
+
+    def test_painel_administrativo_mantem_hub_ativo_pareado(self):
+        hub, _token = self._hub_autenticado()
+        HubSincronizacaoSolicitacao.objects.create(
+            hub=hub,
+            solicitado_por=self.user,
+            status=HubSincronizacaoSolicitacao.STATUS_CONCLUIDA,
+            concluido_em=timezone.now(),
+        )
+        hub.snapshot_operacional = {
+            "terminais": [
+                {"terminal_uuid": "terminal-1", "codigo": "PDV-01", "nome": "PDV 01", "ativo": True, "pareado": True}
+            ]
+        }
+        hub.save(update_fields=["snapshot_operacional", "atualizado_em"])
+
+        linha = self._linha_administracao()
+
+        self.assertEqual(linha["hub_estado"], "ATIVADO")
+        self.assertEqual(linha["configuracao_estado"], "CONFIGURADO")
+        self.assertEqual(linha["pareamento_estado"], "PAREADO")
 
     def test_reativar_hub_sem_token_retorna_erro_controlado(self):
         hub = SysvarHub.objects.create(loja=self.loja, token_hash=None, token_prefixo="", ativo=False)

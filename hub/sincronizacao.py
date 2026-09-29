@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from cadastros.models import Loja
 from hub.administracao import estados_administrativos
-from hub.models import HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
 
 
 ROLES_SINCRONIZACAO = {"Admin", "Diretor", "Gerente"}
@@ -140,9 +140,11 @@ def montar_painel_sincronizacao(user):
     ultimas = HubSincronizacaoSolicitacao.objects.order_by("-solicitado_em", "-id")
     linhas = []
     comandos = HubComandoAdministrativo.objects.order_by("-solicitado_em", "-id")
+    ativacoes_utilizadas = AtivacaoSysvarHub.objects.filter(usado_em__isnull=False).order_by("-usado_em", "-id")
     qs = lojas_no_escopo(user).select_related("sysvar_hub").prefetch_related(
         Prefetch("sysvar_hub__sincronizacoes", queryset=ultimas),
         Prefetch("sysvar_hub__comandos_administrativos", queryset=comandos),
+        Prefetch("sysvar_hub__ativacoes", queryset=ativacoes_utilizadas, to_attr="ativacoes_utilizadas_ordenadas"),
     )
     for loja in qs:
         try:
@@ -152,14 +154,17 @@ def montar_painel_sincronizacao(user):
         ultima = None
         ativa = None
         if hub:
-            sincronizacoes = list(hub.sincronizacoes.all())
+            ativacoes_utilizadas_hub = getattr(hub, "ativacoes_utilizadas_ordenadas", [])
+            ciclo_iniciado_em = ativacoes_utilizadas_hub[0].usado_em if ativacoes_utilizadas_hub else None
+            sincronizacoes = _eventos_do_ciclo_atual(list(hub.sincronizacoes.all()), ciclo_iniciado_em, "solicitado_em")
             ultima = sincronizacoes[0] if sincronizacoes else None
             ativa = next((s for s in sincronizacoes if s.status in HubSincronizacaoSolicitacao.STATUS_ATIVOS), None)
             primeira_concluida = any(s.status == HubSincronizacaoSolicitacao.STATUS_CONCLUIDA for s in sincronizacoes)
             comandos_admin = list(hub.comandos_administrativos.all())
-            comando_ativo = next((c for c in comandos_admin if c.status in HubComandoAdministrativo.STATUS_ATIVOS), None)
-            ultimo_config = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL), None)
-            ultimo_pareamento = next((c for c in comandos_admin if c.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO), None)
+            comandos_ciclo_atual = _comandos_do_ciclo_atual(comandos_admin, ciclo_iniciado_em)
+            comando_ativo = next((c for c in comandos_ciclo_atual if c.status in HubComandoAdministrativo.STATUS_ATIVOS), None)
+            ultimo_config = next((c for c in comandos_ciclo_atual if c.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL), None)
+            ultimo_pareamento = next((c for c in comandos_ciclo_atual if c.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO), None)
         else:
             primeira_concluida = False
             comando_ativo = None
@@ -199,14 +204,19 @@ def montar_painel_sincronizacao(user):
                 "ultimo_comando_pareamento": serializar_comando_admin(ultimo_pareamento),
             }
         linha.update(estados_administrativos(linha))
-        if comando_ativo:
+        comandos_disponiveis = _comandos_administrativos_disponiveis(linha)
+        if not comandos_disponiveis:
+            linha["comando_administrativo_ativo"] = None
+            linha["ultimo_comando_configuracao"] = None
+            linha["ultimo_comando_pareamento"] = None
+        if comandos_disponiveis and comando_ativo:
             if comando_ativo.tipo == HubComandoAdministrativo.TIPO_CONFIGURAR_TERMINAL:
                 linha["configuracao_estado"] = "CONFIGURANDO" if comando_ativo.status == HubComandoAdministrativo.STATUS_PROCESSANDO else "AGUARDANDO"
             elif comando_ativo.tipo == HubComandoAdministrativo.TIPO_GERAR_PAREAMENTO:
                 linha["pareamento_estado"] = "CODIGO_SOLICITADO"
-        if ultimo_config and ultimo_config.status == HubComandoAdministrativo.STATUS_ERRO:
+        if comandos_disponiveis and ultimo_config and ultimo_config.status == HubComandoAdministrativo.STATUS_ERRO:
             linha["configuracao_estado"] = "ERRO"
-        if ultimo_pareamento:
+        if comandos_disponiveis and ultimo_pareamento:
             if ultimo_pareamento.status == HubComandoAdministrativo.STATUS_CONCLUIDO and linha["pareamento_estado"] != "PAREADO":
                 linha["pareamento_estado"] = "CODIGO_DISPONIVEL"
             elif ultimo_pareamento.status == HubComandoAdministrativo.STATUS_ERRO:
@@ -228,6 +238,25 @@ def serializar_solicitacao(solicitacao):
         "mensagem_erro": solicitacao.mensagem_erro,
         "atualizado_em": solicitacao.atualizado_em,
     }
+
+
+def _comandos_do_ciclo_atual(comandos, ciclo_iniciado_em):
+    return _eventos_do_ciclo_atual(comandos, ciclo_iniciado_em, "solicitado_em")
+
+
+def _eventos_do_ciclo_atual(eventos, ciclo_iniciado_em, campo_data):
+    if not ciclo_iniciado_em:
+        return eventos
+    return [evento for evento in eventos if getattr(evento, campo_data) >= ciclo_iniciado_em]
+
+
+def _comandos_administrativos_disponiveis(linha):
+    return bool(
+        linha.get("hub_id")
+        and linha.get("hub_ativo")
+        and linha.get("possui_credencial")
+        and linha.get("primeira_sincronizacao_concluida")
+    )
 
 
 def serializar_comando_admin(comando):
