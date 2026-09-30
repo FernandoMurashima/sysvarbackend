@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.http import FileResponse, Http404
 from django.db import IntegrityError, models, transaction
@@ -14,7 +15,8 @@ from rest_framework.views import APIView
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
-from fiscal.models import FormaPagamentoFiscalMap
+from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
+from fiscal.views.venda_pdv import VendaDevolucaoViewSet, money
 from hub.administracao import (
     atualizar_resultado_comando,
     listar_caixas_loja,
@@ -25,7 +27,7 @@ from hub.administracao import (
 )
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
-from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubSincronizacaoSolicitacao, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
@@ -165,6 +167,253 @@ def _serializar_natureza_despesa_pdv(natureza):
         "categoria_gerencial": natureza.categoria_gerencial,
         "movimenta_financeiro": natureza.movimenta_financeiro,
         "entra_dre": natureza.entra_dre,
+    }
+
+
+def _hub_vendas_base(hub):
+    return (
+        VendaPdv.objects.select_related("loja", "cliente", "vendedor", "caixa")
+        .prefetch_related("itens", "pagamentos", "devolucoes__itens", "cashback_creditos", "cashback_usos")
+        .filter(empresa_id=hub.loja.empresa_id)
+    )
+
+
+def _serializar_venda_devolucao_online(venda):
+    view = VendaDevolucaoViewSet()
+    payload = view._venda_devolucao_payload(venda)
+    payload["uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"central-venda:{venda.pk}"))
+    payload["loja_origem"] = {"id": venda.loja_id, "nome": venda.loja.nome_loja}
+    payload["cliente"] = {
+        "id": venda.cliente_id,
+        "nome": venda.cliente.nome_cliente,
+        "documento": venda.cliente.documento or venda.cliente.cpf or "",
+    }
+    payload["situacao"] = venda.status
+    payload["quantidade_itens"] = sum(int(item.quantidade or 0) for item in venda.itens.all())
+    for item in payload["itens"]:
+        item["item_uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"central-venda-item:{item['id']}"))
+        quantidade = Decimal(item["quantidade"] or 0)
+        desconto = Decimal(item["desconto"] or 0)
+        preco = Decimal(item["preco_unitario"] or 0)
+        disponivel = Decimal(item["quantidade_disponivel"] or 0)
+        desconto_unitario = money(desconto / quantidade) if quantidade else Decimal("0.00")
+        item["valor_liquido_disponivel"] = str(money((preco - desconto_unitario) * disponivel))
+    return payload
+
+
+def _buscar_venda_online(hub, termo=None, venda_id=None):
+    qs = _hub_vendas_base(hub)
+    if venda_id:
+        return qs.filter(pk=venda_id).first()
+    termo = str(termo or "").strip()
+    if not termo:
+        return None
+    filtros = models.Q(documento__iexact=termo)
+    try:
+        filtros |= models.Q(pk=int(termo))
+    except (TypeError, ValueError):
+        pass
+    nfce_ids = NFCe.objects.filter(
+        models.Q(chave_acesso=termo) | models.Q(protocolo=termo) | models.Q(numero=int(termo) if termo.isdecimal() else -1),
+        venda__empresa_id=hub.loja.empresa_id,
+    ).values_list("venda_id", flat=True)
+    filtros |= models.Q(pk__in=nfce_ids)
+    return qs.filter(filtros).order_by("-data_venda", "-id").first()
+
+
+class HubDevolucaoVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        venda = _buscar_venda_online(request.sysvar_hub, termo=request.query_params.get("documento"))
+        if not venda:
+            return Response({"detail": "Venda/cupom não encontrado na Central."}, status=status.HTTP_404_NOT_FOUND)
+        if venda.status != VendaPdv.Status.FINALIZADA:
+            return Response({"detail": "Somente vendas finalizadas podem ser devolvidas."}, status=status.HTTP_409_CONFLICT)
+        return Response({"venda": _serializar_venda_devolucao_online(venda)}, status=status.HTTP_200_OK)
+
+
+class HubDevolucaoVendaDetalheView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, venda_id):
+        venda = _buscar_venda_online(request.sysvar_hub, venda_id=venda_id)
+        if not venda:
+            return Response({"detail": "Venda não encontrada na Central."}, status=status.HTTP_404_NOT_FOUND)
+        if venda.status != VendaPdv.Status.FINALIZADA:
+            return Response({"detail": "Somente vendas finalizadas podem ser devolvidas."}, status=status.HTTP_409_CONFLICT)
+        return Response({"venda": _serializar_venda_devolucao_online(venda)}, status=status.HTTP_200_OK)
+
+
+class HubDevolucaoClientesView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        termo = str(request.query_params.get("q") or "").strip()
+        documento = "".join(ch for ch in str(request.query_params.get("documento") or termo) if ch.isdigit())
+        nome = str(request.query_params.get("nome") or ("" if documento else termo)).strip()
+        qs = Cliente.objects.filter(empresa_id=request.sysvar_hub.loja.empresa_id).order_by("nome_cliente", "id")
+        if documento:
+            qs = qs.filter(models.Q(documento__icontains=documento) | models.Q(cpf__icontains=documento))
+        elif nome:
+            qs = qs.filter(nome_cliente__icontains=nome)
+        else:
+            return Response({"clientes": []}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "clientes": [
+                    {
+                        "id": cliente.pk,
+                        "nome": cliente.nome_cliente,
+                        "documento": cliente.documento or cliente.cpf or "",
+                    }
+                    for cliente in qs[:20]
+                ]
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubDevolucaoClienteVendasView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, cliente_id):
+        cliente = Cliente.objects.filter(pk=cliente_id, empresa_id=request.sysvar_hub.loja.empresa_id).first()
+        if not cliente:
+            return Response({"detail": "Cliente não encontrado na Central."}, status=status.HTTP_404_NOT_FOUND)
+        vendas = _hub_vendas_base(request.sysvar_hub).filter(cliente=cliente, status=VendaPdv.Status.FINALIZADA).order_by("-data_venda", "-id")[:50]
+        payload = []
+        for venda in vendas:
+            nfce = getattr(venda, "nfce", None)
+            payload.append(
+                {
+                    "id": venda.pk,
+                    "documento": venda.documento,
+                    "data_venda": venda.data_venda,
+                    "loja": {"id": venda.loja_id, "nome": venda.loja.nome_loja},
+                    "total": str(money(venda.total)),
+                    "quantidade_itens": sum(int(item.quantidade or 0) for item in venda.itens.all()),
+                    "nfce": {"numero": nfce.numero, "chave_acesso": nfce.chave_acesso, "status": nfce.status} if nfce else None,
+                }
+            )
+        return Response({"cliente": {"id": cliente.pk, "nome": cliente.nome_cliente, "documento": cliente.documento or cliente.cpf or ""}, "vendas": payload}, status=status.HTTP_200_OK)
+
+
+class HubDevolucaoFinalizarOnlineView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        hub = request.sysvar_hub
+        devolucao_uuid = request.data.get("devolucao_uuid") or request.data.get("idempotency_key")
+        try:
+            devolucao_uuid = uuid.UUID(str(devolucao_uuid))
+        except (TypeError, ValueError, AttributeError):
+            return Response({"detail": "Identificador idempotente da devolução inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        existente = HubDevolucaoMapeamento.objects.select_related("devolucao").filter(hub=hub, devolucao_uuid=devolucao_uuid).first()
+        if existente:
+            return Response(_serializar_devolucao_online_resultado(existente.devolucao, existente), status=status.HTTP_200_OK)
+
+        venda = _buscar_venda_online(hub, venda_id=request.data.get("venda_id"), termo=request.data.get("documento_venda"))
+        if not venda:
+            return Response({"detail": "Venda finalizada não encontrada na Central."}, status=status.HTTP_404_NOT_FOUND)
+        if venda.status != VendaPdv.Status.FINALIZADA:
+            return Response({"detail": "Somente vendas finalizadas podem ser devolvidas."}, status=status.HTTP_409_CONFLICT)
+        if venda.cliente.documento == Cliente.DOCUMENTO_CONSUMIDOR_FINAL:
+            return Response({"detail": "Vale-Troca exige cliente identificada. Identifique uma cliente válida antes de finalizar."}, status=status.HTTP_409_CONFLICT)
+
+        view = VendaDevolucaoViewSet()
+        itens_por_id = {item.id: item for item in venda.itens.all()}
+        devolvidos = view._quantidades_devolvidas(venda)
+        selecionados = []
+        total = Decimal("0.00")
+        for row in request.data.get("itens") or []:
+            venda_item_id = int(row.get("venda_item") or row.get("id") or 0)
+            quantidade = int(row.get("quantidade") or 0)
+            venda_item = itens_por_id.get(venda_item_id)
+            if not venda_item or quantidade <= 0:
+                return Response({"detail": "Item de devolução inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            disponivel = int(venda_item.quantidade or 0) - int(devolvidos.get(venda_item.id, 0))
+            if quantidade > disponivel:
+                return Response({"detail": f"Quantidade maior que o saldo para devolver em {venda_item.descricao}."}, status=status.HTTP_409_CONFLICT)
+            desconto_unitario = money(Decimal(venda_item.desconto or 0) / Decimal(venda_item.quantidade or 1))
+            total += money((Decimal(venda_item.preco_unitario or 0) - desconto_unitario) * Decimal(quantidade))
+            selecionados.append((venda_item, quantidade, money(desconto_unitario * Decimal(quantidade))))
+        if total <= 0:
+            return Response({"detail": "Valor da devolução inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        documento = f"HUB-DEV-{hub.pk}-{devolucao_uuid.hex[:16]}"
+        devolucao = VendaDevolucao.objects.create(
+            empresa=venda.empresa,
+            venda=venda,
+            loja=hub.loja,
+            cliente=venda.cliente,
+            documento=documento,
+            motivo=str(request.data.get("motivo") or "")[:255],
+            subtotal=money(total),
+            credito_cliente=money(total),
+            criado_por=None,
+        )
+        for venda_item, quantidade, desconto in selecionados:
+            view._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
+        view._registrar_credito_cliente(devolucao)
+        view._estornar_financeiro(devolucao)
+        view._estornar_cmv(devolucao)
+        view._registrar_nfe_devolucao(devolucao)
+        vale = getattr(devolucao, "vale_troca", None)
+        mapeamento = HubDevolucaoMapeamento.objects.create(
+            hub=hub,
+            devolucao_uuid=devolucao_uuid,
+            devolucao=devolucao,
+            venda_uuid=uuid.uuid5(uuid.NAMESPACE_URL, f"central-venda:{venda.pk}"),
+            documento=documento,
+            vale_documento=vale.documento if vale else "",
+        )
+        return Response(_serializar_devolucao_online_resultado(devolucao, mapeamento), status=status.HTTP_201_CREATED)
+
+
+def _serializar_devolucao_online_resultado(devolucao, mapeamento):
+    vale = getattr(devolucao, "vale_troca", None)
+    nfe = getattr(devolucao, "nfe_devolucao", None)
+    return {
+        "devolucao": {
+            "id": devolucao.pk,
+            "uuid": str(mapeamento.devolucao_uuid),
+            "documento": devolucao.documento,
+            "valor_total": str(money(devolucao.credito_cliente)),
+            "status": devolucao.status,
+            "venda_origem": _serializar_venda_devolucao_online(devolucao.venda),
+            "loja_recebimento": {"id": devolucao.loja_id, "nome": devolucao.loja.nome_loja},
+            "cliente": {"id": devolucao.cliente_id, "nome": devolucao.cliente.nome_cliente, "documento": devolucao.cliente.documento or devolucao.cliente.cpf or ""},
+            "vale_troca": {
+                "id": vale.pk,
+                "documento": vale.documento,
+                "valor_original": str(money(vale.valor_original)),
+                "saldo": str(money(vale.saldo)),
+                "status": vale.status,
+                "validade": vale.validade,
+            } if vale else None,
+            "fiscal": {"status": nfe.status, "numero": nfe.numero, "mensagem": nfe.retorno_mensagem} if nfe else None,
+            "itens": [
+                {
+                    "venda_item": item.venda_item_id,
+                    "produto": item.produto_id,
+                    "sku": item.sku_id,
+                    "ean": item.ean,
+                    "descricao": item.descricao,
+                    "quantidade": item.quantidade,
+                    "preco_unitario": str(item.preco_unitario),
+                    "desconto": str(item.desconto),
+                    "total_item": str(item.total_item),
+                }
+                for item in devolucao.itens.all()
+            ],
+        }
     }
 
 
