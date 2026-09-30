@@ -27,7 +27,7 @@ from financeiro.models import (
     saldo_cashback_cliente,
     saldo_vale_troca_cliente,
 )
-from financeiro.services import gerar_lancamento_contabil_movimentacao
+from financeiro.services import gerar_lancamento_contabil_movimentacao, reservar_documento_vale_troca
 from fiscal.models import (
     Cfop,
     NFCe,
@@ -1990,13 +1990,16 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         gerar_lancamento_contabil_movimentacao(movimento)
 
     def _registrar_credito_cliente(self, devolucao: VendaDevolucao):
+        if ValeTroca.objects.filter(devolucao=devolucao).exists():
+            return
+        documento_vale = reservar_documento_vale_troca(devolucao.empresa)
         vale, created = ValeTroca.objects.get_or_create(
             devolucao=devolucao,
             defaults={
                 "empresa": devolucao.empresa,
                 "cliente": devolucao.cliente,
                 "loja": devolucao.loja,
-                "documento": f"VT-{devolucao.documento}",
+                "documento": documento_vale,
                 "valor_original": devolucao.credito_cliente,
                 "saldo": devolucao.credito_cliente,
                 "status": ValeTroca.STATUS_ABERTO,

@@ -324,7 +324,8 @@ class ValeTroca(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
     loja = models.ForeignKey(Loja, on_delete=models.PROTECT, related_name='vales_troca', db_index=True)
     devolucao = models.OneToOneField('fiscal.VendaDevolucao', on_delete=models.PROTECT, related_name='vale_troca')
-    documento = models.CharField(max_length=50, unique=True, db_index=True)
+    documento = models.CharField(max_length=50, db_index=True)
+    documento_legado = models.CharField(max_length=80, null=True, blank=True, db_index=True)
     valor_original = models.DecimalField(max_digits=18, decimal_places=2)
     saldo = models.DecimalField(max_digits=18, decimal_places=2)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ABERTO, db_index=True)
@@ -340,6 +341,9 @@ class ValeTroca(models.Model):
         indexes = [
             models.Index(fields=['cliente', 'status'], name='ix_vale_troca_cliente_status'),
             models.Index(fields=['loja', 'status'], name='ix_vale_troca_loja_status'),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'documento'], name='uq_vale_troca_empresa_doc'),
         ]
 
     def __str__(self):
@@ -427,6 +431,28 @@ def saldo_vale_troca_cliente(cliente_id, ate=None, empresa=None):
         .get('total')
     )
     return saldo or 0
+
+
+class SequenciaDocumento(models.Model):
+    TIPO_VALE_TROCA = 'VALE_TROCA'
+    TIPO_CHOICES = [
+        (TIPO_VALE_TROCA, 'Vale-Troca'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='sequencias_documento')
+    tipo_documento = models.CharField(max_length=40, choices=TIPO_CHOICES)
+    proximo_numero = models.PositiveIntegerField(default=1)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'financeiro_sequencia_documento'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'tipo_documento'], name='uq_seq_doc_empresa_tipo'),
+        ]
+
+    def __str__(self):
+        return f'{self.empresa_id} - {self.tipo_documento} - {self.proximo_numero}'
 
 
 # =========================

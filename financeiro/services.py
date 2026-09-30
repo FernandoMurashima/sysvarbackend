@@ -5,7 +5,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from cadastros.models import PlanoContabil
 
-from .models import LancamentoContabil, MovimentacaoFinanceira, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from .models import LancamentoContabil, MovimentacaoFinanceira, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 
 
 ZERO = Decimal("0.00")
@@ -19,8 +19,33 @@ class ValeTrocaNaoEncontrado(ValeTrocaErro):
     status_code = 404
 
 
+LIMITE_NUMERO_VALE_TROCA = 9999999
+
+
 def money(valor):
     return Decimal(valor or 0).quantize(Decimal("0.01"))
+
+
+def formatar_documento_vale_troca(numero):
+    return f"VT{int(numero):07d}"
+
+
+@transaction.atomic
+def reservar_documento_vale_troca(empresa):
+    if not empresa:
+        raise ValeTrocaErro("Empresa obrigatoria para gerar Vale-Troca.")
+    sequencia, _ = SequenciaDocumento.objects.select_for_update().get_or_create(
+        empresa=empresa,
+        tipo_documento=SequenciaDocumento.TIPO_VALE_TROCA,
+        defaults={"proximo_numero": 1},
+    )
+    numero = int(sequencia.proximo_numero or 1)
+    if numero > LIMITE_NUMERO_VALE_TROCA:
+        raise ValeTrocaErro("Faixa de numeracao de Vale-Troca esgotada.")
+    documento = formatar_documento_vale_troca(numero)
+    sequencia.proximo_numero = numero + 1
+    sequencia.save(update_fields=["proximo_numero", "atualizado_em"])
+    return documento
 
 
 def _uuid(valor, campo):
@@ -77,12 +102,13 @@ def serializar_vale_troca_online(vale):
 
 
 def consultar_vale_troca_online(hub, documento):
-    documento = str(documento or "").strip()
+    documento = str(documento or "").strip().upper()
     if not documento:
         raise ValeTrocaErro("Informe o numero do Vale-Troca.")
     vale = (
         ValeTroca.objects.select_related("cliente", "loja", "devolucao")
-        .filter(empresa=hub.loja.empresa, documento=documento)
+        .filter(empresa=hub.loja.empresa)
+        .filter(models.Q(documento=documento) | models.Q(documento_legado=documento))
         .first()
     )
     if not vale:
