@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from cadastros.services import ClientePadraoService
-from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento
+from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
@@ -3182,6 +3182,101 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(vale.saldo, Decimal("0.00"))
         self.assertTrue(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, valor=Decimal("100.00")).exists())
         self.assertFalse(Receber.objects.filter(pedido_venda=venda.pk).exists())
+
+    def test_venda_finalizada_com_vale_troca_reservado_sincroniza_retry_idempotente_e_libera_nfce(self):
+        self._hub_autenticado()
+        venda_origem = VendaPdv.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            caixa=self.caixa,
+            cliente=self.cliente,
+            vendedor=self.vendedor,
+            documento="VD-TROCA-HUB-RESERVA",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("219.90"),
+            valor_recebido=Decimal("219.90"),
+        )
+        devolucao = VendaDevolucao.objects.create(
+            empresa=self.empresa,
+            venda=venda_origem,
+            loja=self.loja,
+            cliente=self.cliente,
+            documento="DEV-TROCA-HUB-RESERVA",
+            credito_cliente=Decimal("219.90"),
+        )
+        vale = ValeTroca.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            cliente=self.cliente,
+            devolucao=devolucao,
+            documento="VT0000001",
+            valor_original=Decimal("219.90"),
+            saldo=Decimal("219.90"),
+        )
+        venda_uuid = "67676767-6767-4767-8767-676767676767"
+        operacao_uuid = "68686868-6868-4868-8868-686868686868"
+        reserva = ValeTrocaReserva.objects.create(
+            empresa=self.empresa,
+            hub=self.hub,
+            venda_uuid=venda_uuid,
+            operacao_uuid=operacao_uuid,
+            vale=vale,
+            valor=Decimal("119.90"),
+        )
+        payload = self._payload_venda(
+            venda_uuid=venda_uuid,
+            total="119.90",
+            valor_recebido="119.90",
+            pagamentos=[{
+                "codigo": "TRO",
+                "tipo": "VALE_TROCA",
+                "valor": "119.90",
+                "vale_troca_documento": "VT0000001",
+                "operacao_uuid": operacao_uuid,
+                "vale_troca_reserva_id": reserva.pk,
+            }],
+        )
+        payload["itens"][0]["preco_unitario"] = "119.90"
+        evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid="69696969-6969-4969-8969-696969696969", chave="venda-vale-reservado")
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        pagamento = VendaPdvPagamento.objects.get(venda=venda)
+        self.assertEqual(pagamento.forma, "TROCA")
+        self.assertEqual(pagamento.valor, Decimal("119.90"))
+        self.assertEqual(pagamento.autorizacao, "VT0000001")
+        self.assertFalse(hasattr(pagamento, "operacao_uuid"))
+        self.assertFalse(hasattr(pagamento, "reserva_id"))
+        self.assertFalse(hasattr(pagamento, "tipo"))
+        reserva.refresh_from_db()
+        vale.refresh_from_db()
+        self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_CONSUMIDA)
+        self.assertEqual(vale.saldo, Decimal("100.00"))
+        self.assertEqual(vale.status, ValeTroca.STATUS_ABERTO)
+        self.assertEqual(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, tipo=ValeTrocaMovimento.TIPO_USO).count(), 1)
+        self.assertEqual(ValeTrocaMovimento.objects.get(vale=vale, venda_uso=venda, tipo=ValeTrocaMovimento.TIPO_USO).valor, Decimal("119.90"))
+
+        retry = self._push([evento])
+
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(VendaPdv.objects.filter(documento=venda.documento).count(), 1)
+        self.assertEqual(VendaPdvPagamento.objects.filter(venda=venda).count(), 1)
+        self.assertEqual(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, tipo=ValeTrocaMovimento.TIPO_USO).count(), 1)
+        vale.refresh_from_db()
+        self.assertEqual(vale.saldo, Decimal("100.00"))
+
+        nfce_payload = self._payload_nfce(
+            nfce_uuid="70707070-7070-4070-8070-707070707070",
+            venda_uuid=venda_uuid,
+            serie=1,
+            numero=789,
+        )
+        nfce = self._push([self._evento("NFCE_ATUALIZADA", nfce_payload, evento_uuid="71717171-7171-4171-8171-717171717171", chave="nfce-vale-reservado")])
+
+        self.assertEqual(nfce.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertTrue(HubNFCeMapeamento.objects.filter(venda_uuid=venda_uuid).exists())
 
     def test_devolucao_finalizada_materializa_devolucao_estoque_vale_e_retry_nao_duplica(self):
         self._hub_autenticado()

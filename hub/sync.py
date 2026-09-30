@@ -19,6 +19,9 @@ from financeiro.services import consumir_reservas_vale_troca_venda
 from financeiro.models import Caixa
 from produto.models import ProdutoDetalhe
 
+
+PAGAMENTO_PERSISTENCIA_CAMPOS = ("forma", "descricao", "valor", "autorizacao")
+
 from hub.models import (
     HubClienteMapeamento,
     HubEventoRecebido,
@@ -249,8 +252,8 @@ class HubSyncProcessor:
         if VendaPdv.objects.filter(documento=documento).exists():
             venda = VendaPdv.objects.get(documento=documento)
             HubVendaMapeamento.objects.get_or_create(hub=self.hub, venda_uuid=venda_uuid, defaults={"venda": venda, "documento": documento})
-            pagamentos_retry = [self._normalizar_pagamento(p) for p in payload.get("pagamentos") or []]
-            if any(p.get("operacao_uuid") for p in pagamentos_retry if p.get("forma") == "TROCA"):
+            pagamentos_retry = self._pagamentos_vale_troca_reserva(payload.get("pagamentos") or [])
+            if pagamentos_retry:
                 consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_retry)
             return {"venda_retaguarda_id": venda.pk, "documento": documento}
 
@@ -278,10 +281,19 @@ class HubSyncProcessor:
             desconto_itens += money(venda_item.desconto)
         pagamentos_payload = [self._normalizar_pagamento(p) for p in payload.get("pagamentos") or []]
         pagamentos = view._normalizar_pagamentos({"pagamentos": pagamentos_payload, "valor_recebido": payload.get("valor_recebido") or payload.get("total")})
+        pagamentos_reserva = []
         for normalizado, original in zip(pagamentos, pagamentos_payload):
-            normalizado["operacao_uuid"] = original.get("operacao_uuid")
-            normalizado["reserva_id"] = original.get("reserva_id")
-            normalizado["tipo"] = original.get("tipo")
+            if normalizado["forma"] == "TROCA" and original.get("operacao_uuid"):
+                pagamentos_reserva.append({
+                    "forma": normalizado["forma"],
+                    "descricao": normalizado.get("descricao", ""),
+                    "valor": normalizado["valor"],
+                    "autorizacao": normalizado.get("autorizacao", ""),
+                    "documento": normalizado.get("autorizacao", ""),
+                    "operacao_uuid": original.get("operacao_uuid"),
+                    "reserva_id": original.get("reserva_id"),
+                    "tipo": original.get("tipo") or "VALE_TROCA",
+                })
         total = money(subtotal - desconto_itens - venda.desconto_geral)
         total_pago = money(sum((pagamento["valor"] for pagamento in pagamentos), Decimal("0")))
         if total_pago < total:
@@ -299,10 +311,10 @@ class HubSyncProcessor:
         venda.troco = money(total_pago - total) if total_pago > total else Decimal("0.00")
         venda.forma_pagamento = view._forma_resumo(pagamentos)
         venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
-        view._registrar_pagamentos(venda, pagamentos)
+        view._registrar_pagamentos(venda, self._pagamentos_persistencia(pagamentos))
         view._registrar_financeiro(venda)
-        if any(pagamento.get("operacao_uuid") for pagamento in pagamentos if pagamento["forma"] == "TROCA"):
-            consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos)
+        if pagamentos_reserva:
+            consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_reserva)
         else:
             view._registrar_uso_vale_troca(venda, pagamentos)
         view._registrar_cashback(venda, pagamentos)
@@ -450,6 +462,20 @@ class HubSyncProcessor:
             "valor": pagamento.get("valor"),
             "autorizacao": pagamento.get("autorizacao") or "",
         }
+
+    def _pagamentos_persistencia(self, pagamentos):
+        return [
+            {campo: pagamento[campo] for campo in PAGAMENTO_PERSISTENCIA_CAMPOS if campo in pagamento}
+            for pagamento in pagamentos
+        ]
+
+    def _pagamentos_vale_troca_reserva(self, pagamentos):
+        normalizados = [self._normalizar_pagamento(pagamento) for pagamento in pagamentos]
+        return [
+            pagamento
+            for pagamento in normalizados
+            if pagamento.get("forma") == "TROCA" and pagamento.get("operacao_uuid")
+        ]
 
     def _caixa(self, caixa_id):
         caixa = Caixa.objects.select_for_update().filter(pk=caixa_id, empresa=self.empresa, idloja=self.loja, ativo=True, tipo_caixa=Caixa.TIPO_LOJA).first()
