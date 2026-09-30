@@ -116,6 +116,29 @@ def consultar_vale_troca_online(hub, documento):
     return serializar_vale_troca_online(vale)
 
 
+def listar_vales_troca_online_cliente(hub, cliente_id):
+    if not cliente_id:
+        raise ValeTrocaErro("Vale-Troca exige cliente identificado.")
+    hoje = timezone.localdate()
+    vales = (
+        ValeTroca.objects.select_related("cliente", "loja", "devolucao")
+        .filter(
+            empresa=hub.loja.empresa,
+            cliente_id=cliente_id,
+            status=ValeTroca.STATUS_ABERTO,
+            saldo__gt=ZERO,
+        )
+        .filter(models.Q(validade__isnull=True) | models.Q(validade__gte=hoje))
+        .order_by("criado_em", "Idvaletroca")
+    )
+    disponiveis = []
+    for vale in vales:
+        payload = serializar_vale_troca_online(vale)
+        if money(payload["saldo_disponivel"]) > ZERO:
+            disponiveis.append(payload)
+    return disponiveis
+
+
 def validar_vale_troca_online_para_cliente(vale, cliente_id):
     if not cliente_id:
         raise ValeTrocaErro("Venda com Vale-Troca exige cliente identificado.")

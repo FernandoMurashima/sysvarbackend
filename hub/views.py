@@ -21,6 +21,7 @@ from financeiro.services import (
     cancelar_reservas_vale_troca_venda,
     consultar_reservas_vale_troca_venda,
     consultar_vale_troca_online,
+    listar_vales_troca_online_cliente,
     reservar_vales_troca_venda,
 )
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
@@ -325,6 +326,18 @@ class HubValeTrocaConsultarView(APIView):
         except ValeTrocaErro as exc:
             return _vale_troca_error_response(exc)
         return Response({"vale_troca": vale}, status=status.HTTP_200_OK)
+
+
+class HubValeTrocaDisponiveisView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            vales = listar_vales_troca_online_cliente(request.sysvar_hub, request.query_params.get("cliente_id"))
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"vales_troca": vales}, status=status.HTTP_200_OK)
 
 
 class HubValeTrocaReservarVendaView(APIView):

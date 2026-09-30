@@ -4,6 +4,8 @@ O Vale-Troca online e oficial tem a Central como autoridade de saldo. O Hub cons
 
 O uso exige venda com cliente identificado e bloqueia Consumidor Final. A Central valida tenant, cliente, status aberto, validade e saldo disponivel. O saldo disponivel e calculado como saldo contabil do Vale menos reservas em status `RESERVADA`.
 
+Quando a Central estiver online, ela tambem e a autoridade exclusiva da lista de Vales-Troca disponiveis do cliente no PDV. O Hub deve solicitar a lista pelo endpoint autenticado de Hub e nao usar espelho local como fonte operacional da lista online.
+
 ## Documento comercial
 
 O documento comercial do Vale-Troca segue exatamente `VT` + 7 digitos numericos, por exemplo `VT0000001`. A sequencia e por empresa/tenant, nao por loja. A loja de origem continua registrada no Vale, mas nao faz parte do numero comercial.
