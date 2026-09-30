@@ -28,6 +28,11 @@ from hub.views import (
     HubSincronizacaoTodasView,
     HubSyncPushView,
     HubTiposDespesaPdvView,
+    HubValeTrocaCancelarReservaView,
+    HubValeTrocaCancelarVendaView,
+    HubValeTrocaConsultarView,
+    HubValeTrocaReservarVendaView,
+    HubValeTrocaReservasVendaView,
     HubVendedoresView,
 )
 
@@ -72,6 +77,11 @@ urlpatterns = [
     path("devolucoes/clientes/<int:cliente_id>/vendas/", HubDevolucaoClienteVendasView.as_view(), name="hub-devolucao-cliente-vendas"),
     path("devolucoes/finalizar/", HubDevolucaoFinalizarOnlineView.as_view(), name="hub-devolucao-finalizar"),
     path("formas-pagamento/", HubFormasPagamentoView.as_view(), name="hub-formas-pagamento"),
+    path("vales-troca/consultar/", HubValeTrocaConsultarView.as_view(), name="hub-vale-troca-consultar"),
+    path("vales-troca/reservar-venda/", HubValeTrocaReservarVendaView.as_view(), name="hub-vale-troca-reservar-venda"),
+    path("vales-troca/reservas/<uuid:venda_uuid>/", HubValeTrocaReservasVendaView.as_view(), name="hub-vale-troca-reservas-venda"),
+    path("vales-troca/cancelar-reserva/", HubValeTrocaCancelarReservaView.as_view(), name="hub-vale-troca-cancelar-reserva"),
+    path("vales-troca/cancelar-venda/", HubValeTrocaCancelarVendaView.as_view(), name="hub-vale-troca-cancelar-venda"),
     path("heartbeat/", HubHeartbeatView.as_view(), name="hub-heartbeat"),
     path("comandos/<int:comando_id>/resultado/", HubComandoAdministrativoResultadoView.as_view(), name="hub-comando-resultado"),
     path("sincronizacoes/", HubSincronizacaoPainelView.as_view(), name="hub-sincronizacoes"),

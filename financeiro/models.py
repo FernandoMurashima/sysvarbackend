@@ -378,6 +378,43 @@ class ValeTrocaMovimento(models.Model):
         return f'{self.vale_id} - {self.tipo} - {self.valor}'
 
 
+class ValeTrocaReserva(models.Model):
+    STATUS_RESERVADA = 'RESERVADA'
+    STATUS_CONSUMIDA = 'CONSUMIDA'
+    STATUS_CANCELADA = 'CANCELADA'
+    STATUS_CHOICES = [
+        (STATUS_RESERVADA, 'Reservada'),
+        (STATUS_CONSUMIDA, 'Consumida'),
+        (STATUS_CANCELADA, 'Cancelada'),
+    ]
+
+    Idvaletrocareserva = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='vales_troca_reservas', db_index=True)
+    hub = models.ForeignKey('hub.SysvarHub', on_delete=models.PROTECT, related_name='vales_troca_reservas', db_index=True)
+    venda_uuid = models.UUIDField(db_index=True)
+    operacao_uuid = models.UUIDField(db_index=True)
+    vale = models.ForeignKey(ValeTroca, on_delete=models.PROTECT, related_name='reservas')
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_RESERVADA, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'financeiro_vale_troca_reserva'
+        ordering = ['-criado_em', '-Idvaletrocareserva']
+        constraints = [
+            models.UniqueConstraint(fields=['hub', 'venda_uuid', 'operacao_uuid'], name='uq_vale_reserva_operacao_hub'),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'status'], name='ix_vale_res_emp_status'),
+            models.Index(fields=['vale', 'status'], name='ix_vale_res_vale_status'),
+            models.Index(fields=['hub', 'venda_uuid'], name='ix_vale_res_hub_venda'),
+        ]
+
+    def __str__(self):
+        return f'{self.vale_id} - {self.venda_uuid} - {self.valor} - {self.status}'
+
+
 def saldo_vale_troca_cliente(cliente_id, ate=None, empresa=None):
     hoje = ate or timezone.localdate()
     qs = ValeTroca.objects.filter(cliente_id=cliente_id, status=ValeTroca.STATUS_ABERTO, saldo__gt=0)

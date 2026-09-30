@@ -15,6 +15,14 @@ from rest_framework.views import APIView
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.services import (
+    ValeTrocaErro,
+    cancelar_reserva_vale_troca,
+    cancelar_reservas_vale_troca_venda,
+    consultar_reservas_vale_troca_venda,
+    consultar_vale_troca_online,
+    reservar_vales_troca_venda,
+)
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet, money
 from hub.administracao import (
@@ -301,6 +309,80 @@ class HubDevolucaoClienteVendasView(APIView):
                 }
             )
         return Response({"cliente": {"id": cliente.pk, "nome": cliente.nome_cliente, "documento": cliente.documento or cliente.cpf or ""}, "vendas": payload}, status=status.HTTP_200_OK)
+
+
+def _vale_troca_error_response(exc):
+    return Response({"detail": str(exc)}, status=getattr(exc, "status_code", status.HTTP_409_CONFLICT))
+
+
+class HubValeTrocaConsultarView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            vale = consultar_vale_troca_online(request.sysvar_hub, request.query_params.get("documento"))
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"vale_troca": vale}, status=status.HTTP_200_OK)
+
+
+class HubValeTrocaReservarVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reservas = reservar_vales_troca_venda(
+                request.sysvar_hub,
+                request.data.get("venda_uuid"),
+                request.data.get("cliente_id") or request.data.get("cliente_retaguarda_id"),
+                request.data.get("pagamentos") or [],
+            )
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"reservas": reservas}, status=status.HTTP_200_OK)
+
+
+class HubValeTrocaReservasVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, venda_uuid):
+        try:
+            reservas = consultar_reservas_vale_troca_venda(request.sysvar_hub, venda_uuid)
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"reservas": reservas}, status=status.HTTP_200_OK)
+
+
+class HubValeTrocaCancelarReservaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reserva = cancelar_reserva_vale_troca(
+                request.sysvar_hub,
+                reserva_id=request.data.get("reserva_id"),
+                venda_uuid=request.data.get("venda_uuid"),
+                operacao_uuid=request.data.get("operacao_uuid"),
+            )
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"reserva": reserva}, status=status.HTTP_200_OK)
+
+
+class HubValeTrocaCancelarVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reservas = cancelar_reservas_vale_troca_venda(request.sysvar_hub, request.data.get("venda_uuid"))
+        except ValeTrocaErro as exc:
+            return _vale_troca_error_response(exc)
+        return Response({"reservas": reservas}, status=status.HTTP_200_OK)
 
 
 class HubDevolucaoFinalizarOnlineView(APIView):
