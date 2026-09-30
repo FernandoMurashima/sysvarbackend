@@ -206,18 +206,21 @@ class VendaDevolucaoItem(models.Model):
 class NFeDevolucao(models.Model):
     class Status(models.TextChoices):
         DIGITADA = "DIGITADA", "Digitada"
+        PENDENTE_TRANSMISSAO = "PENDENTE_TRANSMISSAO", "Pendente transmissao"
         EMITINDO = "EMITINDO", "Emitindo"
         AUTORIZADA = "AUTORIZADA", "Autorizada"
         REJEITADA = "REJEITADA", "Rejeitada"
+        ERRO_GERACAO = "ERRO_GERACAO", "Erro geracao"
         CANCELADA = "CANCELADA", "Cancelada"
 
     devolucao = models.OneToOneField(VendaDevolucao, on_delete=models.PROTECT, related_name="nfe_devolucao")
+    loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="nfes_devolucao")
     nfce_origem = models.ForeignKey("fiscal.NFCe", on_delete=models.PROTECT, null=True, blank=True, related_name="nfes_devolucao")
     ambiente = models.CharField(max_length=12, default="HOMOLOGACAO")
     modelo = models.CharField(max_length=2, default="55")
     serie = models.PositiveIntegerField(default=1)
     numero = models.PositiveIntegerField(db_index=True)
-    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DIGITADA, db_index=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.DIGITADA, db_index=True)
     chave_acesso = models.CharField(max_length=44, blank=True, default="", db_index=True)
     protocolo = models.CharField(max_length=30, blank=True, default="")
     xml = models.TextField(blank=True, default="")
@@ -231,11 +234,12 @@ class NFeDevolucao(models.Model):
         db_table = "fiscal_nfe_devolucao"
         ordering = ["-numero"]
         constraints = [
-            models.UniqueConstraint(fields=["serie", "numero"], name="uq_nfe_devolucao_serie_numero"),
+            models.UniqueConstraint(fields=["loja", "ambiente", "modelo", "serie", "numero"], name="uq_nfe_dev_loja_amb_mod_serie_num"),
         ]
         indexes = [
             models.Index(fields=["status"], name="ix_nfe_devolucao_status"),
             models.Index(fields=["chave_acesso"], name="ix_nfe_devolucao_chave"),
+            models.Index(fields=["loja", "status"], name="ix_nfe_dev_loja_status"),
         ]
 
     def __str__(self) -> str:

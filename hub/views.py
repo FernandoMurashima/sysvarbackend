@@ -398,7 +398,14 @@ def _serializar_devolucao_online_resultado(devolucao, mapeamento):
                 "status": vale.status,
                 "validade": vale.validade,
             } if vale else None,
-            "fiscal": {"status": nfe.status, "numero": nfe.numero, "mensagem": nfe.retorno_mensagem} if nfe else None,
+            "fiscal": {
+                "status": nfe.status,
+                "modelo": nfe.modelo,
+                "serie": nfe.serie,
+                "numero": nfe.numero,
+                "chave_acesso": nfe.chave_acesso,
+                "mensagem": nfe.retorno_mensagem,
+            } if nfe else None,
             "itens": [
                 {
                     "venda_item": item.venda_item_id,

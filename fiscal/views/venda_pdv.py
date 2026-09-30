@@ -41,6 +41,7 @@ from fiscal.models import (
 )
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
+from fiscal.services.nfe_devolucao import registrar_nfe_devolucao
 from produto.models import Estoque, EstoqueMovimentacao, Ncm, Produto, ProdutoDetalhe
 from cadastros.models import Cliente, Funcionarios
 from cadastros.services import ClientePadraoService
@@ -2037,17 +2038,4 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             restante = money(restante - abatimento)
 
     def _registrar_nfe_devolucao(self, devolucao: VendaDevolucao):
-        nfce_origem = getattr(devolucao.venda, "nfce", None)
-        nfe = NFeDevolucao.objects.create(
-            devolucao=devolucao,
-            nfce_origem=nfce_origem,
-            numero=_proximo_numero_nfe_devolucao(),
-            status=NFeDevolucao.Status.DIGITADA,
-        )
-        nfe.xml = (
-            f"<NFeDevolucao ambiente=\"homologacao\" devolucao=\"{devolucao.documento}\" "
-            f"venda_origem=\"{devolucao.venda.documento}\" nfce_origem=\"{getattr(nfce_origem, 'chave_acesso', '')}\" />"
-        )
-        nfe.retorno_codigo = "000"
-        nfe.retorno_mensagem = "NF-e de devolução digitada. Aguardando integração fiscal para autorização."
-        nfe.save(update_fields=["xml", "retorno_codigo", "retorno_mensagem", "atualizado_em"])
+        registrar_nfe_devolucao(devolucao)
