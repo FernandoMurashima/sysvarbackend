@@ -17,6 +17,7 @@ from accounts.permissions import HasEmpresaModulo, HasModuleRole
 from accounts.services.effective_access import EffectiveAccessService
 from cadastros.models import Loja
 from fiscal.models import Cfop, NotaFiscalSaida, NotaFiscalSaidaItem
+from fiscal.services.nfe_sequence import reservar_proximo_numero_nfe
 
 from .models import (
     ConfigEan, Ncm, Grade, Tamanho, Cor, Material, Colecao, Unidade,
@@ -2017,11 +2018,8 @@ class OrdemProducaoViewSet(BaseViewSet):
         return cfop or '5152'
 
     def _proximo_numero_nfe(self, loja_origem):
-        serie = str(loja_origem.serie_nfe or 1)
-        numero = str(loja_origem.proximo_numero_nfe or 1)
-        loja_origem.proximo_numero_nfe = int(loja_origem.proximo_numero_nfe or 1) + 1
-        loja_origem.save(update_fields=['proximo_numero_nfe'])
-        return serie, numero
+        serie, numero, _, _ = reservar_proximo_numero_nfe(loja_origem)
+        return str(serie), str(numero)
 
     def _criar_nfe_distribuicao(self, ordem, loja_origem, loja_destino, documento, itens, request):
         existente = NotaFiscalSaida.objects.filter(

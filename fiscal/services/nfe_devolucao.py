@@ -1,35 +1,47 @@
 from decimal import Decimal
 from xml.sax.saxutils import escape
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
-from cadastros.models import Loja
 from fiscal.models import NFeDevolucao, VendaDevolucao
 from fiscal.models.venda_pdv import money
+from fiscal.services.nfe_sequence import reservar_proximo_numero_nfe
 
 
 def registrar_nfe_devolucao(devolucao: VendaDevolucao) -> NFeDevolucao:
-    existente = NFeDevolucao.objects.filter(devolucao=devolucao).first()
-    if existente:
-        return existente
+    with transaction.atomic():
+        devolucao = (
+            VendaDevolucao.objects.select_for_update()
+            .select_related("loja", "venda")
+            .get(pk=devolucao.pk)
+        )
+        existente = NFeDevolucao.objects.filter(devolucao=devolucao).first()
+        if existente:
+            return existente
 
-    loja = Loja.objects.select_for_update().get(pk=devolucao.loja_id)
-    serie = int(loja.serie_nfe or 1)
-    numero = int(loja.proximo_numero_nfe or 1)
-    loja.proximo_numero_nfe = numero + 1
-    loja.save(update_fields=["proximo_numero_nfe"])
-
-    nfce_origem = getattr(devolucao.venda, "nfce", None)
-    nfe = NFeDevolucao.objects.create(
-        devolucao=devolucao,
-        loja=loja,
-        nfce_origem=nfce_origem,
-        ambiente=loja.ambiente_fiscal or "HOMOLOGACAO",
-        modelo="55",
-        serie=serie,
-        numero=numero,
-        status=NFeDevolucao.Status.DIGITADA,
-    )
+        nfce_origem = getattr(devolucao.venda, "nfce", None)
+        nfe = None
+        for _ in range(3):
+            serie, numero, ambiente, loja = reservar_proximo_numero_nfe(devolucao.loja)
+            try:
+                with transaction.atomic():
+                    nfe = NFeDevolucao.objects.create(
+                        devolucao=devolucao,
+                        loja=loja,
+                        nfce_origem=nfce_origem,
+                        ambiente=ambiente,
+                        modelo="55",
+                        serie=serie,
+                        numero=numero,
+                        status=NFeDevolucao.Status.DIGITADA,
+                    )
+                break
+            except IntegrityError:
+                if NFeDevolucao.objects.filter(devolucao=devolucao).exists():
+                    return NFeDevolucao.objects.get(devolucao=devolucao)
+                continue
+        if nfe is None:
+            raise ValueError("Nao foi possivel reservar numero fiscal unico para a NF-e de devolucao.")
     return processar_nfe_devolucao(nfe.pk)
 
 
