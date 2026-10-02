@@ -18,4 +18,4 @@ Reservas sao criadas em lote por venda para evitar uso simultaneo em lojas difer
 
 Fiscalmente, o Hub envia Vale-Troca como `tPag 05` Credito Loja. Financeiro e caixa tratam o instrumento como credito da cliente: ele nao gera numerario e nao cria novo contas a receber para a parcela paga com o proprio credito.
 
-A contingencia offline de Vale oficial da Central nao faz parte desta etapa. O espelho local `ValeTrocaHub`/`ValeTrocaMovimentoHub` permanece preservado para vales locais ainda nao sincronizados.
+A contingencia offline nao gera Vale oficial no Hub. O Hub pode criar Credito provisorio local vinculado a uma devolucao offline e sincronizar `DEVOLUCAO_FINALIZADA`; somente a Central valida a operacao, materializa a devolucao e emite o proximo `VTxxxxxxx`. Vendas dependentes do credito provisorio devem aguardar esse mapeamento antes de consumir o Vale oficial.

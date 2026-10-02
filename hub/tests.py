@@ -3304,7 +3304,9 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(VendaDevolucao.objects.count(), 1)
         self.assertEqual(VendaDevolucaoItem.objects.count(), 1)
         self.assertEqual(HubDevolucaoMapeamento.objects.count(), 1)
-        self.assertTrue(ValeTroca.objects.filter(documento="VT-HUB-TESTE", saldo=Decimal("10.00")).exists())
+        self.assertFalse(ValeTroca.objects.filter(documento="VT-HUB-TESTE").exists())
+        self.assertTrue(ValeTroca.objects.filter(documento="VT0000001", saldo=Decimal("10.00")).exists())
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["vale_documento"], "VT0000001")
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("5.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
@@ -3313,7 +3315,7 @@ class SysvarHubSyncPushApiTests(TestCase):
 
         self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.assertEqual(VendaDevolucao.objects.count(), 1)
-        self.assertEqual(ValeTroca.objects.filter(documento="VT-HUB-TESTE").count(), 1)
+        self.assertEqual(ValeTroca.objects.filter(documento="VT0000001").count(), 1)
         self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
 
     def test_devolucao_quantidade_acima_do_disponivel_falha(self):

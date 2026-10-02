@@ -242,6 +242,11 @@ class HubSyncProcessor:
         existente = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
         if existente:
             return {"venda_retaguarda_id": existente.venda_id, "documento": existente.documento}
+        deps = ((payload.get("dependencias") or {}).get("devolucoes_uuid") or [])
+        for dep in deps:
+            dep_uuid = uuid_value(dep, "devolucao dependente")
+            if not HubDevolucaoMapeamento.objects.filter(hub=self.hub, devolucao_uuid=dep_uuid).exists():
+                raise HubSyncError("Venda depende de devolução provisória ainda não materializada.")
 
         caixa = self._caixa(payload.get("caixa_retaguarda_id"))
         cliente = self._cliente_venda(payload)
@@ -326,7 +331,7 @@ class HubSyncProcessor:
 
     def _devolucao_finalizada(self, payload):
         devolucao_uuid = uuid_value(payload.get("devolucao_uuid"), "devolucao_uuid")
-        venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid")
+        venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid") if payload.get("venda_uuid") else None
         existente = HubDevolucaoMapeamento.objects.filter(hub=self.hub, devolucao_uuid=devolucao_uuid).first()
         if existente:
             return {
@@ -334,18 +339,9 @@ class HubSyncProcessor:
                 "documento": existente.documento,
                 "vale_documento": existente.vale_documento,
             }
-        venda_mapeada = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
-        if not venda_mapeada:
-            raise HubSyncError("Venda origem da devolução ainda não foi sincronizada.")
-        venda = (
-            VendaPdv.objects.select_for_update()
-            .select_related("loja", "cliente", "caixa")
-            .prefetch_related("itens", "devolucoes__itens", "pagamentos")
-            .filter(pk=venda_mapeada.venda_id, empresa=self.empresa, loja=self.loja, status=VendaPdv.Status.FINALIZADA)
-            .first()
-        )
+        venda = self._venda_origem_devolucao(payload, venda_uuid)
         if not venda:
-            raise HubSyncError("Venda origem da devolução não pertence ao Hub.")
+            raise HubSyncError("Venda origem da devolução não encontrada para validação.")
 
         view = VendaDevolucaoViewSet()
         itens_por_sku = {item.sku_id: item for item in venda.itens.all()}
@@ -386,20 +382,8 @@ class HubSyncProcessor:
 
         view._registrar_credito_cliente(devolucao)
         vale_payload = payload.get("vale_troca") or {}
-        vale_documento = str(vale_payload.get("documento") or "").strip()
-        if vale_documento:
-            vale = ValeTroca.objects.select_for_update().filter(devolucao=devolucao).first()
-            if vale and not ValeTroca.objects.filter(documento=vale_documento).exclude(pk=vale.pk).exists():
-                antigo = vale.documento
-                vale.documento = vale_documento[:50]
-                vale.observacao = f"Vale-troca Hub {vale_documento} gerado pela devolução {devolucao.documento}"
-                vale.save(update_fields=["documento", "observacao", "atualizado_em"])
-                ValeTrocaMovimento.objects.filter(vale=vale, observacao__icontains=antigo).update(
-                    observacao=f"Crédito por devolução {devolucao.documento} da venda {venda.documento}"
-                )
-        else:
-            vale = ValeTroca.objects.filter(devolucao=devolucao).first()
-            vale_documento = vale.documento if vale else ""
+        vale = ValeTroca.objects.filter(devolucao=devolucao).first()
+        vale_documento = vale.documento if vale else ""
         view._estornar_financeiro(devolucao)
         view._estornar_cmv(devolucao)
         view._registrar_nfe_devolucao(devolucao)
@@ -407,7 +391,7 @@ class HubSyncProcessor:
             hub=self.hub,
             devolucao_uuid=devolucao_uuid,
             devolucao=devolucao,
-            venda_uuid=venda_uuid,
+            venda_uuid=venda_uuid or uuid.uuid5(uuid.NAMESPACE_URL, f"central-venda:{venda.pk}"),
             documento=documento,
             vale_documento=vale_documento,
         )
@@ -415,8 +399,37 @@ class HubSyncProcessor:
             "devolucao_retaguarda_id": devolucao.pk,
             "documento": documento,
             "vale_documento": vale_documento,
+            "vale_retaguarda_id": vale.pk if vale else None,
             "valor_total": str(devolucao.credito_cliente),
         }
+
+    def _venda_origem_devolucao(self, payload, venda_uuid):
+        if venda_uuid:
+            venda_mapeada = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
+            if venda_mapeada:
+                return (
+                    VendaPdv.objects.select_for_update()
+                    .select_related("loja", "cliente", "caixa")
+                    .prefetch_related("itens", "devolucoes__itens", "pagamentos")
+                    .filter(pk=venda_mapeada.venda_id, empresa=self.empresa, status=VendaPdv.Status.FINALIZADA)
+                    .first()
+                )
+        documento = str(payload.get("documento_venda") or (payload.get("dados_origem") or {}).get("documento_original") or "").strip()
+        loja_origem_id = payload.get("loja_origem_retaguarda_id") or (payload.get("dados_origem") or {}).get("loja_origem_retaguarda_id")
+        qs = (
+            VendaPdv.objects.select_for_update()
+            .select_related("loja", "cliente", "caixa")
+            .prefetch_related("itens", "devolucoes__itens", "pagamentos")
+            .filter(empresa=self.empresa, status=VendaPdv.Status.FINALIZADA)
+        )
+        if loja_origem_id:
+            qs = qs.filter(loja_id=loja_origem_id)
+        if documento:
+            qs = qs.filter(models_q_venda_documento(documento))
+        cliente_id = payload.get("cliente_retaguarda_id")
+        if cliente_id:
+            qs = qs.filter(cliente_id=cliente_id)
+        return qs.order_by("-data_venda", "-id").first()
 
     def _normalizar_item_venda(self, item):
         produto_id = item.get("produto_retaguarda_id")
@@ -733,3 +746,13 @@ def models_q_evento(evento_uuid, chave):
     from django.db.models import Q
 
     return Q(evento_uuid=evento_uuid) | Q(chave_idempotencia=chave)
+
+
+def models_q_venda_documento(documento):
+    from django.db.models import Q
+
+    termo = str(documento or "").strip()
+    filtros = Q(documento=termo) | Q(nfce__chave_acesso=termo) | Q(nfce__protocolo=termo)
+    if termo.isdecimal():
+        filtros |= Q(nfce__numero=int(termo))
+    return filtros
