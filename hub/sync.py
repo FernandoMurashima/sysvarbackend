@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from decimal import Decimal
 
@@ -30,6 +31,7 @@ from hub.models import (
     HubMovimentoCaixaRecebido,
     HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
+    HubVendaFaixaNumeracao,
     HubVendaMapeamento,
 )
 
@@ -51,6 +53,8 @@ STATUS_NFCE_GERADOS = {
     NFCe.Status.CONTINGENCIA,
     NFCe.Status.AUTORIZADA,
 }
+
+DOCUMENTO_VENDA_RE = re.compile(r"^VE(?P<loja>\d{3})(?P<numero>\d{7})$")
 
 
 def payload_hash(payload):
@@ -253,14 +257,13 @@ class HubSyncProcessor:
         vendedor = self._vendedor(payload.get("vendedor_retaguarda_id"))
         if not payload.get("itens"):
             raise HubSyncError("Inclua ao menos um item na venda.")
-        documento = f"HUB-{self.hub.pk}-{venda_uuid.hex[:20]}"
-        if VendaPdv.objects.filter(documento=documento).exists():
-            venda = VendaPdv.objects.get(documento=documento)
-            HubVendaMapeamento.objects.get_or_create(hub=self.hub, venda_uuid=venda_uuid, defaults={"venda": venda, "documento": documento})
-            pagamentos_retry = self._pagamentos_vale_troca_reserva(payload.get("pagamentos") or [])
-            if pagamentos_retry:
-                consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_retry)
-            return {"venda_retaguarda_id": venda.pk, "documento": documento}
+        documento, _numero_documento = self._validar_documento_venda_hub(payload.get("documento"))
+        documento_mapeado = HubVendaMapeamento.objects.filter(documento=documento).exclude(venda_uuid=venda_uuid).first()
+        if documento_mapeado:
+            raise HubSyncError("Documento comercial da venda ja vinculado a outro venda_uuid.")
+        venda_documento = VendaPdv.objects.filter(documento=documento).first()
+        if venda_documento:
+            raise HubSyncError("Documento comercial da venda ja existe na Central para outro venda_uuid.")
 
         view = VendaPdvViewSet()
         data_venda = parse_datetime(payload.get("finalizado_em") or payload.get("data_hora") or payload.get("ocorrido_em"), "data da venda") or timezone.now()
@@ -328,6 +331,23 @@ class HubSyncProcessor:
         view._registrar_comissao(venda)
         HubVendaMapeamento.objects.create(hub=self.hub, venda_uuid=venda_uuid, venda=venda, documento=documento)
         return {"venda_retaguarda_id": venda.pk, "documento": documento, "total": str(venda.total)}
+
+    def _validar_documento_venda_hub(self, documento):
+        documento = str(documento or "").strip()
+        match = DOCUMENTO_VENDA_RE.fullmatch(documento)
+        if not match:
+            raise HubSyncError("Documento comercial da venda deve estar no formato VE + loja + sequencial.")
+        loja_id = int(match.group("loja"))
+        numero = int(match.group("numero"))
+        if loja_id <= 0 or loja_id > 999:
+            raise HubSyncError("Loja do documento comercial da venda invalida.")
+        if loja_id != self.loja.pk:
+            raise HubSyncError("Documento comercial da venda pertence a outra loja.")
+        if numero <= 0 or numero > 9999999:
+            raise HubSyncError("Sequencial do documento comercial da venda invalido.")
+        if not HubVendaFaixaNumeracao.objects.filter(hub=self.hub, inicio__lte=numero, fim__gte=numero).exists():
+            raise HubSyncError("Documento comercial da venda nao pertence a faixa reservada para este Hub.")
+        return documento, numero
 
     def _devolucao_finalizada(self, payload):
         devolucao_uuid = uuid_value(payload.get("devolucao_uuid"), "devolucao_uuid")

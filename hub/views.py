@@ -16,14 +16,18 @@ from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from financeiro.services import (
+    DocumentoSequenciaErro,
     ValeTrocaErro,
     cancelar_reserva_vale_troca,
     cancelar_reservas_vale_troca_venda,
     consultar_reservas_vale_troca_venda,
     consultar_vale_troca_online,
+    escopo_loja,
     listar_vales_troca_online_cliente,
+    reservar_faixa_documento,
     reservar_vales_troca_venda,
 )
+from financeiro.models import SequenciaDocumento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet, money
 from hub.administracao import (
@@ -36,7 +40,7 @@ from hub.administracao import (
 )
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
-from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, HubVendaFaixaNumeracao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
@@ -54,6 +58,7 @@ from hub.sync import HubSyncProcessor
 from produto.models import ProdutoImagem
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
+VENDA_HUB_TAMANHO_FAIXA_PADRAO = 100
 
 
 def _client_ip(request):
@@ -879,6 +884,37 @@ class HubSyncPushView(APIView):
             raise ValidationError({"eventos": "Informe uma lista de eventos."})
         resultados = HubSyncProcessor(request.sysvar_hub, request=request).processar_lote(eventos)
         return Response({"resultados": resultados}, status=status.HTTP_200_OK)
+
+
+class HubVendaFaixaNumeracaoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        hub = request.sysvar_hub
+        loja = hub.loja
+        empresa = loja.empresa
+        if loja.pk <= 0 or loja.pk > 999:
+            return Response({"detail": "Loja invalida para numeracao de venda do Hub."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            inicio, fim = reservar_faixa_documento(
+                empresa,
+                SequenciaDocumento.TIPO_VENDA,
+                escopo_loja(loja.pk),
+                VENDA_HUB_TAMANHO_FAIXA_PADRAO,
+            )
+        except DocumentoSequenciaErro as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        HubVendaFaixaNumeracao.objects.create(hub=hub, inicio=inicio, fim=fim)
+        return Response(
+            {
+                "loja_id": loja.pk,
+                "inicio": inicio,
+                "fim": fim,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class HubBootstrapView(APIView):

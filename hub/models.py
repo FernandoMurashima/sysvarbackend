@@ -266,6 +266,26 @@ class HubVendaMapeamento(models.Model):
         ]
 
 
+class HubVendaFaixaNumeracao(models.Model):
+    hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="faixas_numeracao_venda")
+    inicio = models.PositiveIntegerField()
+    fim = models.PositiveIntegerField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["hub_id", "inicio"]
+        constraints = [
+            models.UniqueConstraint(fields=["hub", "inicio", "fim"], name="uq_hub_venda_faixa_intervalo"),
+            models.CheckConstraint(check=models.Q(inicio__lte=models.F("fim")), name="ck_hub_venda_faixa_ordem"),
+        ]
+        indexes = [
+            models.Index(fields=["hub", "inicio", "fim"], name="ix_hub_venda_faixa_hub_int"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.hub_id} - {self.inicio}-{self.fim}"
+
+
 class HubNFCeMapeamento(models.Model):
     hub = models.ForeignKey(SysvarHub, on_delete=models.PROTECT, related_name="nfces_mapeadas")
     nfce_uuid = models.UUIDField()

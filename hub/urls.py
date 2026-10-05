@@ -35,6 +35,7 @@ from hub.views import (
     HubValeTrocaReservarVendaView,
     HubValeTrocaReservasVendaView,
     HubVendedoresView,
+    HubVendaFaixaNumeracaoView,
 )
 
 urlpatterns = [
@@ -91,6 +92,7 @@ urlpatterns = [
     path("sincronizacoes/todas/", HubSincronizacaoTodasView.as_view(), name="hub-sincronizacoes-todas"),
     path("sincronizacoes/<int:sincronizacao_id>/status/", HubSincronizacaoStatusView.as_view(), name="hub-sincronizacoes-status"),
     path("sync/push/", HubSyncPushView.as_view(), name="hub-sync-push"),
+    path("vendas/faixa-numeracao/", HubVendaFaixaNumeracaoView.as_view(), name="hub-vendas-faixa-numeracao"),
     path("operadores/", HubOperadoresView.as_view(), name="hub-operadores"),
     path("tipos-despesa-pdv/", HubTiposDespesaPdvView.as_view(), name="hub-tipos-despesa-pdv"),
     path("vendedores/", HubVendedoresView.as_view(), name="hub-vendedores"),
