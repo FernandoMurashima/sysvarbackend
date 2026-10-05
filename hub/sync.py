@@ -365,7 +365,11 @@ class HubSyncProcessor:
         if not venda:
             raise HubSyncError("Venda origem da devolução não encontrada para validação.")
         documento, _numero_documento = self._validar_documento_devolucao_hub(payload.get("documento"))
-        documento_mapeado = HubDevolucaoMapeamento.objects.filter(documento=documento).exclude(devolucao_uuid=devolucao_uuid).first()
+        documento_mapeado = (
+            HubDevolucaoMapeamento.objects.filter(devolucao__empresa=self.empresa, documento=documento)
+            .exclude(devolucao_uuid=devolucao_uuid)
+            .first()
+        )
         if documento_mapeado:
             raise HubSyncError("Documento comercial da devolucao ja vinculado a outro devolucao_uuid.")
         if VendaDevolucao.objects.filter(empresa=self.empresa, documento=documento).exists():
