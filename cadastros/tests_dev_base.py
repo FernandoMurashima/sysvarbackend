@@ -1,4 +1,5 @@
 from decimal import Decimal
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -12,15 +13,103 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, Receber
+from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.services import escopo_empresa, escopo_loja
 from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
-from fiscal.models.venda_pdv import VendaPdv
+from fiscal.models.venda_pdv import NFCe, NFeDevolucao, VendaDevolucao, VendaPdv
+from fiscal.services.documentos import reservar_documento_devolucao
+from fiscal.services.nfe_devolucao import registrar_nfe_devolucao
+from fiscal.views.venda_pdv import reservar_documento_venda
+from hub.models import HubClienteMapeamento, HubDevolucaoFaixaNumeracao, HubDevolucaoMapeamento, HubEventoRecebido, HubNFCeMapeamento, HubVendaFaixaNumeracao, HubVendaMapeamento, SysvarHub
 from produto.models import ConfigEan, Estoque, EstoqueMovimentacao, FichaTecnica, FichaTecnicaItem, Produto, ProdutoDetalhe, ProdutoFornecedor, ProdutoUsoConsumoEstoque, ProdutoUsoConsumoMovimentacao, Promocao
 from sysvar_devtools.dev_base import SysvarDevBaseService
 
 
 class SysvarDevBaseTests(TransactionTestCase):
+    def _runtime_models_numeracao(self):
+        return [
+            SequenciaDocumento,
+            VendaPdv,
+            VendaDevolucao,
+            NFCe,
+            NFeDevolucao,
+            ValeTroca,
+            ValeTrocaMovimento,
+            ValeTrocaReserva,
+            SysvarHub,
+            HubVendaFaixaNumeracao,
+            HubDevolucaoFaixaNumeracao,
+            HubVendaMapeamento,
+            HubDevolucaoMapeamento,
+            HubNFCeMapeamento,
+            HubClienteMapeamento,
+            HubEventoRecebido,
+        ]
+
+    def _assert_sem_runtime_numeracao(self):
+        for model in self._runtime_models_numeracao():
+            self.assertEqual(model.objects.count(), 0, model.__name__)
+
+    def _objetos_oficiais_minimos(self):
+        empresa = Empresa.objects.get(documento="42000001000186")
+        loja = Loja.objects.filter(empresa=empresa).order_by("id").first()
+        cliente = empresa.clientes.order_by("id").first()
+        vendedor = empresa.funcionarios.order_by("id").first()
+        self.assertIsNotNone(loja)
+        self.assertIsNotNone(cliente)
+        self.assertIsNotNone(vendedor)
+        return empresa, loja, cliente, vendedor
+
+    def _criar_runtime_numeracao_representativo(self):
+        empresa, loja, cliente, vendedor = self._objetos_oficiais_minimos()
+        SequenciaDocumento.objects.create(
+            empresa=empresa,
+            tipo_documento=SequenciaDocumento.TIPO_VENDA,
+            escopo=escopo_loja(loja.pk),
+            proximo_numero=10,
+        )
+        SequenciaDocumento.objects.create(
+            empresa=empresa,
+            tipo_documento=SequenciaDocumento.TIPO_DEVOLUCAO,
+            escopo=escopo_empresa(),
+            proximo_numero=20,
+        )
+        hub = SysvarHub.objects.create(loja=loja, nome="Hub runtime DEV")
+        HubVendaFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=100)
+        HubDevolucaoFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=100)
+        HubClienteMapeamento.objects.create(hub=hub, cliente_uuid=uuid.uuid4(), cliente=cliente)
+        venda = VendaPdv.objects.create(
+            empresa=empresa,
+            loja=loja,
+            cliente=cliente,
+            vendedor=vendedor,
+            documento=f"VE{loja.pk:03d}0000001",
+            forma_pagamento="DINHEIRO",
+            subtotal=Decimal("10.00"),
+            total=Decimal("10.00"),
+        )
+        devolucao = VendaDevolucao.objects.create(
+            empresa=empresa,
+            venda=venda,
+            loja=loja,
+            cliente=cliente,
+            documento="DEV-0000001",
+            subtotal=Decimal("10.00"),
+            credito_cliente=Decimal("10.00"),
+        )
+        nfce = NFCe.objects.create(venda=venda, loja=loja, serie=1, numero=1, status=NFCe.Status.GERADA, xml="<NFCe />")
+        NFeDevolucao.objects.create(devolucao=devolucao, loja=loja, nfce_origem=nfce, serie=1, numero=1, status=NFeDevolucao.Status.DIGITADA)
+        vale = ValeTroca.objects.create(empresa=empresa, cliente=cliente, loja=loja, devolucao=devolucao, documento="VT0000001", valor_original=Decimal("10.00"), saldo=Decimal("10.00"))
+        ValeTrocaMovimento.objects.create(vale=vale, tipo=ValeTrocaMovimento.TIPO_CREDITO, valor=Decimal("10.00"), saldo_apos=Decimal("10.00"))
+        venda_uuid = uuid.uuid4()
+        devolucao_uuid = uuid.uuid4()
+        HubVendaMapeamento.objects.create(hub=hub, venda_uuid=venda_uuid, venda=venda, documento=venda.documento)
+        HubDevolucaoMapeamento.objects.create(hub=hub, devolucao_uuid=devolucao_uuid, devolucao=devolucao, venda_uuid=venda_uuid, documento=devolucao.documento, vale_documento=vale.documento)
+        HubNFCeMapeamento.objects.create(hub=hub, nfce_uuid=uuid.uuid4(), nfce=nfce, venda_uuid=venda_uuid, ultima_versao_evento=1)
+        ValeTrocaReserva.objects.create(empresa=empresa, hub=hub, venda_uuid=uuid.uuid4(), operacao_uuid=uuid.uuid4(), vale=vale, valor=Decimal("5.00"))
+        HubEventoRecebido.objects.create(hub=hub, evento_uuid=uuid.uuid4(), chave_idempotencia="runtime-dev", tipo="VENDA_FINALIZADA", payload_hash="a" * 64, payload={})
+
     def test_reset_bloqueia_ambiente_producao(self):
         service = SysvarDevBaseService()
         with override_settings(DEBUG=False, DATABASES={"default": {"ENGINE": "django.db.backends.mysql", "NAME": "sysvar_prod"}}):
@@ -49,6 +138,7 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(FichaTecnicaItem.objects.count(), 167)
         self.assertEqual(Promocao.objects.count(), 0)
         self.assertEqual(AuditLog.objects.count(), 0)
+        self._assert_sem_runtime_numeracao()
 
     def test_reset_idempotente_e_sem_operacional(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
@@ -60,6 +150,110 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(CashbackConfig.objects.count(), 1)
         for model in [EstoqueMovimentacao, ProdutoUsoConsumoMovimentacao, Requisicao, Cotacao, PedidoCompra, Distribuicao, MercadoriaTransito, MovimentacaoFinanceira, Pagar, Receber, AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, XmlFornecedorRecebido, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaTermo, RecebimentoMercadoriaEfetivacaoEstoque, NotaFiscalEntrada, NotaFiscalSaida, VendaPdv]:
             self.assertFalse(model.objects.exists(), model.__name__)
+        self._assert_sem_runtime_numeracao()
+
+    def test_reset_remove_estado_preexistente_da_nova_numeracao(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        self._criar_runtime_numeracao_representativo()
+        self.assertTrue(SequenciaDocumento.objects.exists())
+        self.assertTrue(HubVendaFaixaNumeracao.objects.exists())
+        self.assertTrue(HubDevolucaoFaixaNumeracao.objects.exists())
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        self._assert_sem_runtime_numeracao()
+        self.assertEqual(Empresa.objects.count(), 1)
+        self.assertEqual(Loja.objects.count(), 4)
+        self.assertEqual(ConfigFinanceira.objects.count(), 1)
+        self.assertEqual(CashbackConfig.objects.count(), 1)
+        report = SysvarDevBaseService().validate()
+        self.assertTrue(report.valid, report.problems)
+
+    def test_validate_rejeita_residuos_da_nova_numeracao(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa, loja, _cliente, _vendedor = self._objetos_oficiais_minimos()
+        SequenciaDocumento.objects.create(
+            empresa=empresa,
+            tipo_documento=SequenciaDocumento.TIPO_VENDA,
+            escopo=escopo_loja(loja.pk),
+            proximo_numero=2,
+        )
+
+        report = SysvarDevBaseService().validate()
+
+        self.assertFalse(report.valid)
+        self.assertIn("financeiro.SequenciaDocumento", ", ".join(report.problems))
+
+        SequenciaDocumento.objects.all().delete()
+        hub = SysvarHub.objects.create(loja=loja, nome="Hub validacao")
+        HubVendaFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=10)
+        HubDevolucaoFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=10)
+
+        report = SysvarDevBaseService().validate()
+
+        self.assertFalse(report.valid)
+        problemas = ", ".join(report.problems)
+        self.assertIn("hub.HubVendaFaixaNumeracao", problemas)
+        self.assertIn("hub.HubDevolucaoFaixaNumeracao", problemas)
+
+    def test_primeira_venda_apos_base_limpa_usa_funcao_canonica(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa, loja, _cliente, _vendedor = self._objetos_oficiais_minimos()
+
+        primeiro = reservar_documento_venda(empresa, loja)
+        segundo = reservar_documento_venda(empresa, loja)
+
+        self.assertEqual(primeiro, f"VE{loja.id:03d}0000001")
+        self.assertEqual(segundo, f"VE{loja.id:03d}0000002")
+        sequencia = SequenciaDocumento.objects.get(empresa=empresa, tipo_documento=SequenciaDocumento.TIPO_VENDA, escopo=escopo_loja(loja.pk))
+        self.assertEqual(sequencia.proximo_numero, 3)
+
+    def test_primeira_devolucao_apos_base_limpa_usa_funcao_canonica(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+
+        primeiro = reservar_documento_devolucao(empresa)
+        segundo = reservar_documento_devolucao(empresa)
+
+        self.assertEqual(primeiro, "DEV-0000001")
+        self.assertEqual(segundo, "DEV-0000002")
+        sequencia = SequenciaDocumento.objects.get(empresa=empresa, tipo_documento=SequenciaDocumento.TIPO_DEVOLUCAO, escopo=escopo_empresa())
+        self.assertEqual(sequencia.proximo_numero, 3)
+
+    def test_documentos_comerciais_independentes_das_numeracoes_fiscais(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa, loja, cliente, vendedor = self._objetos_oficiais_minimos()
+        documento_venda = reservar_documento_venda(empresa, loja)
+        venda = VendaPdv.objects.create(
+            empresa=empresa,
+            loja=loja,
+            cliente=cliente,
+            vendedor=vendedor,
+            documento=documento_venda,
+            forma_pagamento="DINHEIRO",
+            subtotal=Decimal("10.00"),
+            total=Decimal("10.00"),
+        )
+        nfce = NFCe.objects.create(venda=venda, loja=loja, serie=1, numero=1, status=NFCe.Status.GERADA, xml="<NFCe />")
+        documento_devolucao = reservar_documento_devolucao(empresa)
+        devolucao = VendaDevolucao.objects.create(
+            empresa=empresa,
+            venda=venda,
+            loja=loja,
+            cliente=cliente,
+            documento=documento_devolucao,
+            subtotal=Decimal("10.00"),
+            credito_cliente=Decimal("10.00"),
+        )
+
+        nfe = registrar_nfe_devolucao(devolucao)
+
+        self.assertEqual(venda.documento, f"VE{loja.id:03d}0000001")
+        self.assertEqual(nfce.numero, 1)
+        self.assertNotEqual(venda.documento, str(nfce.numero))
+        self.assertEqual(devolucao.documento, "DEV-0000001")
+        self.assertIsInstance(nfe.numero, int)
+        self.assertNotEqual(devolucao.documento, str(nfe.numero))
 
     def test_reset_recria_mapas_fiscais_das_formas_pdv(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)

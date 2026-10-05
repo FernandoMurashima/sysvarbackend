@@ -23,6 +23,8 @@ from hub.models import (
     HubDevolucaoMapeamento,
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
+    HubDevolucaoFaixaNumeracao,
+    HubVendaFaixaNumeracao,
     HubMovimentoCaixaRecebido,
     HubNFCeMapeamento,
     HubSessaoCaixaRecebida,
@@ -2685,9 +2687,13 @@ class SysvarHubSyncPushApiTests(TestCase):
         )
         self.sku = ProdutoDetalhe.objects.create(produto=self.produto, idcor=self.cor, idtamanho=self.tamanho)
         self.estoque = Estoque.objects.create(CodigodeBarra=self.sku.ean13, referencia=self.produto.referencia, Idloja=self.loja, Estoque=Decimal("5.000"))
+        self._documento_venda_seq = 1
 
     def _hub_autenticado(self, ativo=True):
         hub = SysvarHub.objects.create(loja=self.loja, hub_uuid="11111111-2222-4333-8444-555555555555", ativo=ativo)
+        if ativo:
+            HubVendaFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=9999999)
+            HubDevolucaoFaixaNumeracao.objects.create(hub=hub, inicio=1, fim=9999999)
         token = hub.gerar_token()
         self.client.force_authenticate(user=None)
         self.client.credentials(HTTP_AUTHORIZATION=f"Hub {token}")
@@ -2713,8 +2719,11 @@ class SysvarHubSyncPushApiTests(TestCase):
         return payload
 
     def _payload_venda(self, venda_uuid="12121212-1212-4121-8121-121212121212", **extras):
+        documento = extras.pop("documento", f"VE{self.loja.pk:03d}{self._documento_venda_seq:07d}")
+        self._documento_venda_seq += 1
         payload = {
             "venda_uuid": venda_uuid,
+            "documento": documento,
             "caixa_retaguarda_id": self.caixa.pk,
             "cliente_retaguarda_id": self.cliente.pk,
             "vendedor_retaguarda_id": self.vendedor.pk,
@@ -2741,7 +2750,7 @@ class SysvarHubSyncPushApiTests(TestCase):
             caixa=self.caixa if loja == self.loja else None,
             cliente=self.cliente,
             vendedor=self.vendedor,
-            documento=f"HUB-TEST-{VendaPdv.objects.count() + 1}",
+            documento=f"VE{loja.pk:03d}{VendaPdv.objects.count() + 1:07d}",
             forma_pagamento="DINHEIRO",
             total=Decimal("10.00"),
             valor_recebido=Decimal("10.00"),
@@ -3049,12 +3058,12 @@ class SysvarHubSyncPushApiTests(TestCase):
             cliente_uuid=None,
         )
         self.assertEqual(
-            self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-anonima-nfce")]).data["resultados"][0]["status"],
+            self._push([self._evento("VENDA_FINALIZADA", payload_venda, evento_uuid="56565656-0000-4656-8656-565656565656", chave="venda-anonima-nfce")]).data["resultados"][0]["status"],
             HubEventoRecebido.STATUS_PROCESSADO,
         )
 
         payload_nfce = self._payload_nfce(venda_uuid=venda_uuid)
-        response = self._push([self._evento("NFCE_ATUALIZADA", payload_nfce, chave="nfce-venda-anonima")])
+        response = self._push([self._evento("NFCE_ATUALIZADA", payload_nfce, evento_uuid="56565656-1111-4656-8656-565656565656", chave="nfce-venda-anonima")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         self.assertEqual(NFCe.objects.count(), 1)
@@ -3287,6 +3296,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload = {
             "devolucao_uuid": "46464646-4646-4464-8464-464646464646",
             "venda_uuid": payload_venda["venda_uuid"],
+            "documento": "DEV-0000001",
             "motivo": "Troca Hub",
             "valor_total": "10.00",
             "itens": [{
@@ -3325,6 +3335,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload = {
             "devolucao_uuid": "49494949-4949-4494-8494-494949494949",
             "venda_uuid": payload_venda["venda_uuid"],
+            "documento": "DEV-0000002",
             "itens": [{"sku_retaguarda_id": self.sku.pk, "produto_retaguarda_id": self.produto.pk, "quantidade": 2}],
         }
 

@@ -109,7 +109,7 @@ class ValeTrocaSequenciaTests(TestCase):
             loja=loja or self.loja,
             cliente=cliente,
             vendedor=vendedor,
-            documento=f"VD-{documento}",
+            documento=f"VD-{(loja or self.loja).pk}-{documento}",
             forma_pagamento="DINHEIRO",
             total=Decimal("100.00"),
             valor_recebido=Decimal("100.00"),
