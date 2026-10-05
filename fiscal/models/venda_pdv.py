@@ -137,7 +137,7 @@ class VendaDevolucao(models.Model):
     venda = models.ForeignKey(VendaPdv, on_delete=models.PROTECT, related_name="devolucoes")
     loja = models.ForeignKey("cadastros.Loja", on_delete=models.PROTECT, related_name="devolucoes_venda")
     cliente = models.ForeignKey("cadastros.Cliente", on_delete=models.PROTECT, related_name="devolucoes_venda")
-    documento = models.CharField(max_length=50, unique=True, db_index=True)
+    documento = models.CharField(max_length=50, db_index=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.FINALIZADA, db_index=True)
     motivo = models.CharField(max_length=255, blank=True, default="")
     subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
@@ -159,6 +159,9 @@ class VendaDevolucao(models.Model):
             models.Index(fields=["venda"], name="ix_devolucao_venda"),
             models.Index(fields=["loja", "criado_em"], name="ix_devolucao_loja_data"),
             models.Index(fields=["cliente", "criado_em"], name="ix_devolucao_cliente_data"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["empresa", "documento"], name="uq_devolucao_empresa_documento"),
         ]
 
     def __str__(self) -> str:

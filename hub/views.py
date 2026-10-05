@@ -22,6 +22,7 @@ from financeiro.services import (
     cancelar_reservas_vale_troca_venda,
     consultar_reservas_vale_troca_venda,
     consultar_vale_troca_online,
+    escopo_empresa,
     escopo_loja,
     listar_vales_troca_online_cliente,
     reservar_faixa_documento,
@@ -30,6 +31,7 @@ from financeiro.services import (
 from financeiro.models import SequenciaDocumento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet, money
+from fiscal.services.documentos import reservar_documento_devolucao
 from hub.administracao import (
     atualizar_resultado_comando,
     listar_caixas_loja,
@@ -40,7 +42,7 @@ from hub.administracao import (
 )
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
-from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, HubVendaFaixaNumeracao, SysvarHub
+from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoFaixaNumeracao, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, HubVendaFaixaNumeracao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
@@ -59,6 +61,7 @@ from produto.models import ProdutoImagem
 
 ADMIN_CONFIG_ROLES = {"Admin", "Diretor"}
 VENDA_HUB_TAMANHO_FAIXA_PADRAO = 100
+DEVOLUCAO_HUB_TAMANHO_FAIXA_PADRAO = 100
 
 
 def _client_ip(request):
@@ -447,13 +450,12 @@ class HubDevolucaoFinalizarOnlineView(APIView):
         if total <= 0:
             return Response({"detail": "Valor da devolução inválido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        documento = f"HUB-DEV-{hub.pk}-{devolucao_uuid.hex[:16]}"
         devolucao = VendaDevolucao.objects.create(
             empresa=venda.empresa,
             venda=venda,
             loja=hub.loja,
             cliente=venda.cliente,
-            documento=documento,
+            documento=reservar_documento_devolucao(venda.empresa),
             motivo=str(request.data.get("motivo") or "")[:255],
             subtotal=money(total),
             credito_cliente=money(total),
@@ -471,7 +473,7 @@ class HubDevolucaoFinalizarOnlineView(APIView):
             devolucao_uuid=devolucao_uuid,
             devolucao=devolucao,
             venda_uuid=uuid.uuid5(uuid.NAMESPACE_URL, f"central-venda:{venda.pk}"),
-            documento=documento,
+            documento=devolucao.documento,
             vale_documento=vale.documento if vale else "",
         )
         return Response(_serializar_devolucao_online_resultado(devolucao, mapeamento), status=status.HTTP_201_CREATED)
@@ -910,6 +912,34 @@ class HubVendaFaixaNumeracaoView(APIView):
         return Response(
             {
                 "loja_id": loja.pk,
+                "inicio": inicio,
+                "fim": fim,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class HubDevolucaoFaixaNumeracaoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        hub = request.sysvar_hub
+        empresa = hub.loja.empresa
+        try:
+            inicio, fim = reservar_faixa_documento(
+                empresa,
+                SequenciaDocumento.TIPO_DEVOLUCAO,
+                escopo_empresa(),
+                DEVOLUCAO_HUB_TAMANHO_FAIXA_PADRAO,
+            )
+        except DocumentoSequenciaErro as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        HubDevolucaoFaixaNumeracao.objects.create(hub=hub, inicio=inicio, fim=fim)
+        return Response(
+            {
+                "empresa_id": empresa.pk,
                 "inicio": inicio,
                 "fim": fim,
             },

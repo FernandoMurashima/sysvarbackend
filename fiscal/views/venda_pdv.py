@@ -48,6 +48,7 @@ from fiscal.models import (
 )
 from fiscal.models.venda_pdv import money
 from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPdvSerializer
+from fiscal.services.documentos import reservar_documento_devolucao
 from fiscal.services.nfe_devolucao import registrar_nfe_devolucao
 from produto.models import Estoque, EstoqueMovimentacao, Ncm, Produto, ProdutoDetalhe
 from cadastros.models import Cliente, Funcionarios
@@ -1832,7 +1833,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
             venda=venda,
             loja=venda.loja,
             cliente=venda.cliente,
-            documento=f"DEV-{timezone.now().strftime('%Y%m%d%H%M%S%f')}",
+            documento=reservar_documento_devolucao(venda.empresa),
             motivo=motivo,
             subtotal=money(total),
             credito_cliente=money(total),

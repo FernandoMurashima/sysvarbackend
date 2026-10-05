@@ -27,6 +27,7 @@ from hub.models import (
     HubClienteMapeamento,
     HubEventoRecebido,
     HubFechamentoDiaRecebido,
+    HubDevolucaoFaixaNumeracao,
     HubDevolucaoMapeamento,
     HubMovimentoCaixaRecebido,
     HubNFCeMapeamento,
@@ -55,6 +56,7 @@ STATUS_NFCE_GERADOS = {
 }
 
 DOCUMENTO_VENDA_RE = re.compile(r"^VE(?P<loja>\d{3})(?P<numero>\d{7})$")
+DOCUMENTO_DEVOLUCAO_RE = re.compile(r"^DEV-(?P<numero>\d{7})$")
 
 
 def payload_hash(payload):
@@ -362,6 +364,12 @@ class HubSyncProcessor:
         venda = self._venda_origem_devolucao(payload, venda_uuid)
         if not venda:
             raise HubSyncError("Venda origem da devolução não encontrada para validação.")
+        documento, _numero_documento = self._validar_documento_devolucao_hub(payload.get("documento"))
+        documento_mapeado = HubDevolucaoMapeamento.objects.filter(documento=documento).exclude(devolucao_uuid=devolucao_uuid).first()
+        if documento_mapeado:
+            raise HubSyncError("Documento comercial da devolucao ja vinculado a outro devolucao_uuid.")
+        if VendaDevolucao.objects.filter(empresa=self.empresa, documento=documento).exists():
+            raise HubSyncError("Documento comercial da devolucao ja existe na Central para outro devolucao_uuid.")
 
         view = VendaDevolucaoViewSet()
         itens_por_sku = {item.sku_id: item for item in venda.itens.all()}
@@ -385,7 +393,6 @@ class HubSyncProcessor:
         if total <= 0:
             raise HubSyncError("Valor da devolução inválido.")
 
-        documento = f"HUB-DEV-{self.hub.pk}-{devolucao_uuid.hex[:16]}"
         devolucao = VendaDevolucao.objects.create(
             empresa=venda.empresa,
             venda=venda,
@@ -422,6 +429,18 @@ class HubSyncProcessor:
             "vale_retaguarda_id": vale.pk if vale else None,
             "valor_total": str(devolucao.credito_cliente),
         }
+
+    def _validar_documento_devolucao_hub(self, documento):
+        documento = str(documento or "").strip()
+        match = DOCUMENTO_DEVOLUCAO_RE.fullmatch(documento)
+        if not match:
+            raise HubSyncError("Documento comercial da devolucao deve estar no formato DEV-0000001.")
+        numero = int(match.group("numero"))
+        if numero <= 0 or numero > 9999999:
+            raise HubSyncError("Sequencial do documento comercial da devolucao invalido.")
+        if not HubDevolucaoFaixaNumeracao.objects.filter(hub=self.hub, inicio__lte=numero, fim__gte=numero).exists():
+            raise HubSyncError("Documento comercial da devolucao nao pertence a faixa reservada para este Hub.")
+        return documento, numero
 
     def _venda_origem_devolucao(self, payload, venda_uuid):
         if venda_uuid:
