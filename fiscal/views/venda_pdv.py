@@ -22,12 +22,19 @@ from financeiro.models import (
     MovimentacaoFinanceira,
     Receber,
     ReceberItem,
+    SequenciaDocumento,
     ValeTroca,
     ValeTrocaMovimento,
     saldo_cashback_cliente,
     saldo_vale_troca_cliente,
 )
-from financeiro.services import gerar_lancamento_contabil_movimentacao, reservar_documento_vale_troca
+from financeiro.services import (
+    DocumentoSequenciaErro,
+    escopo_loja,
+    gerar_lancamento_contabil_movimentacao,
+    reservar_documento_vale_troca,
+    reservar_numero_documento,
+)
 from fiscal.models import (
     Cfop,
     NFCe,
@@ -74,11 +81,35 @@ def _proximo_numero_nfce() -> int:
     return atual + 1
 
 
-def _proximo_documento_pdv() -> str:
-    numero = _proximo_numero_nfce()
-    while VendaPdv.objects.filter(documento=str(numero)).exists() or NFCe.objects.filter(numero=numero).exists():
-        numero += 1
-    return str(numero)
+def formatar_documento_venda(loja_id, numero):
+    try:
+        loja_numero = int(loja_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Loja invalida para gerar documento da venda.") from exc
+    if loja_numero <= 0 or loja_numero > 999:
+        raise ValueError("Loja invalida para gerar documento da venda.")
+    try:
+        sequencial = int(numero)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Sequencial invalido para gerar documento da venda.") from exc
+    if sequencial <= 0 or sequencial > 9999999:
+        raise ValueError("Sequencial invalido para gerar documento da venda.")
+    return f"VE{loja_numero:03d}{sequencial:07d}"
+
+
+def reservar_documento_venda(empresa, loja):
+    if not empresa:
+        raise ValueError("Empresa obrigatoria para gerar documento da venda.")
+    if not loja:
+        raise ValueError("Loja obrigatoria para gerar documento da venda.")
+    if loja.empresa_id != empresa.pk:
+        raise ValueError("A loja informada pertence a outra empresa.")
+    numero = reservar_numero_documento(
+        empresa,
+        SequenciaDocumento.TIPO_VENDA,
+        escopo_loja(loja.pk),
+    )
+    return formatar_documento_venda(loja.pk, numero)
 
 
 def _proximo_numero_nfe_devolucao() -> int:
@@ -498,8 +529,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 payload = VendaPdvSerializer(venda_existente, context={"request": request}).data
                 payload["cupom"] = self._cupom(venda_existente, getattr(venda_existente, "nfce", None))
                 return Response(payload, status=status.HTTP_200_OK)
-        else:
-            documento = _proximo_documento_pdv()
+        try:
+            documento = reservar_documento_venda(caixa.idloja.empresa, caixa.idloja)
+        except (DocumentoSequenciaErro, ValueError) as exc:
+            transaction.set_rollback(True)
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         venda = VendaPdv.objects.create(
             empresa=caixa.idloja.empresa,
@@ -1540,7 +1574,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         gerar_lancamento_contabil_movimentacao(movimento)
 
     def _autorizar_nfce(self, venda: VendaPdv, contingencia: bool = False) -> NFCe:
-        numero = int(venda.documento) if str(venda.documento or "").isdigit() else _proximo_numero_nfce()
+        numero = _proximo_numero_nfce()
         nfce = NFCe.objects.create(venda=venda, numero=numero, status=NFCe.Status.EMITINDO)
         nfce.chave_acesso = _gerar_chave(nfce)
         if contingencia:
