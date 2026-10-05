@@ -131,6 +131,8 @@ class Command(BaseCommand):
         base = self._base_produtos(empresa, idx)
         produtos = self._produtos(base)
         self._estoque(lojas, produtos["vendaveis"])
+        lojas_comerciais = [loja for loja in lojas if loja.tipo_unidade != Loja.TIPO_FABRICA]
+        self._vendas_demo(empresa, lojas_comerciais, clientes, funcionarios, financeiro)
         self._pedidos_compra_para_aprovar(empresa, lojas, fornecedores, produtos, base, financeiro)
         return {"lojas": lojas, "clientes": clientes, "fornecedores": fornecedores, "funcionarios": funcionarios, "financeiro": financeiro}
 

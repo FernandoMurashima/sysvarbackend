@@ -29,6 +29,7 @@ from financeiro.models import (
     Receber,
     ReceberItem,
     ReceberRateio,
+    SequenciaDocumento,
     AntecipacaoRecebivel,
     AntecipacaoRecebivelItem,
     ValeTroca,
@@ -45,6 +46,7 @@ from fiscal.models.venda_pdv import (
     VendaPdvItem,
     VendaPdvPagamento,
 )
+from fiscal.views.venda_pdv import reservar_documento_venda
 from produto.models import (
     Codigos,
     Colecao,
@@ -141,6 +143,7 @@ class Command(BaseCommand):
         VendaPdvPagamento.objects.filter(venda__empresa_id__in=empresa_ids).delete()
         VendaPdvItem.objects.filter(venda__empresa_id__in=empresa_ids).delete()
         VendaPdv.objects.filter(empresa_id__in=empresa_ids).delete()
+        SequenciaDocumento.objects.filter(empresa_id__in=empresa_ids).delete()
 
         LancamentoContabil.objects.filter(empresa_id__in=empresa_ids).delete()
         AntecipacaoRecebivelItem.objects.filter(antecipacao__empresa_id__in=empresa_ids).delete()
@@ -709,7 +712,7 @@ class Command(BaseCommand):
                 total_loja = money(total_loja + total_atual)
 
     def _criar_venda_demo(self, empresa, loja, caixa, clientes, cliente_padrao, vendedores, formas, natureza, linhas, data_base, loja_idx, venda_seq):
-        documento = self._proximo_documento_pdv()
+        documento = reservar_documento_venda(empresa, loja)
         vendedor = vendedores[(venda_seq - 1) % len(vendedores)]
         cliente = clientes[(venda_seq - 1) % len(clientes)] if venda_seq % 4 else cliente_padrao
         data_venda = timezone.make_aware(datetime.combine(data_base, time(hour=9 + ((venda_seq - 1) % 9), minute=(venda_seq * 7) % 60)))
@@ -935,7 +938,7 @@ class Command(BaseCommand):
         )
 
     def _nfce_demo(self, venda):
-        numero = int(venda.documento)
+        numero = self._proximo_numero_nfce_demo()
         nfce = NFCe.objects.create(venda=venda, numero=numero, status=NFCe.Status.AUTORIZADA)
         nfce.chave_acesso = self._chave_nfce(nfce)
         nfce.protocolo = f"135{timezone.now().strftime('%y%m%d%H%M%S')}{numero:04d}"[:30]
@@ -1158,11 +1161,11 @@ class Command(BaseCommand):
         )
         gerar_lancamento_contabil_movimentacao(movimento)
 
-    def _proximo_documento_pdv(self):
+    def _proximo_numero_nfce_demo(self):
         numero = (NFCe.objects.aggregate(max_numero=Max("numero")).get("max_numero") or 0) + 1
-        while VendaPdv.objects.filter(documento=str(numero)).exists() or NFCe.objects.filter(numero=numero).exists():
+        while NFCe.objects.filter(numero=numero).exists():
             numero += 1
-        return str(numero)
+        return numero
 
     def _chave_nfce(self, nfce):
         cnpj = "".join(ch for ch in str(nfce.venda.loja.cnpj or "") if ch.isdigit()).zfill(14)[-14:]
