@@ -4,7 +4,7 @@ from sysvar_devtools.dev_base import SysvarDevBaseService
 
 
 class Command(BaseCommand):
-    help = "Gerencia a Base de Desenvolvimento oficial do Sysvar."
+    help = "Gerencia a Base de Desenvolvimento oficial do Sysvar a partir dos JSONs de sysvar_devtools/seeds."
 
     def add_arguments(self, parser):
         group = parser.add_mutually_exclusive_group(required=True)
