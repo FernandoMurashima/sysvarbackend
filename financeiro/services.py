@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from cadastros.models import PlanoContabil
 
@@ -9,9 +9,26 @@ from .models import LancamentoContabil, MovimentacaoFinanceira, SequenciaDocumen
 
 
 ZERO = Decimal("0.00")
+LIMITE_NUMERO_DOCUMENTO = 9999999
 
 
-class ValeTrocaErro(Exception):
+class DocumentoSequenciaErro(Exception):
+    pass
+
+
+class DocumentoSequenciaParametroInvalido(DocumentoSequenciaErro):
+    pass
+
+
+class DocumentoSequenciaQuantidadeInvalida(DocumentoSequenciaErro):
+    pass
+
+
+class DocumentoSequenciaEsgotada(DocumentoSequenciaErro):
+    pass
+
+
+class ValeTrocaErro(DocumentoSequenciaErro):
     status_code = 409
 
 
@@ -19,7 +36,7 @@ class ValeTrocaNaoEncontrado(ValeTrocaErro):
     status_code = 404
 
 
-LIMITE_NUMERO_VALE_TROCA = 9999999
+LIMITE_NUMERO_VALE_TROCA = LIMITE_NUMERO_DOCUMENTO
 
 
 def money(valor):
@@ -30,21 +47,96 @@ def formatar_documento_vale_troca(numero):
     return f"VT{int(numero):07d}"
 
 
+def escopo_empresa():
+    return SequenciaDocumento.ESCOPO_EMPRESA
+
+
+def escopo_loja(loja_id):
+    try:
+        valor = int(loja_id)
+    except (TypeError, ValueError) as exc:
+        raise DocumentoSequenciaParametroInvalido("Loja invalida para escopo de documento.") from exc
+    if valor <= 0:
+        raise DocumentoSequenciaParametroInvalido("Loja invalida para escopo de documento.")
+    return f"LOJA:{valor}"
+
+
+def escopo_ano(ano):
+    try:
+        valor = int(ano)
+    except (TypeError, ValueError) as exc:
+        raise DocumentoSequenciaParametroInvalido("Ano invalido para escopo de documento.") from exc
+    if valor < 1:
+        raise DocumentoSequenciaParametroInvalido("Ano invalido para escopo de documento.")
+    return f"ANO:{valor}"
+
+
+def reservar_numero_documento(empresa, tipo_documento, escopo):
+    inicio, _fim = reservar_faixa_documento(empresa, tipo_documento, escopo, 1)
+    return inicio
+
+
 @transaction.atomic
+def reservar_faixa_documento(empresa, tipo_documento, escopo, quantidade):
+    if not empresa:
+        raise DocumentoSequenciaParametroInvalido("Empresa obrigatoria para reservar sequencia de documento.")
+    if not tipo_documento:
+        raise DocumentoSequenciaParametroInvalido("Tipo de documento obrigatorio para reservar sequencia.")
+    if not escopo:
+        raise DocumentoSequenciaParametroInvalido("Escopo obrigatorio para reservar sequencia.")
+    try:
+        qtd = int(quantidade)
+    except (TypeError, ValueError) as exc:
+        raise DocumentoSequenciaQuantidadeInvalida("Quantidade invalida para reservar sequencia.") from exc
+    if qtd <= 0:
+        raise DocumentoSequenciaQuantidadeInvalida("Quantidade invalida para reservar sequencia.")
+
+    sequencia = _obter_ou_criar_sequencia_documento(empresa, tipo_documento, escopo)
+    numero = int(sequencia.proximo_numero or 1)
+    fim = numero + qtd - 1
+    if numero > LIMITE_NUMERO_DOCUMENTO or fim > LIMITE_NUMERO_DOCUMENTO:
+        raise DocumentoSequenciaEsgotada("Faixa de numeracao de documento esgotada.")
+    sequencia.proximo_numero = fim + 1
+    sequencia.save(update_fields=["proximo_numero", "atualizado_em"])
+    return numero, fim
+
+
+def _obter_ou_criar_sequencia_documento(empresa, tipo_documento, escopo):
+    try:
+        return SequenciaDocumento.objects.select_for_update().get(
+            empresa=empresa,
+            tipo_documento=tipo_documento,
+            escopo=escopo,
+        )
+    except SequenciaDocumento.DoesNotExist:
+        try:
+            with transaction.atomic():
+                return SequenciaDocumento.objects.create(
+                    empresa=empresa,
+                    tipo_documento=tipo_documento,
+                    escopo=escopo,
+                    proximo_numero=1,
+                )
+        except IntegrityError:
+            return SequenciaDocumento.objects.select_for_update().get(
+                empresa=empresa,
+                tipo_documento=tipo_documento,
+                escopo=escopo,
+            )
+
+
 def reservar_documento_vale_troca(empresa):
     if not empresa:
         raise ValeTrocaErro("Empresa obrigatoria para gerar Vale-Troca.")
-    sequencia, _ = SequenciaDocumento.objects.select_for_update().get_or_create(
-        empresa=empresa,
-        tipo_documento=SequenciaDocumento.TIPO_VALE_TROCA,
-        defaults={"proximo_numero": 1},
-    )
-    numero = int(sequencia.proximo_numero or 1)
-    if numero > LIMITE_NUMERO_VALE_TROCA:
-        raise ValeTrocaErro("Faixa de numeracao de Vale-Troca esgotada.")
+    try:
+        numero = reservar_numero_documento(
+            empresa,
+            SequenciaDocumento.TIPO_VALE_TROCA,
+            escopo_empresa(),
+        )
+    except DocumentoSequenciaEsgotada as exc:
+        raise ValeTrocaErro("Faixa de numeracao de Vale-Troca esgotada.") from exc
     documento = formatar_documento_vale_troca(numero)
-    sequencia.proximo_numero = numero + 1
-    sequencia.save(update_fields=["proximo_numero", "atualizado_em"])
     return documento
 
 

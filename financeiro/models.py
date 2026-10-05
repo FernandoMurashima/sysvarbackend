@@ -435,24 +435,34 @@ def saldo_vale_troca_cliente(cliente_id, ate=None, empresa=None):
 
 class SequenciaDocumento(models.Model):
     TIPO_VALE_TROCA = 'VALE_TROCA'
+    TIPO_VENDA = 'VENDA'
+    TIPO_DEVOLUCAO = 'DEVOLUCAO'
+    TIPO_DISTRIBUICAO = 'DISTRIBUICAO'
+    TIPO_PEDIDO_VENDA_DISTRIBUICAO = 'PEDIDO_VENDA_DISTRIBUICAO'
     TIPO_CHOICES = [
         (TIPO_VALE_TROCA, 'Vale-Troca'),
+        (TIPO_VENDA, 'Venda'),
+        (TIPO_DEVOLUCAO, 'Devolucao'),
+        (TIPO_DISTRIBUICAO, 'Distribuicao'),
+        (TIPO_PEDIDO_VENDA_DISTRIBUICAO, 'Pedido de Venda da Distribuicao'),
     ]
+    ESCOPO_EMPRESA = 'EMPRESA'
 
     id = models.BigAutoField(primary_key=True)
     empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='sequencias_documento')
     tipo_documento = models.CharField(max_length=40, choices=TIPO_CHOICES)
+    escopo = models.CharField(max_length=40, default=ESCOPO_EMPRESA)
     proximo_numero = models.PositiveIntegerField(default=1)
     atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'financeiro_sequencia_documento'
         constraints = [
-            models.UniqueConstraint(fields=['empresa', 'tipo_documento'], name='uq_seq_doc_empresa_tipo'),
+            models.UniqueConstraint(fields=['empresa', 'tipo_documento', 'escopo'], name='uq_seq_doc_empresa_tipo_escopo'),
         ]
 
     def __str__(self):
-        return f'{self.empresa_id} - {self.tipo_documento} - {self.proximo_numero}'
+        return f'{self.empresa_id} - {self.tipo_documento} - {self.escopo} - {self.proximo_numero}'
 
 
 # =========================
