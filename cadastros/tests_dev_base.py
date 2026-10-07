@@ -13,7 +13,7 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, PrazoPagamento, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from financeiro.services import escopo_empresa, escopo_loja
 from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
@@ -408,7 +408,6 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(skus_count, 1480)
         self.assertEqual(lojas_count, 4)
         self.assertEqual(Estoque.objects.count(), skus_count * lojas_count)
-        self.assertEqual(Estoque.objects.exclude(Estoque=0).count(), 0)
         self.assertEqual(Estoque.objects.exclude(reserva=0).count(), 0)
         self.assertEqual(EstoqueMovimentacao.objects.count(), 0)
         self.assertFalse(Estoque.objects.values("CodigodeBarra", "Idloja").annotate(c=Count("Idestoque")).filter(c__gt=1).exists())
@@ -427,6 +426,19 @@ class SysvarDevBaseTests(TransactionTestCase):
             if (estoque.referencia or "") != refs.get(estoque.CodigodeBarra, "")
         ]
         self.assertEqual(divergentes, [])
+
+        saldos = {
+            (estoque.Idloja.apelido_loja, estoque.CodigodeBarra): estoque.Estoque
+            for estoque in Estoque.objects.select_related("Idloja")
+        }
+        comerciais = set(ProdutoDetalhe.objects.filter(produto__tipo_produto="1").values_list("ean13", flat=True))
+        for (loja, ean), saldo in saldos.items():
+            if ean not in comerciais:
+                self.assertEqual(saldo, Decimal("0"))
+            elif loja in {"Barra", "Tijuca", "Centro"}:
+                self.assertEqual(saldo, Decimal("20"))
+            elif loja == "Fábrica":
+                self.assertEqual(saldo, Decimal("0"))
 
     def test_estoque_estrutural_uso_consumo_por_loja_sem_movimentacao(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
@@ -521,3 +533,55 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(ProdutoUsoConsumoEstoque.objects.count(), uso_estoque_count)
         self.assertEqual(EstoqueMovimentacao.objects.count(), 0)
         self.assertEqual(ProdutoUsoConsumoMovimentacao.objects.count(), 0)
+
+    def test_forma_credito_unica_e_prazos_separados(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+
+        creditos = list(FormaPagamento.objects.filter(empresa=empresa, tipo=FormaPagamento.TIPO_CREDITO, ativo=True).values_list("codigo", "descricao"))
+
+        self.assertEqual(creditos, [("CRE", "Cartão de crédito")])
+        self.assertFalse(FormaPagamento.objects.filter(empresa=empresa, codigo__in=["CCR", "CC2", "CC3", "CC4"]).exists())
+        self.assertTrue({"AV", "30D", "30-60", "30-60-90", "30-60-90-120"}.issubset(set(PrazoPagamento.objects.filter(empresa=empresa).values_list("codigo", flat=True))))
+
+    def test_produtos_comerciais_possuem_fiscal_dev_completo(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        comerciais = Produto.objects.filter(tipo_produto="1")
+
+        self.assertFalse(comerciais.filter(ncm__isnull=True).exists())
+        self.assertFalse(comerciais.filter(ncm="").exists())
+        self.assertFalse(
+            comerciais.exclude(
+                origem_mercadoria=0,
+                csosn_ou_cst_icms="000",
+                aliquota_icms=Decimal("18"),
+                cfop_venda_dentro="5102",
+                cfop_venda_fora="6102",
+                cst_pis="01",
+                aliq_pis=Decimal("1.65"),
+                cst_cofins="01",
+                aliq_cofins=Decimal("7.60"),
+            ).exists()
+        )
+
+    def test_validate_detecta_saldo_inicial_incorreto(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        estoque = Estoque.objects.filter(Idloja__apelido_loja="Barra", CodigodeBarra__in=ProdutoDetalhe.objects.filter(produto__tipo_produto="1").values("ean13")).first()
+        estoque.Estoque = Decimal("19")
+        estoque.save(update_fields=["Estoque"])
+
+        report = SysvarDevBaseService().validate()
+
+        self.assertFalse(report.valid)
+        self.assertIn("Estoque inicial comercial", ", ".join(report.problems))
+
+    def test_validate_detecta_fiscal_comercial_incompleto(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        produto = Produto.objects.filter(tipo_produto="1").first()
+        produto.cst_pis = None
+        produto.save(update_fields=["cst_pis"])
+
+        report = SysvarDevBaseService().validate()
+
+        self.assertFalse(report.valid)
+        self.assertIn("dados fiscais incompletos", ", ".join(report.problems))

@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from financeiro.services import (
     DocumentoSequenciaErro,
     ValeTrocaErro,
@@ -1057,6 +1057,12 @@ class HubFormasPagamentoView(APIView):
         loja = hub.loja
         empresa = loja.empresa
         parcelas_ordenadas = PrazoPagamentoParcela.objects.order_by("ordem", "Idprazoparcela")
+        prazos = (
+            PrazoPagamento.objects
+            .filter(empresa=empresa, ativo=True)
+            .prefetch_related(Prefetch("parcelas", queryset=parcelas_ordenadas))
+            .order_by("num_parcelas", "codigo", "Idprazo")
+        )
         formas = (
             FormaPagamento.objects
             .filter(empresa=empresa)
@@ -1117,6 +1123,25 @@ class HubFormasPagamentoView(APIView):
                     for parcela in (prazo.parcelas.all() if prazo else [])
                 ],
             })
+        prazos_pagamento = [
+            {
+                "id": prazo.pk,
+                "codigo": prazo.codigo,
+                "descricao": prazo.descricao,
+                "num_parcelas": prazo.num_parcelas,
+                "intervalo_dias": prazo.intervalo_dias,
+                "ativo": prazo.ativo,
+                "parcelas": [
+                    {
+                        "ordem": parcela.ordem,
+                        "dias": parcela.dias,
+                        "percentual": _decimal_string(parcela.percentual, 6),
+                    }
+                    for parcela in prazo.parcelas.all()
+                ],
+            }
+            for prazo in prazos
+        ]
 
         return Response(
             {
@@ -1133,6 +1158,7 @@ class HubFormasPagamentoView(APIView):
                     "id": loja.pk,
                 },
                 "formas_pagamento": formas_pagamento,
+                "prazos_pagamento": prazos_pagamento,
                 "mapas_fiscais": list(mapas_fiscais),
             },
             status=status.HTTP_200_OK,

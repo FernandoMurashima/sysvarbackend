@@ -2337,6 +2337,8 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             num_parcelas=2,
             intervalo_dias=30,
         )
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=1, dias=30, percentual=Decimal("50.000000"))
+        PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=2, dias=60, percentual=Decimal("50.000000"))
         conta = ContaBancaria.objects.create(
             empresa=self.empresa,
             idloja=self.loja,
@@ -2502,7 +2504,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         for idx in range(3):
             self._forma(f"{idx:03d}", prazo_pagamento=prazo)
 
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(7):
             response = self._formas_pagamento()
 
         self.assertEqual(response.status_code, 200, response.data)

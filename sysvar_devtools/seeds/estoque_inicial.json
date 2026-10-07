@@ -1,0 +1,22 @@
+[
+  {
+    "loja_codigo": "BARRA",
+    "tipo_produto": "1",
+    "estoque": "20.000"
+  },
+  {
+    "loja_codigo": "TIJUCA",
+    "tipo_produto": "1",
+    "estoque": "20.000"
+  },
+  {
+    "loja_codigo": "CENTRO",
+    "tipo_produto": "1",
+    "estoque": "20.000"
+  },
+  {
+    "loja_codigo": "FABRICA",
+    "tipo_produto": "1",
+    "estoque": "0.000"
+  }
+]

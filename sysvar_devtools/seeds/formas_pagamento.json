@@ -24,34 +24,9 @@
     "ativo": true
   },
   {
-    "codigo": "CCR",
-    "descricao": "Crédito à vista / rotativo",
+    "codigo": "CRE",
+    "descricao": "Cartão de crédito",
     "tipo": "CREDITO",
-    "prazo_codigo": "30D",
-    "gera_recebivel_bancario": true,
-    "ativo": true
-  },
-  {
-    "codigo": "CC2",
-    "descricao": "Crédito parcelado 2x",
-    "tipo": "CREDITO",
-    "prazo_codigo": "30-60",
-    "gera_recebivel_bancario": true,
-    "ativo": true
-  },
-  {
-    "codigo": "CC3",
-    "descricao": "Crédito parcelado 3x",
-    "tipo": "CREDITO",
-    "prazo_codigo": "30-60-90",
-    "gera_recebivel_bancario": true,
-    "ativo": true
-  },
-  {
-    "codigo": "CC4",
-    "descricao": "Crédito parcelado 4x",
-    "tipo": "CREDITO",
-    "prazo_codigo": "30-60-90-120",
     "gera_recebivel_bancario": true,
     "ativo": true
   }
