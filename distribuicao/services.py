@@ -8,8 +8,13 @@ from django.utils import timezone
 
 from cadastros.models import Cliente, Loja, Nat_Lancamento, PlanoContabil
 from fiscal.models import NotaFiscalSaida, NotaFiscalSaidaItem
-from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem, ReceberRateio
-from financeiro.services import gerar_lancamento_contabil_movimentacao
+from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem, ReceberRateio, SequenciaDocumento
+from financeiro.services import (
+    LIMITE_NUMERO_DOCUMENTO,
+    escopo_ano,
+    gerar_lancamento_contabil_movimentacao,
+    reservar_numero_documento,
+)
 from produto.models import Estoque, ProdutoDetalhe, EstoqueMovimentacao
 
 from .models import (
@@ -34,6 +39,38 @@ def decimal_money(value):
 def proximo_numero(model, empresa_id, prefixo):
     total = model.objects.filter(empresa_id=empresa_id).count() + 1
     return f"{prefixo}-{timezone.localdate():%Y}-{total:06d}"
+
+
+def formatar_documento_distribuicao(ano, numero):
+    try:
+        ano_int = int(ano)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Ano invalido para documento de distribuicao.") from exc
+    if ano_int < 1:
+        raise ValidationError("Ano invalido para documento de distribuicao.")
+    try:
+        numero_int = int(numero)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Numero invalido para documento de distribuicao.") from exc
+    if numero_int < 1 or numero_int > LIMITE_NUMERO_DOCUMENTO:
+        raise ValidationError("Numero invalido para documento de distribuicao.")
+    return f"DI{ano_int % 100:02d}{numero_int:07d}"
+
+
+def reservar_documento_distribuicao(empresa, data_documento=None):
+    if not empresa:
+        raise ValidationError("Empresa obrigatoria para gerar Distribuicao.")
+    data = data_documento or timezone.localdate()
+    try:
+        ano = data.year
+    except AttributeError as exc:
+        raise ValidationError("Data invalida para documento de distribuicao.") from exc
+    numero = reservar_numero_documento(
+        empresa,
+        SequenciaDocumento.TIPO_DISTRIBUICAO,
+        escopo_ano(ano),
+    )
+    return formatar_documento_distribuicao(ano, numero)
 
 
 def proxima_nfe(loja_origem):
@@ -163,11 +200,12 @@ def preparar_distribuicao_producao(ordem, perfil=None, user=None):
         .first()
     )
     loja_origem = loja_central_producao(ordem.empresa)
+    data_distribuicao = timezone.localdate()
     distribuicao = Distribuicao.objects.create(
         empresa=ordem.empresa,
-        numero=proximo_numero(Distribuicao, ordem.empresa_id, "DIST"),
+        numero=reservar_documento_distribuicao(ordem.empresa, data_distribuicao),
         unidade_origem=loja_origem,
-        data=timezone.localdate(),
+        data=data_distribuicao,
         perfil=perfil,
         tipo=perfil.tipo if perfil else PerfilDistribuicao.TIPO_MANUAL,
         fator_preco=perfil.fator_preco if perfil else Decimal("0.2000"),

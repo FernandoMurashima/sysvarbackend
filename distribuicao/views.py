@@ -41,7 +41,7 @@ from .services import (
     gerar_notas_faturamento_distribuicao,
     gerar_pedidos,
     montar_matriz_manual,
-    proximo_numero,
+    reservar_documento_distribuicao,
 )
 
 
@@ -156,7 +156,8 @@ class DistribuicaoViewSet(BaseDistribuicaoViewSet):
             raise ValidationError({"empresa": "Usuário sem empresa vinculada."})
         if empresa_id and origem.empresa_id != int(empresa_id):
             raise ValidationError({"unidade_origem": "Origem pertence a outra empresa."})
-        numero = proximo_numero(Distribuicao, origem.empresa_id, "DIST")
+        data_distribuicao = serializer.validated_data.get("data")
+        numero = reservar_documento_distribuicao(origem.empresa, data_distribuicao)
         serializer.save(empresa=origem.empresa, numero=numero, criado_por=self.request.user)
 
     def perform_update(self, serializer):
