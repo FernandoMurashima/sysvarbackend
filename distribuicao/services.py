@@ -36,11 +36,6 @@ def decimal_money(value):
     return Decimal(value or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def proximo_numero(model, empresa_id, prefixo):
-    total = model.objects.filter(empresa_id=empresa_id).count() + 1
-    return f"{prefixo}-{timezone.localdate():%Y}-{total:06d}"
-
-
 def formatar_documento_distribuicao(ano, numero):
     try:
         ano_int = int(ano)
@@ -71,6 +66,38 @@ def reservar_documento_distribuicao(empresa, data_documento=None):
         escopo_ano(ano),
     )
     return formatar_documento_distribuicao(ano, numero)
+
+
+def formatar_documento_pedido_venda_distribuicao(ano, numero):
+    try:
+        ano_int = int(ano)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Ano invalido para documento de pedido de venda da distribuicao.") from exc
+    if ano_int < 1:
+        raise ValidationError("Ano invalido para documento de pedido de venda da distribuicao.")
+    try:
+        numero_int = int(numero)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Numero invalido para documento de pedido de venda da distribuicao.") from exc
+    if numero_int < 1 or numero_int > LIMITE_NUMERO_DOCUMENTO:
+        raise ValidationError("Numero invalido para documento de pedido de venda da distribuicao.")
+    return f"PV{ano_int % 100:02d}{numero_int:07d}"
+
+
+def reservar_documento_pedido_venda_distribuicao(empresa, data_documento=None):
+    if not empresa:
+        raise ValidationError("Empresa obrigatoria para gerar Pedido de Venda da Distribuicao.")
+    data = data_documento or timezone.localdate()
+    try:
+        ano = data.year
+    except AttributeError as exc:
+        raise ValidationError("Data invalida para documento de pedido de venda da distribuicao.") from exc
+    numero = reservar_numero_documento(
+        empresa,
+        SequenciaDocumento.TIPO_PEDIDO_VENDA_DISTRIBUICAO,
+        escopo_ano(ano),
+    )
+    return formatar_documento_pedido_venda_distribuicao(ano, numero)
 
 
 def proxima_nfe(loja_origem):
@@ -458,15 +485,16 @@ def gerar_pedidos(distribuicao):
         quantidade_confirmada__gt=0,
     ).order_by("loja_destino_id", "item_id")
     lojas = sorted({d.loja_destino_id for d in destinos})
+    data_pedido = timezone.localdate()
     for loja_id in lojas:
         loja_destinos = [d for d in destinos if d.loja_destino_id == loja_id]
         pedido = PedidoVendaDistribuicao.objects.create(
             empresa=distribuicao.empresa,
             distribuicao=distribuicao,
-            numero=proximo_numero(PedidoVendaDistribuicao, distribuicao.empresa_id, "PVD"),
+            numero=reservar_documento_pedido_venda_distribuicao(distribuicao.empresa, data_pedido),
             unidade_origem=distribuicao.unidade_origem,
             loja_destino=loja_destinos[0].loja_destino,
-            data_pedido=timezone.localdate(),
+            data_pedido=data_pedido,
             status=PedidoVendaDistribuicao.STATUS_AGUARDANDO_FATURAMENTO,
         )
         quantidade_total = Decimal("0.000")
