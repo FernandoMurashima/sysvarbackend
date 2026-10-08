@@ -13,7 +13,7 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, FormaPagamentoCondicao, MovimentacaoFinanceira, Pagar, PrazoPagamento, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.models import Adquirente, CashbackConfig, CondicaoAdquirente, ConfigFinanceira, FormaPagamento, FormaPagamentoCondicao, MovimentacaoFinanceira, Pagar, PrazoPagamento, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from financeiro.services import escopo_empresa, escopo_loja
 from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
@@ -601,6 +601,30 @@ class SysvarDevBaseTests(TransactionTestCase):
 
         self.assertFalse(report.valid)
         self.assertIn("Taxas oficiais de FormaPagamentoCondicao", ", ".join(report.problems))
+
+    def test_reset_remove_adquirente_e_condicao_adquirente_preexistentes(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+        forma = FormaPagamento.objects.get(empresa=empresa, codigo="CRE")
+        prazo = PrazoPagamento.objects.get(empresa=empresa, codigo="30D")
+        adquirente = Adquirente.objects.create(empresa=empresa, codigo="REDE", descricao="Rede")
+        CondicaoAdquirente.objects.create(
+            empresa=empresa,
+            adquirente=adquirente,
+            forma_pagamento=forma,
+            prazo_pagamento=prazo,
+            taxa_percentual=Decimal("0.0000"),
+            taxa_fixa=Decimal("0.00"),
+        )
+
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+
+        empresa = Empresa.objects.get(documento="42000001000186")
+        self.assertEqual(Adquirente.objects.filter(empresa=empresa).count(), 0)
+        self.assertEqual(CondicaoAdquirente.objects.filter(empresa=empresa).count(), 0)
+        self.assertEqual(set(FormaPagamento.objects.filter(empresa=empresa, ativo=True).values_list("codigo", flat=True)), {"DIN", "PIX", "DEB", "CRE"})
+        self.assertEqual(FormaPagamentoCondicao.objects.filter(empresa=empresa, ativo=True).count(), 4)
+        self.assertTrue(SysvarDevBaseService().validate().valid)
 
     def test_produtos_comerciais_possuem_fiscal_dev_completo(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)
