@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from cadastros.services import ClientePadraoService
-from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
@@ -2352,6 +2352,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             descricao="Cartão Crédito",
             tipo=FormaPagamento.TIPO_CREDITO,
             prazo_pagamento=prazo,
+            permite_parcelamento=True,
             conta_liquidacao=conta,
             gera_recebivel_bancario=True,
             prazo_credito_dias=30,
@@ -2368,6 +2369,60 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
             prazo_pagamento=prazo,
             taxa_percentual=Decimal("2.5000"),
             taxa_fixa=Decimal("1.20"),
+        )
+        prazo_1x = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="1X",
+            descricao="1x",
+            num_parcelas=1,
+            intervalo_dias=30,
+        )
+        PrazoPagamentoParcela.objects.create(prazo=prazo_1x, ordem=1, dias=30, percentual=Decimal("100.000000"))
+        prazo_3x = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="3X",
+            descricao="3x",
+            num_parcelas=3,
+            intervalo_dias=30,
+        )
+        PrazoPagamentoParcela.objects.create(prazo=prazo_3x, ordem=1, dias=30, percentual=Decimal("33.333333"))
+        PrazoPagamentoParcela.objects.create(prazo=prazo_3x, ordem=2, dias=60, percentual=Decimal("33.333333"))
+        PrazoPagamentoParcela.objects.create(prazo=prazo_3x, ordem=3, dias=90, percentual=Decimal("33.333334"))
+        prazo_inativo = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="4X",
+            descricao="4x",
+            num_parcelas=4,
+            intervalo_dias=30,
+        )
+        condicao_1x = FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            prazo_pagamento=prazo_1x,
+            taxa_percentual=Decimal("2.0000"),
+            taxa_fixa=Decimal("0.10"),
+        )
+        condicao_2x = FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            prazo_pagamento=prazo,
+            taxa_percentual=Decimal("2.5000"),
+            taxa_fixa=Decimal("0.20"),
+        )
+        condicao_3x = FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            prazo_pagamento=prazo_3x,
+            taxa_percentual=Decimal("2.7500"),
+            taxa_fixa=Decimal("0.30"),
+        )
+        FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=credito,
+            prazo_pagamento=prazo_inativo,
+            taxa_percentual=Decimal("3.0000"),
+            taxa_fixa=Decimal("0.40"),
+            ativo=False,
         )
         dinheiro = self._forma(
             "001",
@@ -2445,6 +2500,29 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         self.assertEqual(credito_payload["id"], credito.pk)
         self.assertEqual(credito_payload["descricao"], "Cartão Crédito")
         self.assertEqual(credito_payload["tipo"], FormaPagamento.TIPO_CREDITO)
+        self.assertTrue(credito_payload["permite_parcelamento"])
+        self.assertEqual([item["id"] for item in credito_payload["condicoes_parcelamento"]], [condicao_1x.pk, condicao_2x.pk, condicao_3x.pk])
+        self.assertEqual(credito_payload["condicoes_parcelamento"][0], {
+            "id": condicao_1x.pk,
+            "prazo_pagamento_id": prazo_1x.pk,
+            "prazo_codigo": "1X",
+            "prazo_descricao": "1x",
+            "prazo_num_parcelas": 1,
+            "prazo_intervalo_dias": 30,
+            "taxa_percentual": "2.0000",
+            "taxa_fixa": "0.10",
+            "parcelas": [
+                {"ordem": 1, "dias": 30, "percentual": "100.000000"},
+            ],
+        })
+        self.assertEqual(credito_payload["condicoes_parcelamento"][1]["prazo_codigo"], "30D")
+        self.assertEqual(credito_payload["condicoes_parcelamento"][1]["parcelas"], [
+            {"ordem": 1, "dias": 30, "percentual": "50.000000"},
+            {"ordem": 2, "dias": 60, "percentual": "50.000000"},
+        ])
+        self.assertEqual(credito_payload["condicoes_parcelamento"][2]["prazo_codigo"], "3X")
+        self.assertEqual(credito_payload["condicoes_parcelamento"][2]["taxa_percentual"], "2.7500")
+        self.assertNotIn(prazo_inativo.pk, [item["prazo_pagamento_id"] for item in credito_payload["condicoes_parcelamento"]])
         self.assertEqual(credito_payload["num_parcelas"], 2)
         self.assertEqual(credito_payload["prazo_pagamento"], {
             "id": prazo.pk,
@@ -2504,7 +2582,7 @@ class SysvarHubFormasPagamentoApiTests(TestCase):
         for idx in range(3):
             self._forma(f"{idx:03d}", prazo_pagamento=prazo)
 
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             response = self._formas_pagamento()
 
         self.assertEqual(response.status_code, 200, response.data)

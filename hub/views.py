@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 
 from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
-from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
+from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from financeiro.services import (
     DocumentoSequenciaErro,
     ValeTrocaErro,
@@ -1067,7 +1067,20 @@ class HubFormasPagamentoView(APIView):
             FormaPagamento.objects
             .filter(empresa=empresa)
             .select_related("prazo_pagamento")
-            .prefetch_related(Prefetch("prazo_pagamento__parcelas", queryset=parcelas_ordenadas))
+            .prefetch_related(
+                Prefetch("prazo_pagamento__parcelas", queryset=parcelas_ordenadas),
+                Prefetch(
+                    "condicoes_parcelamento",
+                    queryset=(
+                        FormaPagamentoCondicao.objects
+                        .filter(empresa=empresa, ativo=True, prazo_pagamento__empresa=empresa)
+                        .select_related("prazo_pagamento")
+                        .prefetch_related(Prefetch("prazo_pagamento__parcelas", queryset=parcelas_ordenadas))
+                        .order_by("prazo_pagamento__num_parcelas", "prazo_pagamento__codigo", "Idformapagamentocondicao")
+                    ),
+                    to_attr="condicoes_parcelamento_ativas",
+                ),
+            )
             .order_by("codigo", "Idformapagamento")
         )
         condicoes = {
@@ -1088,11 +1101,34 @@ class HubFormasPagamentoView(APIView):
         for forma in formas:
             prazo = forma.prazo_pagamento
             condicao = condicoes.get((forma.pk, forma.prazo_pagamento_id))
+            condicoes_parcelamento = []
+            for condicao_parcelamento in getattr(forma, "condicoes_parcelamento_ativas", []):
+                prazo_condicao = condicao_parcelamento.prazo_pagamento
+                condicoes_parcelamento.append({
+                    "id": condicao_parcelamento.pk,
+                    "prazo_pagamento_id": prazo_condicao.pk,
+                    "prazo_codigo": prazo_condicao.codigo,
+                    "prazo_descricao": prazo_condicao.descricao,
+                    "prazo_num_parcelas": prazo_condicao.num_parcelas,
+                    "prazo_intervalo_dias": prazo_condicao.intervalo_dias,
+                    "taxa_percentual": _decimal_string(condicao_parcelamento.taxa_percentual, 4),
+                    "taxa_fixa": _decimal_string(condicao_parcelamento.taxa_fixa, 2),
+                    "parcelas": [
+                        {
+                            "ordem": parcela.ordem,
+                            "dias": parcela.dias,
+                            "percentual": _decimal_string(parcela.percentual, 6),
+                        }
+                        for parcela in prazo_condicao.parcelas.all()
+                    ],
+                })
             formas_pagamento.append({
                 "id": forma.pk,
                 "codigo": forma.codigo,
                 "descricao": forma.descricao,
                 "tipo": forma.tipo,
+                "permite_parcelamento": forma.permite_parcelamento,
+                "condicoes_parcelamento": condicoes_parcelamento,
                 "num_parcelas": prazo.num_parcelas if prazo else None,
                 "ativo": forma.ativo,
                 "prazo_pagamento": {
