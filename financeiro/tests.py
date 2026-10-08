@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
 from financeiro.models import (
+    ContaBancaria,
     FormaPagamento,
     FormaPagamentoCondicao,
     PrazoPagamento,
@@ -16,7 +17,7 @@ from financeiro.models import (
     ValeTrocaMovimento,
     ValeTrocaReserva,
 )
-from financeiro.serializers import FormaPagamentoCondicaoSerializer
+from financeiro.serializers import FormaPagamentoCondicaoSerializer, FormaPagamentoSerializer
 from financeiro.services import (
     ValeTrocaErro,
     consultar_vale_troca_online,
@@ -59,6 +60,51 @@ class FormaPagamentoCondicaoTests(TestCase):
             num_parcelas=1,
             intervalo_dias=30,
         )
+
+    def test_forma_recebivel_pode_ser_salva_sem_conta_liquidacao(self):
+        serializer = FormaPagamentoSerializer(data={
+            "empresa": self.empresa.pk,
+            "codigo": "PIX",
+            "descricao": "Pix",
+            "tipo": FormaPagamento.TIPO_PIX,
+            "ativo": True,
+            "gera_recebivel_bancario": True,
+            "conta_liquidacao": None,
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        forma = serializer.save()
+        self.assertTrue(forma.gera_recebivel_bancario)
+        self.assertIsNone(forma.conta_liquidacao)
+
+    def test_forma_rejeita_conta_liquidacao_de_outra_empresa(self):
+        loja_outra = Loja.objects.create(
+            empresa=self.outra_empresa,
+            nome_loja="Loja Financeiro Outra",
+            apelido_loja="Outra",
+            cnpj="21222333000180",
+            estado="SP",
+        )
+        conta_outra = ContaBancaria.objects.create(
+            empresa=self.outra_empresa,
+            idloja=loja_outra,
+            descricao="Conta outra empresa",
+            banco="001",
+            agencia="0001",
+            conta="12345",
+        )
+        serializer = FormaPagamentoSerializer(data={
+            "empresa": self.empresa.pk,
+            "codigo": "DEB",
+            "descricao": "Cartao de debito",
+            "tipo": FormaPagamento.TIPO_DEBITO,
+            "ativo": True,
+            "gera_recebivel_bancario": True,
+            "conta_liquidacao": conta_outra.pk,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("conta_liquidacao", serializer.errors)
 
     def test_cria_forma_pagamento_com_condicoes_validas(self):
         condicao = FormaPagamentoCondicao.objects.create(
