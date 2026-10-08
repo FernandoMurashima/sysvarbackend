@@ -18,8 +18,10 @@ from financeiro.models import (
     CashbackConfig,
     CashbackMovimento,
     FormaPagamento,
+    FormaPagamentoCondicao,
     CondicaoAdquirente,
     MovimentacaoFinanceira,
+    PrazoPagamento,
     Receber,
     ReceberItem,
     SequenciaDocumento,
@@ -61,6 +63,18 @@ UF_CODIGO = {
     "SE": "28", "BA": "29", "MG": "31", "ES": "32", "RJ": "33", "SP": "35", "PR": "41",
     "SC": "42", "RS": "43", "MS": "50", "MT": "51", "GO": "52", "DF": "53",
 }
+
+PAGAMENTO_PERSISTENCIA_CAMPOS = ("forma", "descricao", "valor", "autorizacao")
+PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS = (
+    "forma_pagamento_condicao_id",
+    "prazo_pagamento_id",
+    "prazo_codigo",
+    "prazo_descricao",
+    "num_parcelas",
+    "taxa_percentual",
+    "taxa_fixa",
+    "parcelas",
+)
 
 
 def _digito_chave(base43: str) -> str:
@@ -589,7 +603,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
         self._registrar_pagamentos(venda, pagamentos_payload)
 
-        self._registrar_financeiro(venda)
+        self._registrar_financeiro(venda, pagamentos_metadados=pagamentos_payload)
         self._registrar_cmv(venda)
         self._registrar_impostos_venda(venda)
         self._registrar_comissao(venda)
@@ -617,13 +631,22 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             valor = money(pagamento.get("valor"))
             if not forma or valor <= 0:
                 continue
-            normalizados.append({
+            normalizado = {
                 "forma": forma,
                 "descricao": str(pagamento.get("descricao") or forma).strip()[:80],
                 "valor": valor,
                 "autorizacao": str(pagamento.get("autorizacao") or "").strip()[:60],
-            })
+            }
+            normalizado.update(self._normalizar_snapshot_financeiro_pagamento(pagamento))
+            normalizados.append(normalizado)
         return normalizados
+
+    def _normalizar_snapshot_financeiro_pagamento(self, pagamento) -> Dict:
+        return {
+            campo: pagamento.get(campo)
+            for campo in PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS
+            if campo in pagamento
+        }
 
     def _forma_resumo(self, pagamentos: List[Dict]) -> str:
         if len(pagamentos) == 1:
@@ -632,7 +655,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
     def _registrar_pagamentos(self, venda: VendaPdv, pagamentos: List[Dict]):
         for pagamento in pagamentos:
-            VendaPdvPagamento.objects.create(venda=venda, **pagamento)
+            dados = {campo: pagamento[campo] for campo in PAGAMENTO_PERSISTENCIA_CAMPOS if campo in pagamento}
+            VendaPdvPagamento.objects.create(venda=venda, **dados)
 
     def _total_cashback_usado(self, pagamentos: List[Dict]) -> Decimal:
         return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] == "CASHBACK"), Decimal("0")))
@@ -1266,12 +1290,13 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         )
         gerar_lancamento_contabil_movimentacao(movimento)
 
-    def _registrar_financeiro(self, venda: VendaPdv):
+    def _registrar_financeiro(self, venda: VendaPdv, pagamentos_metadados: List[Dict] | None = None):
         if Receber.objects.filter(pedido_venda=venda.pk).exists():
             return
 
         natureza = self._natureza_venda(venda.empresa)
-        pagamentos = list(venda.pagamentos.all())
+        pagamentos = list(venda.pagamentos.all().order_by("id"))
+        pagamentos_metadados = pagamentos_metadados or []
         valor_venda = money(venda.total)
         total_beneficios = money(sum((pagamento.valor for pagamento in pagamentos if pagamento.forma in ("CASHBACK", "TROCA")), Decimal("0")))
         valor_financeiro = money(max(Decimal("0.00"), valor_venda - total_beneficios))
@@ -1299,7 +1324,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
         saldo_financeiro = valor_financeiro
         parcela_n = 1
-        for pagamento in pagamentos:
+        for indice, pagamento in enumerate(pagamentos):
             if pagamento.forma in ("CASHBACK", "TROCA"):
                 continue
             valor_pagamento = money(min(money(pagamento.valor), saldo_financeiro))
@@ -1307,6 +1332,19 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 continue
             saldo_financeiro = money(saldo_financeiro - valor_pagamento)
             forma_config = formas_config.get(str(pagamento.forma or "").upper())
+            snapshot = self._snapshot_financeiro_pagamento(pagamentos_metadados, indice)
+            if snapshot:
+                parcela_n = self._registrar_recebiveis_snapshot_condicao(
+                    venda,
+                    receber,
+                    natureza,
+                    pagamento,
+                    forma_config,
+                    valor_pagamento,
+                    parcela_n,
+                    snapshot,
+                )
+                continue
             if self._eh_cartao(forma_config):
                 parcela_n = self._registrar_recebiveis_cartao(
                     venda,
@@ -1403,6 +1441,180 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         valores = [money(money(valor_total) * percentual / divisor) for percentual in percentuais]
         valores[-1] = money(money(valor_total) - sum(valores[:-1], Decimal("0.00")))
         return valores
+
+    def _snapshot_financeiro_pagamento(self, pagamentos_metadados: List[Dict], indice: int):
+        if indice >= len(pagamentos_metadados):
+            return None
+        pagamento = pagamentos_metadados[indice] or {}
+        if not any(campo in pagamento for campo in PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS):
+            return None
+        return self._validar_snapshot_financeiro_pagamento(pagamento)
+
+    def _validar_snapshot_financeiro_pagamento(self, pagamento: Dict) -> Dict:
+        try:
+            num_parcelas = int(pagamento.get("num_parcelas") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Snapshot financeiro inválido: número de parcelas inválido.")
+        if num_parcelas <= 0:
+            raise ValueError("Snapshot financeiro inválido: número de parcelas inválido.")
+        parcelas_payload = pagamento.get("parcelas") or []
+        if not isinstance(parcelas_payload, list) or len(parcelas_payload) != num_parcelas:
+            raise ValueError("Snapshot financeiro inválido: parcelas incoerentes.")
+
+        parcelas = []
+        ordens = set()
+        for parcela in parcelas_payload:
+            try:
+                ordem = int(parcela.get("ordem") or 0)
+                dias = int(parcela.get("dias") or 0)
+                percentual = Decimal(str(parcela.get("percentual") or "0"))
+                valor_fixo = parcela.get("valor_fixo")
+                valor_fixo = None if valor_fixo in (None, "") else Decimal(str(valor_fixo))
+            except (TypeError, ValueError, ArithmeticError):
+                raise ValueError("Snapshot financeiro inválido: parcela inválida.")
+            if ordem <= 0 or ordem in ordens or dias < 0 or percentual < 0 or (valor_fixo is not None and valor_fixo < 0):
+                raise ValueError("Snapshot financeiro inválido: parcela inválida.")
+            ordens.add(ordem)
+            parcelas.append({
+                "ordem": ordem,
+                "dias": dias,
+                "percentual": percentual,
+                "valor_fixo": valor_fixo,
+            })
+        if ordens != set(range(1, num_parcelas + 1)):
+            raise ValueError("Snapshot financeiro inválido: ordens de parcelas incoerentes.")
+
+        try:
+            taxa_percentual = Decimal(str(pagamento.get("taxa_percentual") or "0"))
+            taxa_fixa = Decimal(str(pagamento.get("taxa_fixa") or "0"))
+        except (TypeError, ValueError, ArithmeticError):
+            raise ValueError("Snapshot financeiro inválido: taxas inválidas.")
+        if taxa_percentual < 0 or taxa_fixa < 0:
+            raise ValueError("Snapshot financeiro inválido: taxas inválidas.")
+
+        return {
+            "forma_pagamento_condicao_id": self._int_ou_none(pagamento.get("forma_pagamento_condicao_id")),
+            "prazo_pagamento_id": self._int_ou_none(pagamento.get("prazo_pagamento_id")),
+            "num_parcelas": num_parcelas,
+            "taxa_percentual": taxa_percentual,
+            "taxa_fixa": taxa_fixa,
+            "parcelas": sorted(parcelas, key=lambda item: item["ordem"]),
+        }
+
+    def _int_ou_none(self, value):
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ValueError("Snapshot financeiro inválido: identificador inválido.")
+
+    def _data_base_venda(self, venda: VendaPdv):
+        data_venda = venda.data_venda
+        if timezone.is_aware(data_venda):
+            return timezone.localtime(data_venda).date()
+        return data_venda.date()
+
+    def _valores_parcelas_snapshot(self, valor_total: Decimal, parcelas: List[Dict]) -> List[Decimal]:
+        if not parcelas:
+            return [money(valor_total)]
+        if any(parcela["valor_fixo"] is not None for parcela in parcelas):
+            valores = [
+                money(parcela["valor_fixo"]) if parcela["valor_fixo"] is not None else Decimal("0.00")
+                for parcela in parcelas
+            ]
+            sem_valor_fixo = [idx for idx, parcela in enumerate(parcelas) if parcela["valor_fixo"] is None]
+            total_percentual = sum((parcelas[idx]["percentual"] for idx in sem_valor_fixo), Decimal("0"))
+            if sem_valor_fixo and total_percentual > 0:
+                divisor = Decimal("1") if total_percentual <= 1 else Decimal("100")
+                for idx in sem_valor_fixo:
+                    valores[idx] = money(money(valor_total) * parcelas[idx]["percentual"] / divisor)
+            elif sem_valor_fixo:
+                distribuido = self._distribuir_valor(money(valor_total) - sum(valores, Decimal("0.00")), len(sem_valor_fixo))
+                for idx, valor in zip(sem_valor_fixo, distribuido):
+                    valores[idx] = valor
+            valores[-1] = money(valores[-1] + (money(valor_total) - sum(valores, Decimal("0.00"))))
+        else:
+            total_percentual = sum((parcela["percentual"] for parcela in parcelas), Decimal("0"))
+            if total_percentual <= 0:
+                valores = self._distribuir_valor(valor_total, len(parcelas))
+            else:
+                divisor = Decimal("1") if total_percentual <= 1 else Decimal("100")
+                valores = [money(money(valor_total) * parcela["percentual"] / divisor) for parcela in parcelas]
+                valores[-1] = money(money(valor_total) - sum(valores[:-1], Decimal("0.00")))
+        if any(valor < 0 for valor in valores):
+            raise ValueError("Snapshot financeiro inválido: valores de parcelas inválidos.")
+        return valores
+
+    def _prazo_snapshot_seguro(self, venda: VendaPdv, forma: FormaPagamento, snapshot: Dict):
+        condicao_id = snapshot.get("forma_pagamento_condicao_id")
+        prazo_id = snapshot.get("prazo_pagamento_id")
+        prazo = None
+        if condicao_id:
+            condicao = (
+                FormaPagamentoCondicao.objects
+                .select_related("forma_pagamento", "prazo_pagamento")
+                .filter(pk=condicao_id)
+                .first()
+            )
+            if condicao:
+                if condicao.empresa_id != venda.empresa_id or condicao.forma_pagamento_id != forma.pk:
+                    raise ValueError("Snapshot financeiro inválido: condição pertence a outra empresa ou forma.")
+                prazo = condicao.prazo_pagamento
+        if prazo_id:
+            prazo_ref = PrazoPagamento.objects.filter(pk=prazo_id).first()
+            if prazo_ref:
+                if prazo_ref.empresa_id != venda.empresa_id:
+                    raise ValueError("Snapshot financeiro inválido: prazo pertence a outra empresa.")
+                if prazo and prazo.pk != prazo_ref.pk:
+                    raise ValueError("Snapshot financeiro inválido: prazo diferente da condição.")
+                prazo = prazo_ref
+        return prazo
+
+    def _registrar_recebiveis_snapshot_condicao(
+        self,
+        venda: VendaPdv,
+        receber: Receber,
+        natureza: Nat_Lancamento,
+        pagamento: VendaPdvPagamento,
+        forma: FormaPagamento,
+        valor_pagamento: Decimal,
+        parcela_inicial: int,
+        snapshot: Dict,
+    ) -> int:
+        if not forma:
+            raise ValueError("Forma de pagamento do snapshot financeiro não localizada.")
+        parcelas = snapshot["parcelas"]
+        valores_brutos = self._valores_parcelas_snapshot(valor_pagamento, parcelas)
+        taxas_fixas = self._distribuir_valor(snapshot["taxa_fixa"], len(valores_brutos))
+        data_base = self._data_base_venda(venda)
+        prazo = self._prazo_snapshot_seguro(venda, forma, snapshot)
+
+        for idx, (parcela, valor_bruto) in enumerate(zip(parcelas, valores_brutos)):
+            taxa_fixa_parcela = taxas_fixas[idx]
+            valor_taxa = money((money(valor_bruto) * snapshot["taxa_percentual"] / Decimal("100")) + taxa_fixa_parcela)
+            valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - valor_taxa))
+            ReceberItem.objects.create(
+                Idreceber=receber,
+                venda_pagamento=pagamento,
+                forma_pagamento_ref=forma,
+                prazo_pagamento=prazo,
+                parcela_n=parcela_inicial,
+                parcela_total=len(valores_brutos),
+                status=ReceberItem.STATUS_PREVISTO,
+                Data_vencimento=data_base + timedelta(days=parcela["dias"]),
+                valor_parcela=valor_bruto,
+                valor_bruto=valor_bruto,
+                taxa_percentual=snapshot["taxa_percentual"],
+                taxa_fixa=taxa_fixa_parcela,
+                valor_taxa=valor_taxa,
+                valor_liquido_previsto=valor_liquido,
+                FormaPagamento=pagamento.forma,
+                Previsao=True,
+                Idnatureza=natureza,
+            )
+            parcela_inicial += 1
+        return parcela_inicial
 
     def _registrar_recebiveis_cartao(
         self,

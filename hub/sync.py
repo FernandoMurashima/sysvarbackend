@@ -22,6 +22,16 @@ from produto.models import ProdutoDetalhe
 
 
 PAGAMENTO_PERSISTENCIA_CAMPOS = ("forma", "descricao", "valor", "autorizacao")
+PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS = (
+    "forma_pagamento_condicao_id",
+    "prazo_pagamento_id",
+    "prazo_codigo",
+    "prazo_descricao",
+    "num_parcelas",
+    "taxa_percentual",
+    "taxa_fixa",
+    "parcelas",
+)
 
 from hub.models import (
     HubClienteMapeamento,
@@ -322,7 +332,7 @@ class HubSyncProcessor:
         venda.forma_pagamento = view._forma_resumo(pagamentos)
         venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
         view._registrar_pagamentos(venda, self._pagamentos_persistencia(pagamentos))
-        view._registrar_financeiro(venda)
+        view._registrar_financeiro(venda, pagamentos_metadados=pagamentos)
         if pagamentos_reserva:
             consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_reserva)
         else:
@@ -512,11 +522,20 @@ class HubSyncProcessor:
                 "operacao_uuid": pagamento.get("operacao_uuid"),
                 "reserva_id": pagamento.get("vale_troca_reserva_id") or pagamento.get("reserva_id"),
             }
-        return {
+        normalizado = {
             "forma": str(codigo).upper(),
             "descricao": pagamento.get("descricao") or str(codigo).upper(),
             "valor": pagamento.get("valor"),
             "autorizacao": pagamento.get("autorizacao") or "",
+        }
+        normalizado.update(self._snapshot_financeiro_pagamento(pagamento))
+        return normalizado
+
+    def _snapshot_financeiro_pagamento(self, pagamento):
+        return {
+            campo: pagamento.get(campo)
+            for campo in PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS
+            if campo in pagamento
         }
 
     def _pagamentos_persistencia(self, pagamentos):

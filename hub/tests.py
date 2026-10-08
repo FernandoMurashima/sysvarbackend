@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -2822,6 +2822,54 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload.update(extras)
         return payload
 
+    def _forma_condicao_pagamento(self, codigo="CRE", parcelas=3, taxa_percentual="9.0000", taxa_fixa="9.00", tipo=None):
+        forma = FormaPagamento.objects.create(
+            empresa=self.empresa,
+            codigo=codigo,
+            descricao=f"{codigo} parcelado",
+            tipo=tipo or FormaPagamento.TIPO_CREDITO,
+            permite_parcelamento=True,
+            gera_recebivel_bancario=True,
+        )
+        prazo = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo=f"{parcelas}X",
+            descricao="/".join(str(30 * idx) for idx in range(1, parcelas + 1)),
+            num_parcelas=parcelas,
+            intervalo_dias=30,
+        )
+        for idx in range(1, parcelas + 1):
+            percentual = Decimal("1.000000") / Decimal(parcelas)
+            PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=idx, dias=30 * idx, percentual=percentual.quantize(Decimal("0.000001")))
+        condicao = FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=forma,
+            prazo_pagamento=prazo,
+            taxa_percentual=Decimal(taxa_percentual),
+            taxa_fixa=Decimal(taxa_fixa),
+        )
+        return forma, prazo, condicao
+
+    def _snapshot_pagamento_condicao(self, condicao, prazo, taxa_percentual="2.4000", taxa_fixa="3.00"):
+        return {
+            "forma_pagamento_condicao_id": condicao.pk,
+            "prazo_pagamento_id": prazo.pk,
+            "prazo_codigo": prazo.codigo,
+            "prazo_descricao": prazo.descricao,
+            "num_parcelas": prazo.num_parcelas,
+            "taxa_percentual": taxa_percentual,
+            "taxa_fixa": taxa_fixa,
+            "parcelas": [
+                {
+                    "ordem": parcela.ordem,
+                    "dias": parcela.dias,
+                    "percentual": str(parcela.percentual),
+                    "valor_fixo": None,
+                }
+                for parcela in prazo.parcelas.order_by("ordem")
+            ],
+        }
+
     def _criar_venda_mapeada(self, hub=None, venda_uuid="23232323-2323-4232-8232-232323232323", loja=None):
         loja = loja or self.loja
         venda = VendaPdv.objects.create(
@@ -3018,7 +3066,10 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(VendaPdvPagamento.objects.filter(venda_id=venda_id).count(), 1)
         receber = Receber.objects.get(pedido_venda=venda_id)
         self.assertEqual(receber.Valor_total, Decimal("20.00"))
-        self.assertEqual(sum(ReceberItem.objects.filter(Idreceber=receber).values_list("valor_parcela", flat=True), Decimal("0.00")), Decimal("20.00"))
+        itens_receber = list(ReceberItem.objects.filter(Idreceber=receber).order_by("parcela_n"))
+        self.assertEqual(sum((item.valor_parcela for item in itens_receber), Decimal("0.00")), Decimal("20.00"))
+        self.assertEqual(len(itens_receber), 1)
+        self.assertEqual(itens_receber[0].status, ReceberItem.STATUS_BAIXADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=VendaPdv.objects.get(pk=venda_id).documento).count(), 1)
@@ -3027,6 +3078,98 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
+
+    def test_venda_hub_parcelada_usa_snapshot_financeiro_historico(self):
+        self._hub_autenticado()
+        forma, prazo, condicao = self._forma_condicao_pagamento(parcelas=3, taxa_percentual="9.0000", taxa_fixa="9.00")
+        snapshot = self._snapshot_pagamento_condicao(condicao, prazo, taxa_percentual="2.4000", taxa_fixa="3.00")
+        payload = self._payload_venda(
+            venda_uuid="71717171-7171-4171-8171-717171717171",
+            total="300.00",
+            valor_recebido="300.00",
+            finalizado_em="2026-10-08T10:00:00-03:00",
+            pagamentos=[{
+                "codigo": forma.codigo,
+                "tipo": "CREDITO",
+                "descricao": "Cartão de crédito",
+                "valor": "300.00",
+                **snapshot,
+            }],
+        )
+        payload["itens"][0]["preco_unitario"] = "300.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-parcelada-snapshot")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        receber = Receber.objects.get(pedido_venda=venda.pk)
+        itens = list(ReceberItem.objects.filter(Idreceber=receber).order_by("parcela_n"))
+
+        self.assertEqual(receber.Titulo, venda.documento)
+        self.assertEqual(receber.Documento, venda.documento)
+        self.assertEqual(receber.Valor_total, Decimal("300.00"))
+        self.assertEqual(len(itens), 3)
+        self.assertEqual([item.parcela_n for item in itens], [1, 2, 3])
+        self.assertEqual([item.parcela_total for item in itens], [3, 3, 3])
+        self.assertEqual([item.Data_vencimento for item in itens], [date(2026, 11, 7), date(2026, 12, 7), date(2027, 1, 6)])
+        self.assertEqual(sum((item.valor_bruto for item in itens), Decimal("0.00")), Decimal("300.00"))
+        self.assertEqual([item.status for item in itens], [ReceberItem.STATUS_PREVISTO] * 3)
+        self.assertEqual([item.Previsao for item in itens], [True, True, True])
+        self.assertEqual([item.taxa_percentual for item in itens], [Decimal("2.4000")] * 3)
+        self.assertEqual(sum((item.taxa_fixa for item in itens), Decimal("0.00")), Decimal("3.00"))
+        self.assertEqual(sum((item.valor_taxa for item in itens), Decimal("0.00")), Decimal("10.20"))
+        self.assertEqual(sum((item.valor_liquido_previsto for item in itens), Decimal("0.00")), Decimal("289.80"))
+        self.assertEqual([item.prazo_pagamento_id for item in itens], [prazo.pk] * 3)
+        self.assertEqual([item.forma_pagamento_ref_id for item in itens], [forma.pk] * 3)
+        self.assertFalse(MovimentacaoFinanceira.objects.filter(receber_item__in=itens).exists())
+
+    def test_venda_hub_mista_cashback_parcela_somente_valor_financeiro(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("0.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("50.00"),
+        )
+        forma, prazo, condicao = self._forma_condicao_pagamento(codigo="PIX", parcelas=2, taxa_percentual="7.0000", taxa_fixa="4.00", tipo=FormaPagamento.TIPO_PIX)
+        snapshot = self._snapshot_pagamento_condicao(condicao, prazo, taxa_percentual="1.0000", taxa_fixa="2.00")
+        payload = self._payload_venda(
+            venda_uuid="72727272-7272-4272-8272-727272727272",
+            total="300.00",
+            valor_recebido="300.00",
+            finalizado_em="2026-10-08T10:00:00-03:00",
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "50.00"},
+                {
+                    "codigo": forma.codigo,
+                    "tipo": "PIX",
+                    "descricao": "Pix parcelado",
+                    "valor": "250.00",
+                    **snapshot,
+                },
+            ],
+        )
+        payload["itens"][0]["preco_unitario"] = "300.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-mista-snapshot")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        receber = Receber.objects.get(pedido_venda=venda.pk)
+        itens = list(ReceberItem.objects.filter(Idreceber=receber).order_by("parcela_n"))
+
+        self.assertEqual(receber.Valor_total, Decimal("250.00"))
+        self.assertEqual(len(itens), 2)
+        self.assertEqual(sum((item.valor_bruto for item in itens), Decimal("0.00")), Decimal("250.00"))
+        self.assertEqual([item.FormaPagamento for item in itens], [forma.codigo, forma.codigo])
+        self.assertFalse(ReceberItem.objects.filter(Idreceber=receber, FormaPagamento="CASHBACK").exists())
+        self.assertEqual([item.status for item in itens], [ReceberItem.STATUS_PREVISTO, ReceberItem.STATUS_PREVISTO])
 
     def test_venda_finalizada_sem_cliente_usa_cliente_padrao_da_empresa(self):
         self._hub_autenticado()
