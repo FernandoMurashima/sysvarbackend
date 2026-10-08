@@ -1446,7 +1446,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if indice >= len(pagamentos_metadados):
             return None
         pagamento = pagamentos_metadados[indice] or {}
-        if not any(campo in pagamento for campo in PAGAMENTO_SNAPSHOT_FINANCEIRO_CAMPOS):
+        if pagamento.get("forma_pagamento_condicao_id") in (None, ""):
             return None
         return self._validar_snapshot_financeiro_pagamento(pagamento)
 

@@ -3054,7 +3054,17 @@ class SysvarHubSyncPushApiTests(TestCase):
         self._hub_autenticado()
         payload = self._payload_venda(total="20.00", valor_recebido="20.00")
         payload["itens"][0]["quantidade"] = 2
-        payload["pagamentos"][0]["valor"] = "20.00"
+        payload["pagamentos"][0].update({
+            "valor": "20.00",
+            "forma_pagamento_condicao_id": None,
+            "prazo_pagamento_id": None,
+            "prazo_codigo": "",
+            "prazo_descricao": "",
+            "num_parcelas": 1,
+            "taxa_percentual": "0.0000",
+            "taxa_fixa": "0.00",
+            "parcelas": [],
+        })
 
         response = self._push([self._evento("VENDA_FINALIZADA", payload)])
         self.assertEqual(response.status_code, 200, response.data)
@@ -3070,6 +3080,8 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(sum((item.valor_parcela for item in itens_receber), Decimal("0.00")), Decimal("20.00"))
         self.assertEqual(len(itens_receber), 1)
         self.assertEqual(itens_receber[0].status, ReceberItem.STATUS_BAIXADO)
+        self.assertEqual(itens_receber[0].valor_baixa, Decimal("20.00"))
+        self.assertIsNotNone(itens_receber[0].data_baixa)
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("3.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(documento=VendaPdv.objects.get(pk=venda_id).documento).count(), 1)
