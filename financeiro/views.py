@@ -4,6 +4,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django.utils import timezone
 from django.db import models, transaction
+from django.db.models import Prefetch
 from decimal import Decimal, InvalidOperation
 from accounts.permissions import HasModuleRole
 from cadastros.models import Nat_Lancamento
@@ -19,7 +20,7 @@ from .models import (
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
     AntecipacaoRecebivel, AntecipacaoRecebivelItem,
-    FormaPagamento, Adquirente, CondicaoAdquirente, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, Adquirente, CondicaoAdquirente, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela
 )
 from .serializers import (
     ConfigFinanceiraSerializer, TipoDespesaPdvSerializer,
@@ -30,7 +31,7 @@ from .serializers import (
     PagarSerializer, PagarItemSerializer, PagarRateioSerializer,
     ReceberSerializer, ReceberItemSerializer, ReceberRateioSerializer,
     AntecipacaoRecebivelSerializer,
-    FormaPagamentoSerializer, AdquirenteSerializer, CondicaoAdquirenteSerializer,
+    FormaPagamentoSerializer, AdquirenteSerializer, CondicaoAdquirenteSerializer, FormaPagamentoCondicaoSerializer,
     PrazoPagamentoSerializer, PrazoPagamentoParcelaSerializer
 )
 from .services import (
@@ -233,11 +234,18 @@ class BaseViewSet(viewsets.ModelViewSet):
 class FormaPagamentoViewSet(BaseViewSet):
     read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     write_roles = ["Admin", "Diretor", "Gerente"]
-    queryset = FormaPagamento.objects.all().order_by('codigo')
+    queryset = FormaPagamento.objects.select_related('prazo_pagamento').all().order_by('codigo')
     serializer_class = FormaPagamentoSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
+        condicoes_ativas = (
+            FormaPagamentoCondicao.objects
+            .filter(ativo=True)
+            .select_related('prazo_pagamento')
+            .order_by('prazo_pagamento__num_parcelas', 'prazo_pagamento__codigo')
+        )
+        qs = qs.prefetch_related(Prefetch('condicoes_parcelamento', queryset=condicoes_ativas, to_attr='condicoes_parcelamento_ativas'))
         ativo = self.request.query_params.get('ativo')
         codigo = self.request.query_params.get('codigo')
         if ativo in ('true', 'false', '1', '0'):
@@ -245,6 +253,26 @@ class FormaPagamentoViewSet(BaseViewSet):
             qs = qs.filter(ativo=v)
         if codigo:
             qs = qs.filter(codigo=codigo)
+        return qs
+
+
+class FormaPagamentoCondicaoViewSet(BaseViewSet):
+    read_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
+    write_roles = ["Admin", "Diretor", "Gerente"]
+    queryset = FormaPagamentoCondicao.objects.select_related('forma_pagamento', 'prazo_pagamento').all()
+    serializer_class = FormaPagamentoCondicaoSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ativo = self.request.query_params.get('ativo')
+        forma = self.request.query_params.get('forma_pagamento')
+        prazo = self.request.query_params.get('prazo_pagamento')
+        if ativo in ('true', 'false', '1', '0'):
+            qs = qs.filter(ativo=ativo in ('true', '1'))
+        if forma:
+            qs = qs.filter(forma_pagamento_id=forma)
+        if prazo:
+            qs = qs.filter(prazo_pagamento_id=prazo)
         return qs
 
 

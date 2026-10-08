@@ -1,11 +1,22 @@
 from decimal import Decimal
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
-from financeiro.models import SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.models import (
+    FormaPagamento,
+    FormaPagamentoCondicao,
+    PrazoPagamento,
+    SequenciaDocumento,
+    ValeTroca,
+    ValeTrocaMovimento,
+    ValeTrocaReserva,
+)
+from financeiro.serializers import FormaPagamentoCondicaoSerializer
 from financeiro.services import (
     ValeTrocaErro,
     consultar_vale_troca_online,
@@ -14,6 +25,99 @@ from financeiro.services import (
 )
 from fiscal.models import VendaDevolucao, VendaPdv
 from hub.models import SysvarHub
+
+
+class FormaPagamentoCondicaoTests(TestCase):
+    def setUp(self):
+        self.empresa = Empresa.objects.create(nome="Empresa Financeiro", documento="11222333000180")
+        self.outra_empresa = Empresa.objects.create(nome="Outra Empresa Financeiro", documento="21222333000180")
+        self.forma = FormaPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="CRE",
+            descricao="Cartao de credito",
+            tipo=FormaPagamento.TIPO_CREDITO,
+            permite_parcelamento=True,
+        )
+        self.prazo_1x = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="1X",
+            descricao="1x",
+            num_parcelas=1,
+            intervalo_dias=30,
+        )
+        self.prazo_2x = PrazoPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="2X",
+            descricao="2x",
+            num_parcelas=2,
+            intervalo_dias=30,
+        )
+        self.prazo_outra_empresa = PrazoPagamento.objects.create(
+            empresa=self.outra_empresa,
+            codigo="1X",
+            descricao="1x outra empresa",
+            num_parcelas=1,
+            intervalo_dias=30,
+        )
+
+    def test_cria_forma_pagamento_com_condicoes_validas(self):
+        condicao = FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=self.forma,
+            prazo_pagamento=self.prazo_1x,
+            taxa_percentual=Decimal("2.1000"),
+            taxa_fixa=Decimal("0.50"),
+        )
+
+        self.assertEqual(condicao.forma_pagamento, self.forma)
+        self.assertEqual(condicao.prazo_pagamento, self.prazo_1x)
+        self.assertTrue(self.forma.permite_parcelamento)
+
+    def test_serializer_impede_prazo_de_outra_empresa(self):
+        serializer = FormaPagamentoCondicaoSerializer(data={
+            "empresa": self.empresa.pk,
+            "forma_pagamento": self.forma.pk,
+            "prazo_pagamento": self.prazo_outra_empresa.pk,
+            "taxa_percentual": "2.1000",
+            "taxa_fixa": "0.00",
+            "ativo": True,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("prazo_pagamento", serializer.errors)
+
+    def test_api_formas_retorna_condicoes_ativas(self):
+        FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=self.forma,
+            prazo_pagamento=self.prazo_1x,
+            taxa_percentual=Decimal("2.1000"),
+            taxa_fixa=Decimal("0.00"),
+            ativo=True,
+        )
+        FormaPagamentoCondicao.objects.create(
+            empresa=self.empresa,
+            forma_pagamento=self.forma,
+            prazo_pagamento=self.prazo_2x,
+            taxa_percentual=Decimal("2.2500"),
+            taxa_fixa=Decimal("0.00"),
+            ativo=False,
+        )
+        user = get_user_model().objects.create_superuser("financeiro-admin", "admin@test.local", "123")
+        client = APIClient()
+        client.force_authenticate(user)
+
+        resp = client.get("/api/financeiro/formas/", {"empresa": self.empresa.pk, "codigo": "CRE"})
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
+        forma_payload = payload[0]
+        self.assertTrue(forma_payload["permite_parcelamento"])
+        self.assertEqual(len(forma_payload["condicoes_parcelamento"]), 1)
+        condicao_payload = forma_payload["condicoes_parcelamento"][0]
+        self.assertEqual(condicao_payload["prazo_codigo"], "1X")
+        self.assertEqual(condicao_payload["prazo_num_parcelas"], 1)
+        self.assertEqual(condicao_payload["taxa_percentual"], "2.1000")
 
 
 class ValeTrocaSequenciaTests(TestCase):

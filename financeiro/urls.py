@@ -8,6 +8,7 @@ from .views import (
     ReceberViewSet, ReceberItemViewSet, ReceberRateioViewSet,
     AntecipacaoRecebivelViewSet,
     FormaPagamentoViewSet,
+    FormaPagamentoCondicaoViewSet,
     AdquirenteViewSet, CondicaoAdquirenteViewSet,
     PrazoPagamentoViewSet, PrazoPagamentoParcelaViewSet
 )
@@ -16,6 +17,7 @@ router = DefaultRouter()
 router.register('config-financeira', ConfigFinanceiraViewSet)
 router.register('tipos-despesa-pdv', TipoDespesaPdvViewSet)
 router.register('formas', FormaPagamentoViewSet)
+router.register('formas-condicoes', FormaPagamentoCondicaoViewSet)
 router.register('adquirentes', AdquirenteViewSet)
 router.register('condicoes-adquirente', CondicaoAdquirenteViewSet)
 router.register('prazos', PrazoPagamentoViewSet)

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Case, DecimalField, Sum, Value, When
 from django.utils import timezone
@@ -39,6 +40,7 @@ class FormaPagamento(models.Model):
         blank=True,
         related_name='formas_pagamento',
     )
+    permite_parcelamento = models.BooleanField(default=False)
     conta_liquidacao = models.ForeignKey(
         'financeiro.ContaBancaria',
         on_delete=models.PROTECT,
@@ -108,6 +110,43 @@ class CondicaoAdquirente(models.Model):
 
     def __str__(self):
         return f"{self.adquirente} - {self.forma_pagamento} - {self.prazo_pagamento}"
+
+
+class FormaPagamentoCondicao(models.Model):
+    Idformapagamentocondicao = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, null=True, blank=True, related_name='formas_pagamento_condicoes', db_index=True)
+    forma_pagamento = models.ForeignKey(FormaPagamento, on_delete=models.PROTECT, related_name='condicoes_parcelamento')
+    prazo_pagamento = models.ForeignKey('financeiro.PrazoPagamento', on_delete=models.PROTECT, related_name='formas_pagamento_condicoes')
+    taxa_percentual = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    taxa_fixa = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    ativo = models.BooleanField(default=True)
+    data_cadastro = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'financeiro_forma_pagamento_condicao'
+        constraints = [
+            models.UniqueConstraint(fields=['forma_pagamento', 'prazo_pagamento'], name='uq_forma_pagamento_condicao_prazo')
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'ativo'], name='financeiro__empresa_7a0a69_idx'),
+            models.Index(fields=['forma_pagamento', 'ativo'], name='financeiro__forma_a_0f2e86_idx'),
+        ]
+        ordering = ['forma_pagamento__codigo', 'prazo_pagamento__num_parcelas', 'prazo_pagamento__codigo']
+
+    def clean(self):
+        super().clean()
+        empresa_id = self.empresa_id
+        forma_empresa_id = getattr(self.forma_pagamento, 'empresa_id', None)
+        prazo_empresa_id = getattr(self.prazo_pagamento, 'empresa_id', None)
+        if empresa_id and forma_empresa_id and forma_empresa_id != empresa_id:
+            raise ValidationError({'forma_pagamento': 'A forma de pagamento pertence a outra empresa.'})
+        if empresa_id and prazo_empresa_id and prazo_empresa_id != empresa_id:
+            raise ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
+        if forma_empresa_id and prazo_empresa_id and forma_empresa_id != prazo_empresa_id:
+            raise ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
+
+    def __str__(self):
+        return f"{self.forma_pagamento} - {self.prazo_pagamento}"
 
 
 class PrazoPagamento(models.Model):

@@ -5,7 +5,7 @@ from .models import (
     ValeTroca, ValeTrocaMovimento,
     Pagar, PagarItem, PagarRateio,
     Receber, ReceberItem, ReceberRateio,
-    FormaPagamento, Adquirente, CondicaoAdquirente, PrazoPagamento, PrazoPagamentoParcela
+    FormaPagamento, Adquirente, CondicaoAdquirente, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela
 )
 
 class PagarRateioInline(admin.TabularInline):
@@ -152,8 +152,8 @@ class ReceberRateioAdmin(admin.ModelAdmin):
 
 @admin.register(FormaPagamento)
 class FormaPagamentoAdmin(admin.ModelAdmin):
-    list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "prazo_pagamento", "ativo", "data_cadastro")
-    list_filter = ("ativo", "tipo")
+    list_display = ("Idformapagamento", "codigo", "descricao", "tipo", "permite_parcelamento", "prazo_pagamento", "ativo", "data_cadastro")
+    list_filter = ("ativo", "tipo", "permite_parcelamento")
     search_fields = ("codigo", "descricao")
     readonly_fields = ("data_cadastro",)
 
@@ -171,6 +171,14 @@ class CondicaoAdquirenteAdmin(admin.ModelAdmin):
     list_display = ("Idcondicaoadquirente", "empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "taxa_percentual", "taxa_fixa", "ativo")
     list_filter = ("empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "ativo")
     search_fields = ("adquirente__codigo", "adquirente__descricao", "forma_pagamento__codigo", "prazo_pagamento__codigo")
+    readonly_fields = ("data_cadastro",)
+
+
+@admin.register(FormaPagamentoCondicao)
+class FormaPagamentoCondicaoAdmin(admin.ModelAdmin):
+    list_display = ("Idformapagamentocondicao", "empresa", "forma_pagamento", "prazo_pagamento", "taxa_percentual", "taxa_fixa", "ativo")
+    list_filter = ("empresa", "forma_pagamento", "prazo_pagamento", "ativo")
+    search_fields = ("forma_pagamento__codigo", "forma_pagamento__descricao", "prazo_pagamento__codigo", "prazo_pagamento__descricao")
     readonly_fields = ("data_cadastro",)
 
 

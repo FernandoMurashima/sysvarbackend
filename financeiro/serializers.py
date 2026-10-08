@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    FormaPagamento, Adquirente, CondicaoAdquirente,
+    FormaPagamento, Adquirente, CondicaoAdquirente, FormaPagamentoCondicao,
     PrazoPagamento, PrazoPagamentoParcela,
     ConfigFinanceira, TipoDespesaPdv,
     Caixa, ContaBancaria, MovimentacaoFinanceira,
@@ -56,7 +56,31 @@ class PrazoPagamentoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class FormaPagamentoCondicaoResumoSerializer(serializers.ModelSerializer):
+    prazo = serializers.IntegerField(source='prazo_pagamento_id', read_only=True)
+    prazo_codigo = serializers.CharField(source='prazo_pagamento.codigo', read_only=True)
+    prazo_descricao = serializers.CharField(source='prazo_pagamento.descricao', read_only=True)
+    prazo_num_parcelas = serializers.IntegerField(source='prazo_pagamento.num_parcelas', read_only=True)
+
+    class Meta:
+        model = FormaPagamentoCondicao
+        fields = (
+            'Idformapagamentocondicao',
+            'prazo',
+            'prazo_pagamento',
+            'prazo_codigo',
+            'prazo_descricao',
+            'prazo_num_parcelas',
+            'taxa_percentual',
+            'taxa_fixa',
+            'ativo',
+        )
+        read_only_fields = fields
+
+
 class FormaPagamentoSerializer(serializers.ModelSerializer):
+    condicoes_parcelamento = serializers.SerializerMethodField()
+
     class Meta:
         model = FormaPagamento
         fields = '__all__'
@@ -77,6 +101,17 @@ class FormaPagamentoSerializer(serializers.ModelSerializer):
         if tef and not str(modalidade or '').strip():
             raise serializers.ValidationError({'tef_modalidade': 'Informe a modalidade do TEF.'})
         return attrs
+
+    def get_condicoes_parcelamento(self, obj):
+        condicoes = getattr(obj, 'condicoes_parcelamento_ativas', None)
+        if condicoes is None:
+            condicoes = (
+                obj.condicoes_parcelamento
+                .filter(ativo=True)
+                .select_related('prazo_pagamento')
+                .order_by('prazo_pagamento__num_parcelas', 'prazo_pagamento__codigo')
+            )
+        return FormaPagamentoCondicaoResumoSerializer(condicoes, many=True).data
 
 
 class AdquirenteSerializer(serializers.ModelSerializer):
@@ -107,6 +142,34 @@ class CondicaoAdquirenteSerializer(serializers.ModelSerializer):
         for campo, obj in (('adquirente', adquirente), ('forma_pagamento', forma), ('prazo_pagamento', prazo)):
             if empresa and obj and getattr(obj, 'empresa_id', None) and obj.empresa_id != empresa.id:
                 raise serializers.ValidationError({campo: 'O cadastro pertence a outra empresa.'})
+        if attrs.get('taxa_percentual', getattr(self.instance, 'taxa_percentual', 0)) < 0:
+            raise serializers.ValidationError({'taxa_percentual': 'A taxa percentual não pode ser negativa.'})
+        if attrs.get('taxa_fixa', getattr(self.instance, 'taxa_fixa', 0)) < 0:
+            raise serializers.ValidationError({'taxa_fixa': 'A taxa fixa não pode ser negativa.'})
+        return attrs
+
+
+class FormaPagamentoCondicaoSerializer(serializers.ModelSerializer):
+    forma_codigo = serializers.CharField(source='forma_pagamento.codigo', read_only=True)
+    forma_descricao = serializers.CharField(source='forma_pagamento.descricao', read_only=True)
+    prazo_codigo = serializers.CharField(source='prazo_pagamento.codigo', read_only=True)
+    prazo_descricao = serializers.CharField(source='prazo_pagamento.descricao', read_only=True)
+    prazo_num_parcelas = serializers.IntegerField(source='prazo_pagamento.num_parcelas', read_only=True)
+
+    class Meta:
+        model = FormaPagamentoCondicao
+        fields = '__all__'
+        read_only_fields = ('data_cadastro',)
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
+        forma = attrs.get('forma_pagamento', getattr(self.instance, 'forma_pagamento', None))
+        prazo = attrs.get('prazo_pagamento', getattr(self.instance, 'prazo_pagamento', None))
+        for campo, obj in (('forma_pagamento', forma), ('prazo_pagamento', prazo)):
+            if empresa and obj and getattr(obj, 'empresa_id', None) and obj.empresa_id != empresa.id:
+                raise serializers.ValidationError({campo: 'O cadastro pertence a outra empresa.'})
+        if forma and prazo and getattr(forma, 'empresa_id', None) and getattr(prazo, 'empresa_id', None) and forma.empresa_id != prazo.empresa_id:
+            raise serializers.ValidationError({'prazo_pagamento': 'O prazo pertence a outra empresa.'})
         if attrs.get('taxa_percentual', getattr(self.instance, 'taxa_percentual', 0)) < 0:
             raise serializers.ValidationError({'taxa_percentual': 'A taxa percentual não pode ser negativa.'})
         if attrs.get('taxa_fixa', getattr(self.instance, 'taxa_fixa', 0)) < 0:
