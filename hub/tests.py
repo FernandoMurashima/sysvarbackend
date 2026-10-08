@@ -3146,6 +3146,138 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual([item.condicao_adquirente_id for item in itens], [condicao_adquirente.pk] * 3)
         self.assertFalse(MovimentacaoFinanceira.objects.filter(receber_item__in=itens).exists())
 
+    def test_venda_hub_condicoes_deb_e_credito_geram_parcelas_previstas_pelo_snapshot(self):
+        self._hub_autenticado()
+        forma_deb, prazo_av, condicao_deb = self._forma_condicao_pagamento(codigo="DEB", parcelas=1, taxa_percentual="0.0000", taxa_fixa="0.00", tipo=FormaPagamento.TIPO_DEBITO)
+        prazo_av.codigo = "AV"
+        prazo_av.descricao = "À vista"
+        prazo_av.intervalo_dias = 0
+        prazo_av.save(update_fields=["codigo", "descricao", "intervalo_dias"])
+        parcela_av = prazo_av.parcelas.get()
+        parcela_av.dias = 0
+        parcela_av.percentual = Decimal("1.000000")
+        parcela_av.save(update_fields=["dias", "percentual"])
+        forma_cre = FormaPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="CRE",
+            descricao="Cartão de crédito",
+            tipo=FormaPagamento.TIPO_CREDITO,
+            permite_parcelamento=True,
+            gera_recebivel_bancario=True,
+        )
+        cenarios = [
+            {
+                "uuid": "74747474-7474-4474-8474-747474747471",
+                "chave": "venda-deb-av-snapshot",
+                "forma": forma_deb,
+                "condicao": condicao_deb,
+                "prazo": prazo_av,
+                "tipo": "DEBITO",
+                "dias": [0],
+                "taxa": "0.0000",
+                "valor_taxa": Decimal("0.00"),
+                "liquido": Decimal("100.00"),
+            },
+            {
+                "uuid": "74747474-7474-4474-8474-747474747472",
+                "chave": "venda-cre-1x-snapshot",
+                "forma": forma_cre,
+                "parcelas": 1,
+                "codigo_prazo": "30D",
+                "descricao_prazo": "30 dias",
+                "dias": [30],
+                "taxa": "2.0000",
+                "valor_taxa": Decimal("2.00"),
+                "liquido": Decimal("98.00"),
+            },
+            {
+                "uuid": "74747474-7474-4474-8474-747474747473",
+                "chave": "venda-cre-2x-snapshot",
+                "forma": forma_cre,
+                "parcelas": 2,
+                "codigo_prazo": "30-60",
+                "descricao_prazo": "30/60",
+                "dias": [30, 60],
+                "taxa": "2.5000",
+                "valor_taxa": Decimal("2.50"),
+                "liquido": Decimal("97.50"),
+            },
+            {
+                "uuid": "74747474-7474-4474-8474-747474747474",
+                "chave": "venda-cre-3x-snapshot",
+                "forma": forma_cre,
+                "parcelas": 3,
+                "codigo_prazo": "30-60-90",
+                "descricao_prazo": "30/60/90",
+                "dias": [30, 60, 90],
+                "taxa": "2.5000",
+                "valor_taxa": Decimal("2.50"),
+                "liquido": Decimal("97.50"),
+            },
+        ]
+
+        for cenario in cenarios:
+            if "prazo" not in cenario:
+                prazo = PrazoPagamento.objects.create(
+                    empresa=self.empresa,
+                    codigo=cenario["codigo_prazo"],
+                    descricao=cenario["descricao_prazo"],
+                    num_parcelas=cenario["parcelas"],
+                    intervalo_dias=30,
+                )
+                for ordem, dias in enumerate(cenario["dias"], start=1):
+                    percentual = (Decimal("1.000000") / Decimal(cenario["parcelas"])).quantize(Decimal("0.000001"))
+                    PrazoPagamentoParcela.objects.create(prazo=prazo, ordem=ordem, dias=dias, percentual=percentual)
+                cenario["prazo"] = prazo
+                cenario["condicao"] = FormaPagamentoCondicao.objects.create(
+                    empresa=self.empresa,
+                    forma_pagamento=cenario["forma"],
+                    prazo_pagamento=prazo,
+                    taxa_percentual=Decimal(cenario["taxa"]),
+                    taxa_fixa=Decimal("0.00"),
+                )
+            snapshot = self._snapshot_pagamento_condicao(cenario["condicao"], cenario["prazo"], taxa_percentual=cenario["taxa"], taxa_fixa="0.00")
+            payload = self._payload_venda(
+                venda_uuid=cenario["uuid"],
+                total="100.00",
+                valor_recebido="100.00",
+                finalizado_em="2026-10-08T10:00:00-03:00",
+                pagamentos=[{
+                    "codigo": cenario["forma"].codigo,
+                    "tipo": cenario.get("tipo", "CREDITO"),
+                    "descricao": cenario["forma"].descricao,
+                    "valor": "100.00",
+                    **snapshot,
+                }],
+            )
+            payload["itens"][0]["preco_unitario"] = "100.00"
+
+            with self.subTest(codigo=cenario["forma"].codigo, prazo=cenario["prazo"].codigo):
+                response = self._push([self._evento("VENDA_FINALIZADA", payload, evento_uuid=cenario["uuid"], chave=cenario["chave"])])
+
+                self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+                venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+                receber = Receber.objects.get(pedido_venda=venda.pk)
+                itens = list(ReceberItem.objects.filter(Idreceber=receber).order_by("parcela_n"))
+
+                self.assertTrue(venda.documento.startswith("VE"))
+                self.assertEqual(receber.Titulo, venda.documento)
+                self.assertEqual(receber.Documento, venda.documento)
+                self.assertEqual(receber.Valor_total, Decimal("100.00"))
+                self.assertEqual(len(itens), cenario["prazo"].num_parcelas)
+                self.assertEqual([item.parcela_n for item in itens], list(range(1, cenario["prazo"].num_parcelas + 1)))
+                self.assertEqual([item.parcela_total for item in itens], [cenario["prazo"].num_parcelas] * cenario["prazo"].num_parcelas)
+                self.assertEqual([item.Data_vencimento for item in itens], [date(2026, 10, 8) + timedelta(days=dias) for dias in cenario["dias"]])
+                self.assertEqual([item.status for item in itens], [ReceberItem.STATUS_PREVISTO] * cenario["prazo"].num_parcelas)
+                self.assertEqual(sum((item.valor_bruto for item in itens), Decimal("0.00")), Decimal("100.00"))
+                self.assertEqual([item.taxa_percentual for item in itens], [Decimal(cenario["taxa"])] * cenario["prazo"].num_parcelas)
+                self.assertEqual(sum((item.taxa_fixa for item in itens), Decimal("0.00")), Decimal("0.00"))
+                self.assertEqual(sum((item.valor_taxa for item in itens), Decimal("0.00")), cenario["valor_taxa"])
+                self.assertEqual(sum((item.valor_liquido_previsto for item in itens), Decimal("0.00")), cenario["liquido"])
+                self.assertEqual([item.adquirente_id for item in itens], [None] * cenario["prazo"].num_parcelas)
+                self.assertEqual([item.condicao_adquirente_id for item in itens], [None] * cenario["prazo"].num_parcelas)
+                self.assertFalse(MovimentacaoFinanceira.objects.filter(receber_item__in=itens).exists())
+
     def test_venda_hub_sem_snapshot_usa_taxa_da_condicao_da_forma(self):
         self._hub_autenticado()
         forma, prazo, _condicao = self._forma_condicao_pagamento(parcelas=2, taxa_percentual="2.5000", taxa_fixa="2.00")

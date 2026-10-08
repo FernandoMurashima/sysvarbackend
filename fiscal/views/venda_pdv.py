@@ -1442,6 +1442,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         valores[-1] = money(money(valor_total) - sum(valores[:-1], Decimal("0.00")))
         return valores
 
+    def _valores_taxa_percentual(self, valores_brutos: List[Decimal], taxa_percentual: Decimal) -> List[Decimal]:
+        if not valores_brutos:
+            return []
+        total_taxa = money(sum(valores_brutos, Decimal("0.00")) * taxa_percentual / Decimal("100"))
+        taxas = [money(money(valor) * taxa_percentual / Decimal("100")) for valor in valores_brutos]
+        taxas[-1] = money(taxas[-1] + (total_taxa - sum(taxas, Decimal("0.00"))))
+        return taxas
+
     def _snapshot_financeiro_pagamento(self, pagamentos_metadados: List[Dict], indice: int):
         if indice >= len(pagamentos_metadados):
             return None
@@ -1587,13 +1595,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         parcelas = snapshot["parcelas"]
         valores_brutos = self._valores_parcelas_snapshot(valor_pagamento, parcelas)
         taxas_fixas = self._distribuir_valor(snapshot["taxa_fixa"], len(valores_brutos))
+        taxas_percentuais = self._valores_taxa_percentual(valores_brutos, snapshot["taxa_percentual"])
         data_base = self._data_base_venda(venda)
         prazo = self._prazo_snapshot_seguro(venda, forma, snapshot)
         condicao_adquirente = self._condicao_adquirente_para_prazo(venda, forma, prazo)
 
         for idx, (parcela, valor_bruto) in enumerate(zip(parcelas, valores_brutos)):
             taxa_fixa_parcela = taxas_fixas[idx]
-            valor_taxa = money((money(valor_bruto) * snapshot["taxa_percentual"] / Decimal("100")) + taxa_fixa_parcela)
+            valor_taxa = money(taxas_percentuais[idx] + taxa_fixa_parcela)
             valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - valor_taxa))
             ReceberItem.objects.create(
                 Idreceber=receber,
@@ -1638,12 +1647,13 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         taxa_percentual = Decimal(condicao_taxa.taxa_percentual or 0) if condicao_taxa else Decimal("0")
         taxa_fixa_total = Decimal(condicao_taxa.taxa_fixa or 0) if condicao_taxa else Decimal("0")
         taxas_fixas = self._distribuir_valor(taxa_fixa_total, len(valores_brutos))
+        taxas_percentuais = self._valores_taxa_percentual(valores_brutos, taxa_percentual)
         hoje = timezone.localdate()
 
         for idx, (parcela, valor_bruto) in enumerate(zip(parcelas, valores_brutos), start=1):
             dias = int(getattr(parcela, "dias", 0) or 0)
             taxa_fixa_parcela = taxas_fixas[idx - 1]
-            valor_taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa_parcela)
+            valor_taxa = money(taxas_percentuais[idx - 1] + taxa_fixa_parcela)
             valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - valor_taxa))
             ReceberItem.objects.create(
                 Idreceber=receber,
