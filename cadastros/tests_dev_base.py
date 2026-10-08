@@ -13,7 +13,7 @@ from auditoria.models import AuditAction, AuditLog
 from cadastros.models import Empresa, Fornecedor, FornecedorCategoria, FornecedorContato, FornecedorEndereco, Loja
 from compras.models import Cotacao, PedidoCompra, PedidoCompraItem, Requisicao
 from distribuicao.models import Distribuicao, MercadoriaTransito, PerfilDistribuicao, PerfilDistribuicaoItem
-from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, MovimentacaoFinanceira, Pagar, PrazoPagamento, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.models import CashbackConfig, ConfigFinanceira, FormaPagamento, FormaPagamentoCondicao, MovimentacaoFinanceira, Pagar, PrazoPagamento, Receber, SequenciaDocumento, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from financeiro.services import escopo_empresa, escopo_loja
 from fiscal.models.nota_fiscal_entrada import AgenteLocalSysvar, AtivacaoAgenteLocalSysvar, ConfiguracaoXmlFornecedor, FormaPagamentoFiscalMap, NotaFiscalEntrada, RecebimentoMercadoriaConferenciaItem, RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque, RecebimentoMercadoriaPedido, RecebimentoMercadoriaTermo, XmlFornecedorRecebido
 from fiscal.models.nota_fiscal_saida import NotaFiscalSaida
@@ -543,6 +543,64 @@ class SysvarDevBaseTests(TransactionTestCase):
         self.assertEqual(creditos, [("CRE", "Cartão de crédito")])
         self.assertFalse(FormaPagamento.objects.filter(empresa=empresa, codigo__in=["CCR", "CC2", "CC3", "CC4"]).exists())
         self.assertTrue({"AV", "30D", "30-60", "30-60-90", "30-60-90-120"}.issubset(set(PrazoPagamento.objects.filter(empresa=empresa).values_list("codigo", flat=True))))
+
+    def test_reset_cria_formas_e_condicoes_pagamento_oficiais(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+
+        formas = {
+            forma.codigo: forma
+            for forma in FormaPagamento.objects.filter(empresa=empresa, codigo__in=["DIN", "PIX", "DEB", "CRE"])
+        }
+        self.assertEqual(set(formas), {"DIN", "PIX", "DEB", "CRE"})
+        self.assertEqual(FormaPagamento.objects.filter(empresa=empresa, ativo=True, tipo=FormaPagamento.TIPO_CREDITO).count(), 1)
+        self.assertEqual(FormaPagamento.objects.get(empresa=empresa, ativo=True, tipo=FormaPagamento.TIPO_CREDITO).codigo, "CRE")
+        self.assertFalse(formas["DIN"].permite_parcelamento)
+        self.assertFalse(formas["PIX"].permite_parcelamento)
+        self.assertTrue(formas["DEB"].permite_parcelamento)
+        self.assertTrue(formas["CRE"].permite_parcelamento)
+        self.assertEqual(formas["DIN"].prazo_pagamento.codigo, "AV")
+        self.assertEqual(formas["PIX"].prazo_pagamento.codigo, "AV")
+        self.assertEqual(formas["DEB"].prazo_pagamento.codigo, "AV")
+        self.assertEqual(formas["CRE"].prazo_pagamento.codigo, "30D")
+
+        condicoes = {
+            (c.forma_pagamento.codigo, c.prazo_pagamento.codigo): c
+            for c in FormaPagamentoCondicao.objects.select_related("forma_pagamento", "prazo_pagamento").filter(empresa=empresa, ativo=True)
+        }
+        self.assertEqual(set(condicoes), {("DEB", "AV"), ("CRE", "30D"), ("CRE", "30-60"), ("CRE", "30-60-90")})
+        self.assertEqual(FormaPagamentoCondicao.objects.filter(empresa=empresa, ativo=True).count(), 4)
+        self.assertEqual(condicoes[("DEB", "AV")].taxa_percentual, Decimal("0.0000"))
+        self.assertEqual(condicoes[("DEB", "AV")].taxa_fixa, Decimal("0.00"))
+        self.assertEqual(condicoes[("CRE", "30D")].taxa_percentual, Decimal("2.0000"))
+        self.assertEqual(condicoes[("CRE", "30D")].taxa_fixa, Decimal("0.00"))
+        self.assertEqual(condicoes[("CRE", "30-60")].taxa_percentual, Decimal("2.5000"))
+        self.assertEqual(condicoes[("CRE", "30-60")].taxa_fixa, Decimal("0.00"))
+        self.assertEqual(condicoes[("CRE", "30-60-90")].taxa_percentual, Decimal("2.5000"))
+        self.assertEqual(condicoes[("CRE", "30-60-90")].taxa_fixa, Decimal("0.00"))
+        self.assertFalse(FormaPagamentoCondicao.objects.filter(empresa=empresa, forma_pagamento__codigo__in=["DIN", "PIX"], ativo=True).exists())
+        self.assertFalse(FormaPagamentoCondicao.objects.filter(empresa=empresa, forma_pagamento__codigo="CRE", prazo_pagamento__codigo="30-60-90-120", ativo=True).exists())
+
+    def test_create_idempotente_condicoes_pagamento_e_validate(self):
+        call_command("sysvar_dev_base", "--reset", verbosity=0)
+        empresa = Empresa.objects.get(documento="42000001000186")
+        first = FormaPagamentoCondicao.objects.filter(empresa=empresa).count()
+
+        call_command("sysvar_dev_base", "--create", verbosity=0)
+
+        self.assertEqual(FormaPagamentoCondicao.objects.filter(empresa=empresa).count(), first)
+        self.assertEqual(FormaPagamentoCondicao.objects.filter(empresa=empresa, ativo=True).count(), 4)
+        report = SysvarDevBaseService().validate()
+        self.assertTrue(report.valid, report.problems)
+
+        condicao = FormaPagamentoCondicao.objects.get(empresa=empresa, forma_pagamento__codigo="CRE", prazo_pagamento__codigo="30D")
+        condicao.taxa_percentual = Decimal("9.0000")
+        condicao.save(update_fields=["taxa_percentual"])
+
+        report = SysvarDevBaseService().validate()
+
+        self.assertFalse(report.valid)
+        self.assertIn("Taxas oficiais de FormaPagamentoCondicao", ", ".join(report.problems))
 
     def test_produtos_comerciais_possuem_fiscal_dev_completo(self):
         call_command("sysvar_dev_base", "--reset", verbosity=0)

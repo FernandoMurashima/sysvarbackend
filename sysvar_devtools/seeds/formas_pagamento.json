@@ -4,15 +4,8 @@
     "descricao": "Dinheiro",
     "tipo": "DINHEIRO",
     "prazo_codigo": "AV",
+    "permite_parcelamento": false,
     "gera_recebivel_bancario": false,
-    "ativo": true
-  },
-  {
-    "codigo": "DEB",
-    "descricao": "Cartão de débito",
-    "tipo": "DEBITO",
-    "prazo_codigo": "AV",
-    "gera_recebivel_bancario": true,
     "ativo": true
   },
   {
@@ -20,6 +13,16 @@
     "descricao": "PIX",
     "tipo": "PIX",
     "prazo_codigo": "AV",
+    "permite_parcelamento": false,
+    "gera_recebivel_bancario": true,
+    "ativo": true
+  },
+  {
+    "codigo": "DEB",
+    "descricao": "Cartão de débito",
+    "tipo": "DEBITO",
+    "prazo_codigo": "AV",
+    "permite_parcelamento": true,
     "gera_recebivel_bancario": true,
     "ativo": true
   },
@@ -27,6 +30,8 @@
     "codigo": "CRE",
     "descricao": "Cartão de crédito",
     "tipo": "CREDITO",
+    "prazo_codigo": "30D",
+    "permite_parcelamento": true,
     "gera_recebivel_bancario": true,
     "ativo": true
   }

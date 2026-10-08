@@ -1,0 +1,30 @@
+[
+  {
+    "forma_codigo": "DEB",
+    "prazo_codigo": "AV",
+    "taxa_percentual": "0.0000",
+    "taxa_fixa": "0.00",
+    "ativo": true
+  },
+  {
+    "forma_codigo": "CRE",
+    "prazo_codigo": "30D",
+    "taxa_percentual": "2.0000",
+    "taxa_fixa": "0.00",
+    "ativo": true
+  },
+  {
+    "forma_codigo": "CRE",
+    "prazo_codigo": "30-60",
+    "taxa_percentual": "2.5000",
+    "taxa_fixa": "0.00",
+    "ativo": true
+  },
+  {
+    "forma_codigo": "CRE",
+    "prazo_codigo": "30-60-90",
+    "taxa_percentual": "2.5000",
+    "taxa_fixa": "0.00",
+    "ativo": true
+  }
+]
