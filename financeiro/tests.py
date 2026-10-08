@@ -9,6 +9,8 @@ from rest_framework.test import APIClient
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
 from financeiro.models import (
     ContaBancaria,
+    Adquirente,
+    CondicaoAdquirente,
     FormaPagamento,
     FormaPagamentoCondicao,
     PrazoPagamento,
@@ -17,7 +19,7 @@ from financeiro.models import (
     ValeTrocaMovimento,
     ValeTrocaReserva,
 )
-from financeiro.serializers import FormaPagamentoCondicaoSerializer, FormaPagamentoSerializer
+from financeiro.serializers import CondicaoAdquirenteSerializer, FormaPagamentoCondicaoSerializer, FormaPagamentoSerializer
 from financeiro.services import (
     ValeTrocaErro,
     consultar_vale_troca_online,
@@ -131,6 +133,28 @@ class FormaPagamentoCondicaoTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("prazo_pagamento", serializer.errors)
+
+    def test_serializer_condicao_adquirente_nao_altera_taxas_legadas(self):
+        adquirente = Adquirente.objects.create(empresa=self.empresa, codigo="REDE", descricao="Rede")
+        condicao = CondicaoAdquirente.objects.create(
+            empresa=self.empresa,
+            adquirente=adquirente,
+            forma_pagamento=self.forma,
+            prazo_pagamento=self.prazo_1x,
+            taxa_percentual=Decimal("9.0000"),
+            taxa_fixa=Decimal("9.00"),
+        )
+        serializer = CondicaoAdquirenteSerializer(
+            condicao,
+            data={"taxa_percentual": "1.0000", "taxa_fixa": "1.00"},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+        condicao.refresh_from_db()
+        self.assertEqual(condicao.taxa_percentual, Decimal("9.0000"))
+        self.assertEqual(condicao.taxa_fixa, Decimal("9.00"))
 
     def test_api_formas_retorna_condicoes_ativas(self):
         FormaPagamentoCondicao.objects.create(

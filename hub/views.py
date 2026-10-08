@@ -1101,6 +1101,14 @@ class HubFormasPagamentoView(APIView):
         for forma in formas:
             prazo = forma.prazo_pagamento
             condicao = condicoes.get((forma.pk, forma.prazo_pagamento_id))
+            condicao_taxa = next(
+                (
+                    condicao_forma
+                    for condicao_forma in getattr(forma, "condicoes_parcelamento_ativas", [])
+                    if condicao_forma.prazo_pagamento_id == forma.prazo_pagamento_id
+                ),
+                None,
+            )
             condicoes_parcelamento = []
             for condicao_parcelamento in getattr(forma, "condicoes_parcelamento_ativas", []):
                 prazo_condicao = condicao_parcelamento.prazo_pagamento
@@ -1144,8 +1152,8 @@ class HubFormasPagamentoView(APIView):
                 "conta_liquidacao_id": forma.conta_liquidacao_id,
                 "gera_recebivel_bancario": forma.gera_recebivel_bancario,
                 "prazo_credito_dias": forma.prazo_credito_dias,
-                "taxa_percentual": _decimal_string(condicao.taxa_percentual if condicao else 0, 4),
-                "taxa_fixa": _decimal_string(condicao.taxa_fixa if condicao else 0, 2),
+                "taxa_percentual": _decimal_string(condicao_taxa.taxa_percentual if condicao_taxa else 0, 4),
+                "taxa_fixa": _decimal_string(condicao_taxa.taxa_fixa if condicao_taxa else 0, 2),
                 "tef_habilitado": forma.tef_habilitado,
                 "tef_modalidade": forma.tef_modalidade,
                 "tef_adquirente_codigo": forma.tef_adquirente_codigo,

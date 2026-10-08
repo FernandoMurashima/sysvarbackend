@@ -19,6 +19,7 @@ from financeiro.models import (
     CondicaoAdquirente,
     ContaBancaria,
     FormaPagamento,
+    FormaPagamentoCondicao,
     LancamentoContabil,
     MovimentacaoFinanceira,
     Pagar,
@@ -872,8 +873,9 @@ class Command(BaseCommand):
 
     def _movimento_bancario_previsto(self, venda, natureza, pagamento, forma, valor_bruto, item):
         condicao = self._condicao_adquirente(venda.empresa, forma)
-        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
-        taxa_fixa = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
+        condicao_taxa = self._forma_pagamento_condicao(venda.empresa, forma)
+        taxa_percentual = Decimal(condicao_taxa.taxa_percentual or 0) if condicao_taxa else Decimal("0")
+        taxa_fixa = Decimal(condicao_taxa.taxa_fixa or 0) if condicao_taxa else Decimal("0")
         taxa = money((valor_bruto * taxa_percentual / Decimal("100")) + taxa_fixa)
         valor_liquido = money(max(Decimal("0.00"), valor_bruto - taxa))
         data_prevista = timezone.localdate() + timedelta(days=int(forma.prazo_credito_dias or 0))
@@ -914,6 +916,16 @@ class Command(BaseCommand):
             .select_related("adquirente")
             .filter(empresa=empresa, forma_pagamento=forma, prazo_pagamento=forma.prazo_pagamento, ativo=True)
             .order_by("Idcondicaoadquirente")
+            .first()
+        )
+
+    def _forma_pagamento_condicao(self, empresa, forma):
+        if not forma.prazo_pagamento_id:
+            return None
+        return (
+            FormaPagamentoCondicao.objects
+            .filter(empresa=empresa, forma_pagamento=forma, prazo_pagamento=forma.prazo_pagamento, ativo=True)
+            .order_by("Idformapagamentocondicao")
             .first()
         )
 

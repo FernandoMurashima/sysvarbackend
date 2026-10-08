@@ -1589,6 +1589,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         taxas_fixas = self._distribuir_valor(snapshot["taxa_fixa"], len(valores_brutos))
         data_base = self._data_base_venda(venda)
         prazo = self._prazo_snapshot_seguro(venda, forma, snapshot)
+        condicao_adquirente = self._condicao_adquirente_para_prazo(venda, forma, prazo)
 
         for idx, (parcela, valor_bruto) in enumerate(zip(parcelas, valores_brutos)):
             taxa_fixa_parcela = taxas_fixas[idx]
@@ -1599,6 +1600,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                 venda_pagamento=pagamento,
                 forma_pagamento_ref=forma,
                 prazo_pagamento=prazo,
+                adquirente=condicao_adquirente.adquirente if condicao_adquirente else None,
+                condicao_adquirente=condicao_adquirente,
                 parcela_n=parcela_inicial,
                 parcela_total=len(valores_brutos),
                 status=ReceberItem.STATUS_PREVISTO,
@@ -1631,8 +1634,9 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             parcelas = [None]
         valores_brutos = self._valores_parcelas(valor_pagamento, parcelas)
         condicao = self._condicao_adquirente(venda, forma)
-        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
-        taxa_fixa_total = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
+        condicao_taxa = self._forma_pagamento_condicao(venda, forma)
+        taxa_percentual = Decimal(condicao_taxa.taxa_percentual or 0) if condicao_taxa else Decimal("0")
+        taxa_fixa_total = Decimal(condicao_taxa.taxa_fixa or 0) if condicao_taxa else Decimal("0")
         taxas_fixas = self._distribuir_valor(taxa_fixa_total, len(valores_brutos))
         hoje = timezone.localdate()
 
@@ -1691,8 +1695,9 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
 
     def _registrar_recebivel_bancario(self, venda: VendaPdv, natureza: Nat_Lancamento, pagamento: VendaPdvPagamento, forma: FormaPagamento, valor_bruto: Decimal, item: ReceberItem):
         condicao = self._condicao_adquirente(venda, forma)
-        taxa_percentual = Decimal(condicao.taxa_percentual or 0) if condicao else Decimal("0")
-        taxa_fixa = Decimal(condicao.taxa_fixa or 0) if condicao else Decimal("0")
+        condicao_taxa = self._forma_pagamento_condicao(venda, forma)
+        taxa_percentual = Decimal(condicao_taxa.taxa_percentual or 0) if condicao_taxa else Decimal("0")
+        taxa_fixa = Decimal(condicao_taxa.taxa_fixa or 0) if condicao_taxa else Decimal("0")
         taxa = money((money(valor_bruto) * taxa_percentual / Decimal("100")) + taxa_fixa)
         valor_liquido = money(max(Decimal("0.00"), money(valor_bruto) - taxa))
         item.adquirente = condicao.adquirente if condicao else None
@@ -1734,7 +1739,10 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         gerar_lancamento_contabil_movimentacao(movimento)
 
     def _condicao_adquirente(self, venda: VendaPdv, forma: FormaPagamento):
-        if not forma.prazo_pagamento_id:
+        return self._condicao_adquirente_para_prazo(venda, forma, getattr(forma, "prazo_pagamento", None))
+
+    def _condicao_adquirente_para_prazo(self, venda: VendaPdv, forma: FormaPagamento, prazo):
+        if not forma or not prazo:
             return None
         return (
             CondicaoAdquirente.objects
@@ -1742,10 +1750,25 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             .filter(
                 empresa=venda.empresa,
                 forma_pagamento=forma,
-                prazo_pagamento=forma.prazo_pagamento,
+                prazo_pagamento=prazo,
                 ativo=True,
             )
             .order_by("Idcondicaoadquirente")
+            .first()
+        )
+
+    def _forma_pagamento_condicao(self, venda: VendaPdv, forma: FormaPagamento):
+        if not forma or not forma.prazo_pagamento_id:
+            return None
+        return (
+            FormaPagamentoCondicao.objects
+            .filter(
+                empresa=venda.empresa,
+                forma_pagamento=forma,
+                prazo_pagamento=forma.prazo_pagamento,
+                ativo=True,
+            )
+            .order_by("Idformapagamentocondicao")
             .first()
         )
 

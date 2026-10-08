@@ -129,7 +129,7 @@ class CondicaoAdquirenteSerializer(serializers.ModelSerializer):
     class Meta:
         model = CondicaoAdquirente
         fields = '__all__'
-        read_only_fields = ('data_cadastro',)
+        read_only_fields = ('data_cadastro', 'taxa_percentual', 'taxa_fixa')
 
     def validate(self, attrs):
         empresa = attrs.get('empresa', getattr(self.instance, 'empresa', None))
@@ -139,10 +139,6 @@ class CondicaoAdquirenteSerializer(serializers.ModelSerializer):
         for campo, obj in (('adquirente', adquirente), ('forma_pagamento', forma), ('prazo_pagamento', prazo)):
             if empresa and obj and getattr(obj, 'empresa_id', None) and obj.empresa_id != empresa.id:
                 raise serializers.ValidationError({campo: 'O cadastro pertence a outra empresa.'})
-        if attrs.get('taxa_percentual', getattr(self.instance, 'taxa_percentual', 0)) < 0:
-            raise serializers.ValidationError({'taxa_percentual': 'A taxa percentual não pode ser negativa.'})
-        if attrs.get('taxa_fixa', getattr(self.instance, 'taxa_fixa', 0)) < 0:
-            raise serializers.ValidationError({'taxa_fixa': 'A taxa fixa não pode ser negativa.'})
         return attrs
 
 

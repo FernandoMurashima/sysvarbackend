@@ -171,7 +171,7 @@ class CondicaoAdquirenteAdmin(admin.ModelAdmin):
     list_display = ("Idcondicaoadquirente", "empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "taxa_percentual", "taxa_fixa", "ativo")
     list_filter = ("empresa", "adquirente", "forma_pagamento", "prazo_pagamento", "ativo")
     search_fields = ("adquirente__codigo", "adquirente__descricao", "forma_pagamento__codigo", "prazo_pagamento__codigo")
-    readonly_fields = ("data_cadastro",)
+    readonly_fields = ("data_cadastro", "taxa_percentual", "taxa_fixa")
 
 
 @admin.register(FormaPagamentoCondicao)
