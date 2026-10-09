@@ -1433,7 +1433,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     def _valores_parcelas(self, valor_total: Decimal, parcelas) -> List[Decimal]:
         if not parcelas:
             return [money(valor_total)]
-        percentuais = [Decimal(parcela.percentual or 0) for parcela in parcelas]
+        percentuais = [Decimal(getattr(parcela, "percentual", 0) or 0) for parcela in parcelas]
         total_percentual = sum(percentuais, Decimal("0"))
         if total_percentual <= 0:
             return self._distribuir_valor(valor_total, len(parcelas))

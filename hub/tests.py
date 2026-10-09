@@ -3325,6 +3325,60 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual([item.adquirente_id for item in itens], [adquirente.pk, adquirente.pk])
         self.assertEqual([item.condicao_adquirente_id for item in itens], [condicao_adquirente.pk, condicao_adquirente.pk])
 
+    def test_venda_hub_cartao_sem_snapshot_e_sem_prazo_gera_recebivel_unico(self):
+        self._hub_autenticado()
+        forma = FormaPagamento.objects.create(
+            empresa=self.empresa,
+            codigo="CRE",
+            descricao="Cartão de crédito legado",
+            tipo=FormaPagamento.TIPO_CREDITO,
+            permite_parcelamento=True,
+            gera_recebivel_bancario=True,
+        )
+        payload = self._payload_venda(
+            venda_uuid="75757575-7575-4575-8575-757575757575",
+            total="150.00",
+            valor_recebido="150.00",
+            pagamentos=[{
+                "codigo": forma.codigo,
+                "tipo": "CREDITO",
+                "descricao": forma.descricao,
+                "valor": "150.00",
+                "forma_pagamento_condicao_id": None,
+                "prazo_pagamento_id": None,
+                "num_parcelas": 1,
+                "taxa_percentual": "0.0000",
+                "taxa_fixa": "0.00",
+                "parcelas": [],
+            }],
+        )
+        payload["itens"][0]["preco_unitario"] = "150.00"
+        evento = self._evento("VENDA_FINALIZADA", payload, chave="venda-cartao-sem-prazo-legado")
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        receber = Receber.objects.get(pedido_venda=venda.pk)
+        itens = list(ReceberItem.objects.filter(Idreceber=receber).order_by("parcela_n"))
+
+        self.assertEqual(receber.Titulo, venda.documento)
+        self.assertEqual(receber.Documento, venda.documento)
+        self.assertEqual(receber.Valor_total, Decimal("150.00"))
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(itens[0].parcela_n, 1)
+        self.assertEqual(itens[0].parcela_total, 1)
+        self.assertEqual(itens[0].status, ReceberItem.STATUS_PREVISTO)
+        self.assertEqual(itens[0].valor_parcela, Decimal("150.00"))
+        self.assertEqual(itens[0].valor_bruto, Decimal("150.00"))
+        self.assertEqual(itens[0].valor_liquido_previsto, Decimal("150.00"))
+        self.assertIsNone(itens[0].prazo_pagamento_id)
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(ReceberItem.objects.filter(Idreceber=receber).count(), 1)
+
     def test_venda_hub_mista_cashback_parcela_somente_valor_financeiro(self):
         self._hub_autenticado()
         CashbackConfig.objects.create(
