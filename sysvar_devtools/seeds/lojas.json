@@ -32,7 +32,8 @@
     "proximo_numero_nfe": 1,
     "emite_nfce": true,
     "emite_nfe": true,
-    "ativo": true
+    "ativo": true,
+    "codigo_municipio_ibge": "3304557"
   },
   {
     "codigo": "TIJUCA",
@@ -67,7 +68,8 @@
     "proximo_numero_nfe": 1,
     "emite_nfce": true,
     "emite_nfe": true,
-    "ativo": true
+    "ativo": true,
+    "codigo_municipio_ibge": "3304557"
   },
   {
     "codigo": "CENTRO",
@@ -102,7 +104,8 @@
     "proximo_numero_nfe": 1,
     "emite_nfce": true,
     "emite_nfe": true,
-    "ativo": true
+    "ativo": true,
+    "codigo_municipio_ibge": "3304557"
   },
   {
     "codigo": "FABRICA",
@@ -137,6 +140,7 @@
     "proximo_numero_nfe": 1,
     "emite_nfce": false,
     "emite_nfe": true,
-    "ativo": true
+    "ativo": true,
+    "codigo_municipio_ibge": "3304557"
   }
 ]
