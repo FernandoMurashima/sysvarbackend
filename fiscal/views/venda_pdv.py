@@ -3,8 +3,10 @@ from collections import defaultdict
 from random import randint
 from typing import Dict, List
 
+from django.db.models import Q
 from django.db import models, transaction
 from django.db.models import Max
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import datetime, time, timedelta
 from rest_framework import status, viewsets
@@ -53,7 +55,7 @@ from fiscal.serializers import NFCeSerializer, VendaDevolucaoSerializer, VendaPd
 from fiscal.services.documentos import reservar_documento_devolucao
 from fiscal.services.nfe_devolucao import registrar_nfe_devolucao
 from produto.models import Estoque, EstoqueMovimentacao, Ncm, Produto, ProdutoDetalhe
-from cadastros.models import Cliente, Funcionarios
+from cadastros.models import Cliente, Funcionarios, Loja
 from cadastros.services import ClientePadraoService
 
 
@@ -153,6 +155,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     write_roles = ["Admin", "Diretor", "Gerente", "Caixa"]
     action_roles = {
         "finalizar": ["Admin", "Diretor", "Gerente", "Caixa"],
+        "consulta_vendas": ["Admin", "Diretor", "Gerente"],
+        "consulta": ["Admin", "Diretor", "Gerente"],
         "relatorio_vendas": ["Admin", "Diretor", "Gerente"],
         "relatorio_margem": ["Admin", "Diretor", "Gerente"],
     }
@@ -186,6 +190,315 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if user.is_superuser:
             return self.request.query_params.get("empresa")
         return getattr(user, "empresa_id", None)
+
+    @action(detail=False, methods=["get"], url_path="consulta-vendas")
+    def consulta_vendas(self, request):
+        qs, erro = self._consulta_vendas_queryset(request)
+        if erro:
+            return erro
+
+        page, page_size, erro = self._consulta_paginacao(request)
+        if erro:
+            return erro
+
+        count = qs.count()
+        total_pages = (count + page_size - 1) // page_size if count else 0
+        inicio = (page - 1) * page_size
+        fim = inicio + page_size
+        vendas = list(qs[inicio:fim])
+
+        return Response({
+            "count": count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "results": [self._consulta_venda_resumo(venda) for venda in vendas],
+        })
+
+    @action(detail=True, methods=["get"], url_path="consulta")
+    def consulta(self, request, pk=None):
+        qs = self._consulta_vendas_base_queryset().select_related(
+            "loja",
+            "caixa",
+            "cliente",
+            "vendedor",
+            "criado_por",
+            "nfce",
+        ).prefetch_related(
+            "itens",
+            "pagamentos__recebiveis",
+            "devolucoes",
+            "devolucoes__vale_troca",
+            "vales_troca_usados__vale",
+            "cashback_creditos",
+            "cashback_usos",
+        )
+        venda = get_object_or_404(qs, pk=pk)
+        return Response(self._consulta_venda_detalhe(venda))
+
+    def _consulta_vendas_base_queryset(self):
+        qs = (
+            VendaPdv.objects
+            .select_related("loja", "cliente", "vendedor", "nfce")
+            .prefetch_related("pagamentos")
+        )
+        empresa_id = self._empresa_id_usuario()
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        elif not self.request.user.is_superuser:
+            qs = qs.none()
+        return qs.order_by("-data_venda", "-id")
+
+    def _consulta_vendas_queryset(self, request):
+        qs = self._consulta_vendas_base_queryset()
+        params = request.query_params
+        status_param = params.get("status") or VendaPdv.Status.FINALIZADA
+        status_validos = {choice[0] for choice in VendaPdv.Status.choices}
+        if status_param not in status_validos:
+            return None, Response({"detail": "Status de venda inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        qs = qs.filter(status=status_param)
+
+        data_ini = params.get("data_ini")
+        data_fim = params.get("data_fim")
+        if data_ini and data_fim and data_ini > data_fim:
+            return None, Response({"detail": "data_ini não pode ser maior que data_fim."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            if data_ini:
+                qs = qs.filter(data_venda__gte=self._datetime_inicio_dia(data_ini))
+            if data_fim:
+                qs = qs.filter(data_venda__lte=self._datetime_fim_dia(data_fim))
+        except ValueError:
+            return None, Response({"detail": "Datas devem usar o formato YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        loja = params.get("loja")
+        if loja:
+            loja_qs = Loja.objects.filter(pk=loja)
+            empresa_id = self._empresa_id_usuario()
+            if empresa_id:
+                loja_qs = loja_qs.filter(empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                loja_qs = loja_qs.none()
+            if not loja_qs.exists():
+                return None, Response({"detail": "Loja inválida para o escopo do usuário."}, status=status.HTTP_400_BAD_REQUEST)
+            qs = qs.filter(loja_id=loja)
+
+        vendedor = params.get("vendedor")
+        if vendedor:
+            vendedor_qs = Funcionarios.objects.filter(pk=vendedor)
+            empresa_id = self._empresa_id_usuario()
+            if empresa_id:
+                vendedor_qs = vendedor_qs.filter(empresa_id=empresa_id)
+            elif not request.user.is_superuser:
+                vendedor_qs = vendedor_qs.none()
+            if not vendedor_qs.exists():
+                return None, Response({"detail": "Vendedor inválido para o escopo do usuário."}, status=status.HTTP_400_BAD_REQUEST)
+            qs = qs.filter(vendedor_id=vendedor)
+
+        documento = params.get("documento")
+        if documento:
+            qs = qs.filter(documento__icontains=documento.strip())
+
+        cliente = params.get("cliente")
+        if cliente:
+            termo = cliente.strip()
+            qs = qs.filter(Q(cliente__nome_cliente__icontains=termo) | Q(cliente__documento__icontains=termo)).distinct()
+
+        forma_pagamento = params.get("forma_pagamento")
+        if forma_pagamento:
+            qs = qs.filter(pagamentos__forma__iexact=forma_pagamento.strip()).distinct()
+
+        nfce = params.get("nfce")
+        if nfce:
+            termo = nfce.strip()
+            filtro_nfce = Q(nfce__chave_acesso__icontains=termo) | Q(nfce__protocolo__icontains=termo)
+            if termo.isdigit():
+                filtro_nfce |= Q(nfce__numero=int(termo))
+            qs = qs.filter(filtro_nfce).distinct()
+
+        return qs, None
+
+    def _consulta_paginacao(self, request):
+        try:
+            page = int(request.query_params.get("page") or 1)
+            page_size = int(request.query_params.get("page_size") or 20)
+        except (TypeError, ValueError):
+            return None, None, Response({"detail": "Paginação inválida."}, status=status.HTTP_400_BAD_REQUEST)
+        if page < 1:
+            return None, None, Response({"detail": "page deve ser maior ou igual a 1."}, status=status.HTTP_400_BAD_REQUEST)
+        if page_size < 1:
+            return None, None, Response({"detail": "page_size deve ser maior ou igual a 1."}, status=status.HTTP_400_BAD_REQUEST)
+        return page, min(page_size, 100), None
+
+    def _consulta_venda_resumo(self, venda: VendaPdv) -> dict:
+        nfce = getattr(venda, "nfce", None)
+        return {
+            "id": venda.pk,
+            "documento": venda.documento,
+            "status": venda.status,
+            "data_venda": timezone.localtime(venda.data_venda).isoformat() if timezone.is_aware(venda.data_venda) else venda.data_venda.isoformat(),
+            "loja": self._consulta_loja_payload(venda.loja),
+            "cliente": self._consulta_cliente_payload(venda.cliente),
+            "vendedor": self._consulta_vendedor_payload(venda.vendedor),
+            "pagamentos": [self._consulta_pagamento_resumo(pagamento) for pagamento in venda.pagamentos.all()],
+            "nfce": self._consulta_nfce_resumo(nfce),
+            "subtotal": str(money(venda.subtotal)),
+            "desconto": str(money(Decimal(venda.desconto_itens or 0) + Decimal(venda.desconto_geral or 0))),
+            "total": str(money(venda.total)),
+        }
+
+    def _consulta_venda_detalhe(self, venda: VendaPdv) -> dict:
+        nfce = getattr(venda, "nfce", None)
+        return {
+            **self._consulta_venda_resumo(venda),
+            "caixa": self._consulta_caixa_payload(venda.caixa),
+            "operador": self._consulta_operador_payload(venda.criado_por),
+            "itens": [self._consulta_item_detalhe(item) for item in venda.itens.all()],
+            "totais": {
+                "subtotal": str(money(venda.subtotal)),
+                "desconto_itens": str(money(venda.desconto_itens)),
+                "desconto_geral": str(money(venda.desconto_geral)),
+                "total": str(money(venda.total)),
+                "valor_recebido": str(money(venda.valor_recebido)),
+                "troco": str(money(venda.troco)),
+            },
+            "pagamentos": [self._consulta_pagamento_detalhe(pagamento) for pagamento in venda.pagamentos.all()],
+            "financeiro": self._consulta_financeiro_payload(venda),
+            "nfce": self._consulta_nfce_detalhe(nfce),
+            "devolucoes": [self._consulta_devolucao_resumo(devolucao) for devolucao in venda.devolucoes.all()],
+            "vales_troca": [self._consulta_vale_troca_resumo(movimento) for movimento in venda.vales_troca_usados.all()],
+            "cashback": {
+                "gerado": [self._consulta_cashback_resumo(movimento) for movimento in venda.cashback_creditos.all()],
+                "usado": [self._consulta_cashback_resumo(movimento) for movimento in venda.cashback_usos.all()],
+            },
+        }
+
+    def _consulta_loja_payload(self, loja):
+        return {"id": loja.pk, "nome": loja.nome_loja} if loja else None
+
+    def _consulta_cliente_payload(self, cliente):
+        return {"id": cliente.pk, "nome": cliente.nome_cliente, "documento": cliente.documento or cliente.cpf or ""} if cliente else None
+
+    def _consulta_vendedor_payload(self, vendedor):
+        return {"id": vendedor.pk, "nome": vendedor.nomefuncionario} if vendedor else None
+
+    def _consulta_caixa_payload(self, caixa):
+        return {"id": caixa.pk, "codigo": caixa.codigo, "descricao": caixa.descricao} if caixa else None
+
+    def _consulta_operador_payload(self, operador):
+        return {"id": operador.pk, "username": operador.username, "nome": operador.get_full_name() or operador.username} if operador else None
+
+    def _consulta_pagamento_resumo(self, pagamento: VendaPdvPagamento) -> dict:
+        return {
+            "forma": pagamento.forma,
+            "codigo": pagamento.forma,
+            "descricao": pagamento.descricao or pagamento.forma,
+            "tipo": None,
+            "valor": str(money(pagamento.valor)),
+        }
+
+    def _consulta_pagamento_detalhe(self, pagamento: VendaPdvPagamento) -> dict:
+        return {
+            **self._consulta_pagamento_resumo(pagamento),
+            "autorizacao": pagamento.autorizacao,
+            "parcelas": [self._consulta_recebivel_item_payload(item) for item in pagamento.recebiveis.all()],
+        }
+
+    def _consulta_item_detalhe(self, item: VendaPdvItem) -> dict:
+        return {
+            "id": item.pk,
+            "referencia": item.referencia,
+            "ean": item.ean,
+            "descricao": item.descricao,
+            "cor": item.cor,
+            "tamanho": item.tamanho,
+            "quantidade": item.quantidade,
+            "preco_unitario": str(item.preco_unitario),
+            "desconto": str(money(item.desconto)),
+            "total_item": str(money(item.total_item)),
+            "promocao": None,
+        }
+
+    def _consulta_nfce_resumo(self, nfce: NFCe | None):
+        if not nfce:
+            return None
+        return {"id": nfce.pk, "numero": nfce.numero, "serie": nfce.serie, "status": nfce.status}
+
+    def _consulta_nfce_detalhe(self, nfce: NFCe | None):
+        if not nfce:
+            return None
+        return {
+            **self._consulta_nfce_resumo(nfce),
+            "chave": nfce.chave_acesso,
+            "protocolo": nfce.protocolo,
+            "tipo_emissao": nfce.tipo_emissao,
+            "emitida_em": nfce.emitida_em.isoformat() if nfce.emitida_em else None,
+            "autorizada_em": nfce.autorizada_em.isoformat() if nfce.autorizada_em else None,
+            "ambiente": nfce.ambiente,
+        }
+
+    def _consulta_financeiro_payload(self, venda: VendaPdv) -> dict:
+        receber = Receber.objects.filter(pedido_venda=venda.pk).prefetch_related("itens").first()
+        if not receber:
+            return {"receber": None, "parcelas": []}
+        return {
+            "receber": {
+                "id": receber.pk,
+                "titulo": receber.Titulo,
+                "documento": receber.Documento,
+                "valor_total": str(money(receber.Valor_total)),
+            },
+            "parcelas": [self._consulta_recebivel_item_payload(item) for item in receber.itens.all()],
+        }
+
+    def _consulta_recebivel_item_payload(self, item: ReceberItem) -> dict:
+        return {
+            "id": item.pk,
+            "parcela_n": item.parcela_n,
+            "parcela_total": item.parcela_total,
+            "status": item.status,
+            "data_vencimento": item.Data_vencimento.isoformat() if item.Data_vencimento else None,
+            "valor_parcela": str(money(item.valor_parcela)),
+            "valor_bruto": str(money(item.valor_bruto)),
+            "taxa_percentual": str(item.taxa_percentual),
+            "taxa_fixa": str(money(item.taxa_fixa)),
+            "valor_taxa": str(money(item.valor_taxa)),
+            "valor_liquido_previsto": str(money(item.valor_liquido_previsto)),
+            "prazo_pagamento_id": item.prazo_pagamento_id,
+            "forma_pagamento_id": item.forma_pagamento_ref_id,
+            "adquirente_id": item.adquirente_id,
+            "condicao_adquirente_id": item.condicao_adquirente_id,
+        }
+
+    def _consulta_devolucao_resumo(self, devolucao: VendaDevolucao) -> dict:
+        return {
+            "id": devolucao.pk,
+            "documento": devolucao.documento,
+            "status": devolucao.status,
+            "credito_cliente": str(money(devolucao.credito_cliente)),
+        }
+
+    def _consulta_vale_troca_resumo(self, movimento: ValeTrocaMovimento) -> dict:
+        vale = movimento.vale
+        return {
+            "id": movimento.pk,
+            "tipo": movimento.tipo,
+            "valor": str(money(movimento.valor)),
+            "vale": {
+                "id": vale.pk,
+                "documento": vale.documento,
+                "status": vale.status,
+                "saldo": str(money(vale.saldo)),
+            } if vale else None,
+        }
+
+    def _consulta_cashback_resumo(self, movimento: CashbackMovimento) -> dict:
+        return {
+            "id": movimento.pk,
+            "tipo": movimento.tipo,
+            "status": movimento.status,
+            "valor": str(money(movimento.valor)),
+            "validade": movimento.validade.isoformat() if movimento.validade else None,
+        }
 
     @action(detail=False, methods=["get"], url_path="relatorio-vendas")
     def relatorio_vendas(self, request):
