@@ -45,6 +45,7 @@ from hub.models import (
     HubVendaFaixaNumeracao,
     HubVendaMapeamento,
 )
+from hub.recebimentos import processar_retorno_conferencia_hub
 
 
 TIPOS_SUPORTADOS = {
@@ -55,6 +56,7 @@ TIPOS_SUPORTADOS = {
     "FECHAMENTO_DIA",
     "NFCE_ATUALIZADA",
     "DEVOLUCAO_FINALIZADA",
+    "RECEBIMENTO_LOJA_CONFERIDO",
 }
 
 
@@ -213,6 +215,8 @@ class HubSyncProcessor:
             return self._nfce_atualizada(payload)
         if tipo == "DEVOLUCAO_FINALIZADA":
             return self._devolucao_finalizada(payload)
+        if tipo == "RECEBIMENTO_LOJA_CONFERIDO":
+            return processar_retorno_conferencia_hub(self.hub, payload)
         raise HubSyncError("Tipo de evento não suportado.")
 
     def _cliente_local(self, payload):
@@ -790,6 +794,18 @@ class HubSyncProcessor:
         if tipo == "NFCE_ATUALIZADA" and payload.get("nfce_uuid"):
             obj = HubNFCeMapeamento.objects.filter(hub=self.hub, nfce_uuid=payload.get("nfce_uuid")).select_related("nfce").first()
             return self._resultado_nfce(obj) if obj else {}
+        if tipo == "RECEBIMENTO_LOJA_CONFERIDO" and (payload.get("recebimento_id") or payload.get("id")):
+            from fiscal.models import RecebimentoMercadoriaEfetivacaoEstoque, RecebimentoMercadoriaEstoque
+
+            recebimento_id = payload.get("recebimento_id") or payload.get("id")
+            recebimento = RecebimentoMercadoriaEstoque.objects.filter(pk=recebimento_id, empresa=self.empresa).first()
+            efetivacao = RecebimentoMercadoriaEfetivacaoEstoque.objects.filter(recebimento_id=recebimento_id).first()
+            if recebimento:
+                return {
+                    "recebimento_retaguarda_id": recebimento.pk,
+                    "status": recebimento.status,
+                    "efetivacao_estoque_id": getattr(efetivacao, "pk", None),
+                }
         return {}
 
     def _resultado(self, evento_uuid, chave, status, mapeamento=None, mensagem=""):

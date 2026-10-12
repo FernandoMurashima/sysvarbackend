@@ -44,6 +44,7 @@ from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
 from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoFaixaNumeracao, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, HubVendaFaixaNumeracao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
+from hub.recebimentos import recebimentos_hub_queryset, serializar_recebimento_hub
 from hub.sincronizacao import (
     atualizar_status_sincronizacao,
     hubs_no_escopo,
@@ -886,6 +887,50 @@ class HubSyncPushView(APIView):
             raise ValidationError({"eventos": "Informe uma lista de eventos."})
         resultados = HubSyncProcessor(request.sysvar_hub, request=request).processar_lote(eventos)
         return Response({"resultados": resultados}, status=status.HTTP_200_OK)
+
+
+class HubRecebimentosView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        status_param = str(request.query_params.get("status") or "").strip().upper()
+        qs = recebimentos_hub_queryset(request.sysvar_hub)
+        if status_param:
+            qs = qs.filter(status=status_param)
+        else:
+            qs = qs.filter(status__in=[
+                "ABERTO",
+                "EM_CONFERENCIA",
+            ])
+        return Response(
+            {
+                "recebimentos_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": request.sysvar_hub.pk,
+                    "hub_uuid": str(request.sysvar_hub.hub_uuid),
+                },
+                "empresa": {"id": request.sysvar_hub.loja.empresa_id},
+                "loja": {"id": request.sysvar_hub.loja_id},
+                "recebimentos": [serializar_recebimento_hub(recebimento) for recebimento in qs],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubRecebimentoDetalheView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, recebimento_id):
+        recebimento = recebimentos_hub_queryset(request.sysvar_hub).filter(pk=recebimento_id).first()
+        if not recebimento:
+            raise Http404
+        return Response(
+            {"recebimento": serializar_recebimento_hub(recebimento, detalhado=True)},
+            status=status.HTTP_200_OK,
+        )
 
 
 class HubVendaFaixaNumeracaoView(APIView):
