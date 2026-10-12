@@ -45,6 +45,10 @@ from hub.models import (
     HubVendaFaixaNumeracao,
     HubVendaMapeamento,
 )
+from hub.distribuicao_recebimentos import (
+    mapeamento_recebimento_distribuicao_hub,
+    processar_retorno_distribuicao_hub,
+)
 from hub.recebimentos import processar_retorno_conferencia_hub
 
 
@@ -57,6 +61,7 @@ TIPOS_SUPORTADOS = {
     "NFCE_ATUALIZADA",
     "DEVOLUCAO_FINALIZADA",
     "RECEBIMENTO_LOJA_CONFERIDO",
+    "DISTRIBUICAO_LOJA_CONFERIDA",
 }
 
 
@@ -217,6 +222,8 @@ class HubSyncProcessor:
             return self._devolucao_finalizada(payload)
         if tipo == "RECEBIMENTO_LOJA_CONFERIDO":
             return processar_retorno_conferencia_hub(self.hub, payload)
+        if tipo == "DISTRIBUICAO_LOJA_CONFERIDA":
+            return processar_retorno_distribuicao_hub(self.hub, payload)
         raise HubSyncError("Tipo de evento não suportado.")
 
     def _cliente_local(self, payload):
@@ -806,6 +813,8 @@ class HubSyncProcessor:
                     "status": recebimento.status,
                     "efetivacao_estoque_id": getattr(efetivacao, "pk", None),
                 }
+        if tipo == "DISTRIBUICAO_LOJA_CONFERIDA":
+            return mapeamento_recebimento_distribuicao_hub(self.hub, payload)
         return {}
 
     def _resultado(self, evento_uuid, chave, status, mapeamento=None, mensagem=""):

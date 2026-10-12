@@ -42,6 +42,11 @@ from hub.administracao import (
 )
 from hub.authentication import HubTokenAuthentication
 from hub.catalogo import gerar_catalogo_hub
+from hub.distribuicao_recebimentos import (
+    obter_recebimento_distribuicao_hub,
+    recebimentos_distribuicao_hub_queryset,
+    serializar_recebimento_distribuicao_hub,
+)
 from hub.models import AtivacaoSysvarHub, HubComandoAdministrativo, HubDevolucaoFaixaNumeracao, HubDevolucaoMapeamento, HubSincronizacaoSolicitacao, HubVendaFaixaNumeracao, SysvarHub
 from hub.operacional import normalizar_snapshot_operacional
 from hub.recebimentos import recebimentos_hub_queryset, serializar_recebimento_hub
@@ -929,6 +934,46 @@ class HubRecebimentoDetalheView(APIView):
             raise Http404
         return Response(
             {"recebimento": serializar_recebimento_hub(recebimento, detalhado=True)},
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubDistribuicaoRecebimentosView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        status_param = str(request.query_params.get("status") or "TRANS").strip().upper()
+        qs = recebimentos_distribuicao_hub_queryset(request.sysvar_hub, status_param or None)
+        return Response(
+            {
+                "recebimentos_versao": 1,
+                "gerado_em": timezone.now(),
+                "hub": {
+                    "id": request.sysvar_hub.pk,
+                    "hub_uuid": str(request.sysvar_hub.hub_uuid),
+                },
+                "empresa": {"id": request.sysvar_hub.loja.empresa_id},
+                "loja": {"id": request.sysvar_hub.loja_id},
+                "recebimentos": [
+                    serializar_recebimento_distribuicao_hub(pedido, detalhado=True)
+                    for pedido in qs
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class HubDistribuicaoRecebimentoDetalheView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, recebimento_id):
+        pedido = obter_recebimento_distribuicao_hub(request.sysvar_hub, recebimento_id)
+        if not pedido:
+            raise Http404
+        return Response(
+            {"recebimento": serializar_recebimento_distribuicao_hub(pedido, detalhado=True)},
             status=status.HTTP_200_OK,
         )
 
