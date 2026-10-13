@@ -15,6 +15,7 @@ from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_La
 from cadastros.services import ClientePadraoService
 from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, ContaBancaria, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
+from fiscal.views.venda_pdv import VendaPdvViewSet
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
 from hub.models import (
     AtivacaoSysvarHub,
@@ -3622,6 +3623,277 @@ class SysvarHubSyncPushApiTests(TestCase):
         receber = Receber.objects.get(pedido_venda=venda.pk)
         self.assertEqual(receber.Valor_total, Decimal("90.00"))
         self.assertEqual(sum(ReceberItem.objects.filter(Idreceber=receber).values_list("valor_parcela", flat=True), Decimal("0.00")), Decimal("90.00"))
+
+    def test_venda_hub_sem_promocao_gera_cashback_sobre_total(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="73737373-7373-4373-8373-737373737373",
+            total="100.00",
+            valor_recebido="100.00",
+        )
+        payload["itens"][0]["preco_unitario"] = "100.00"
+        payload["pagamentos"][0]["valor"] = "100.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-sem-promocao")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("10.00"))
+
+    def test_venda_hub_com_promocao_que_acumula_gera_cashback_sobre_total(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="74747474-7474-4474-8474-747474747474",
+            total="100.00",
+            valor_recebido="100.00",
+        )
+        payload["itens"][0].update({
+            "preco_unitario": "100.00",
+            "promocao": {
+                "id": 10,
+                "nome": "Promocao elegivel",
+                "tipo": "DESCONTO_PERCENTUAL",
+                "valor": "10.0000",
+                "acumula_cashback": True,
+            },
+        })
+        payload["pagamentos"][0]["valor"] = "100.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-promocao-elegivel")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("10.00"))
+
+    def test_venda_hub_com_item_promocional_que_nao_acumula_nao_gera_cashback(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="75757575-7575-4575-8575-757575757575",
+            total="100.00",
+            valor_recebido="100.00",
+        )
+        payload["itens"][0].update({
+            "preco_unitario": "100.00",
+            "promocao": {
+                "id": 11,
+                "nome": "Promocao sem cashback",
+                "tipo": "DESCONTO_PERCENTUAL",
+                "valor": "10.0000",
+                "acumula_cashback": False,
+            },
+        })
+        payload["pagamentos"][0]["valor"] = "100.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-promocao-sem-acumulo")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        self.assertFalse(CashbackMovimento.objects.filter(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO).exists())
+
+    def test_venda_hub_mista_respeita_acumula_cashback_do_snapshot_e_retry_nao_duplica(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="76767676-7676-4676-8676-767676767676",
+            total="150.00",
+            valor_recebido="150.00",
+            itens=[
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "100.00",
+                    "desconto": "0.00",
+                    "promocao": {
+                        "id": 12,
+                        "nome": "Promocao sem cashback",
+                        "tipo": "DESCONTO_PERCENTUAL",
+                        "valor": "10.0000",
+                        "acumula_cashback": False,
+                    },
+                },
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "50.00",
+                    "desconto": "0.00",
+                    "promocao": None,
+                },
+            ],
+            pagamentos=[{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "150.00"}],
+        )
+
+        evento = self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-mista-snapshot")
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("5.00"))
+
+        response = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(CashbackMovimento.objects.filter(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO).count(), 1)
+
+    def test_venda_hub_mista_com_desconto_geral_preserva_base_de_itens_elegiveis_sem_rateio(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="79797979-7979-4979-8979-797979797979",
+            total="120.00",
+            valor_recebido="120.00",
+            desconto_geral="30.00",
+            itens=[
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "100.00",
+                    "desconto": "0.00",
+                    "promocao": None,
+                },
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "50.00",
+                    "desconto": "0.00",
+                    "promocao": {
+                        "id": 14,
+                        "nome": "Promocao sem cashback",
+                        "tipo": "DESCONTO_PERCENTUAL",
+                        "valor": "10.0000",
+                        "acumula_cashback": False,
+                    },
+                },
+            ],
+            pagamentos=[{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "120.00"}],
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-desconto-geral")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("10.00"))
+
+    def test_venda_hub_gera_cashback_sobre_base_elegivel_menos_cashback_usado(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal("20.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="77777777-7777-4777-8777-777777777777",
+            total="150.00",
+            valor_recebido="150.00",
+            itens=[
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "100.00",
+                    "desconto": "0.00",
+                    "promocao": None,
+                },
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "50.00",
+                    "desconto": "0.00",
+                    "promocao": {
+                        "id": 13,
+                        "nome": "Promocao sem cashback",
+                        "tipo": "DESCONTO_PERCENTUAL",
+                        "valor": "10.0000",
+                        "acumula_cashback": False,
+                    },
+                },
+            ],
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "20.00"},
+                {"codigo": "DINHEIRO", "tipo": "DINHEIRO", "descricao": "Dinheiro", "valor": "130.00"},
+            ],
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-base-menos-uso")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("20.00")).exists())
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("8.00"))
+
+    def test_regra_cashback_pdv_central_permanece_sobre_total_da_venda(self):
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        venda = VendaPdv.objects.create(
+            empresa=self.empresa,
+            loja=self.loja,
+            caixa=self.caixa,
+            cliente=self.cliente,
+            vendedor=self.vendedor,
+            documento="VD-CENTRAL-CBK",
+            forma_pagamento="DINHEIRO",
+            total=Decimal("150.00"),
+            valor_recebido=Decimal("150.00"),
+        )
+
+        VendaPdvViewSet()._registrar_cashback(venda, [{"forma": "DINHEIRO", "valor": Decimal("150.00")}])
+
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("15.00"))
 
     def test_venda_hub_normaliza_troca_por_tipo_e_consumo_do_vale_documentado(self):
         self._hub_autenticado()

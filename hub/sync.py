@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -15,7 +16,7 @@ from fiscal.models import NFCe, VendaDevolucao, VendaPdv
 from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet
-from financeiro.models import ValeTroca, ValeTrocaMovimento
+from financeiro.models import CashbackConfig, CashbackMovimento, ValeTroca, ValeTrocaMovimento
 from financeiro.services import consumir_reservas_vale_troca_venda
 from financeiro.models import Caixa
 from produto.models import ProdutoDetalhe
@@ -348,7 +349,7 @@ class HubSyncProcessor:
             consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_reserva)
         else:
             view._registrar_uso_vale_troca(venda, pagamentos)
-        view._registrar_cashback(venda, pagamentos)
+        self._registrar_cashback_venda_hub(view, venda, pagamentos, payload.get("itens") or [])
         view._registrar_cmv(venda)
         view._registrar_impostos_venda(venda)
         view._registrar_comissao(venda)
@@ -541,6 +542,64 @@ class HubSyncProcessor:
         }
         normalizado.update(self._snapshot_financeiro_pagamento(pagamento))
         return normalizado
+
+    def _registrar_cashback_venda_hub(self, view: VendaPdvViewSet, venda: VendaPdv, pagamentos, itens_payload):
+        config = CashbackConfig.regra_ativa(venda.empresa)
+        if not config or not view._cliente_participa_cashback(venda, config):
+            return
+
+        cashback_usado = view._total_cashback_usado(pagamentos)
+        if cashback_usado > 0 and not CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).exists():
+            CashbackMovimento.objects.create(
+                empresa=venda.empresa,
+                cliente=venda.cliente,
+                venda_uso=venda,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+                valor=cashback_usado,
+                observacao=f"Uso na venda PDV {venda.documento}",
+                criado_por=venda.criado_por,
+            )
+
+        base_credito = self._base_cashback_venda_hub(venda, cashback_usado, itens_payload)
+        if base_credito < money(config.valor_minimo_geracao):
+            return
+
+        credito = money(base_credito * Decimal(config.percentual or 0) / Decimal("100"))
+        if credito <= 0:
+            return
+
+        if CashbackMovimento.objects.filter(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO).exists():
+            return
+
+        CashbackMovimento.objects.create(
+            empresa=venda.empresa,
+            cliente=venda.cliente,
+            venda_origem=venda,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=credito,
+            validade=timezone.localdate() + timedelta(days=int(config.validade_dias or 0)),
+            observacao=f"Crédito gerado pela venda PDV {venda.documento}",
+            criado_por=venda.criado_por,
+        )
+
+    def _base_cashback_venda_hub(self, venda: VendaPdv, cashback_usado: Decimal, itens_payload) -> Decimal:
+        itens_payload = list(itens_payload or [])
+        possui_promocao_sem_acumulo = any(
+            item.get("promocao") and item["promocao"].get("acumula_cashback") is False
+            for item in itens_payload
+        )
+        if not possui_promocao_sem_acumulo:
+            return money(max(Decimal("0.00"), venda.total - cashback_usado))
+
+        itens_central = list(venda.itens.order_by("id"))
+        base_itens = Decimal("0.00")
+        for venda_item, item_payload in zip(itens_central, itens_payload):
+            promocao = item_payload.get("promocao") or {}
+            if promocao.get("acumula_cashback") is False:
+                continue
+            total_item = money(Decimal(venda_item.quantidade) * Decimal(venda_item.preco_unitario) - Decimal(venda_item.desconto))
+            base_itens += total_item
+        return money(max(Decimal("0.00"), base_itens - cashback_usado))
 
     def _snapshot_financeiro_pagamento(self, pagamento):
         return {
