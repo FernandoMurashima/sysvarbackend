@@ -325,23 +325,36 @@ def cancelar_reservas_cashback_venda(hub, venda_uuid):
     return [serializar_cashback_reserva(reserva) for reserva in reservas]
 
 
+def _reserva_id_cashback_pagamento(pagamento):
+    reserva_id = pagamento.get("reserva_id") or pagamento.get("cashback_reserva_id")
+    if reserva_id in (None, ""):
+        return None
+    try:
+        reserva_id = int(reserva_id)
+    except (TypeError, ValueError) as exc:
+        raise CashbackErro("Reserva de Cashback invalida.") from exc
+    if reserva_id <= 0:
+        raise CashbackErro("Reserva de Cashback invalida.")
+    return reserva_id
+
+
 def consumir_reservas_cashback_venda(hub, venda_uuid, venda, pagamentos):
     venda_uuid = _uuid_cashback(venda_uuid, "venda_uuid")
-    reservas_consumidas = []
     for pagamento in pagamentos:
         if str(pagamento.get("tipo") or "").upper() != "CASHBACK":
             continue
-        if not pagamento.get("operacao_uuid") and not pagamento.get("reserva_id"):
+        reserva_id = _reserva_id_cashback_pagamento(pagamento)
+        if not reserva_id:
             continue
         operacao_uuid = _uuid_cashback(pagamento.get("operacao_uuid"), "operacao_uuid")
         reserva = (
             CashbackReserva.objects.select_for_update()
-            .filter(hub=hub, venda_uuid=venda_uuid, operacao_uuid=operacao_uuid)
+            .filter(pk=reserva_id)
             .first()
         )
         if not reserva:
             raise CashbackErro("Reserva de Cashback obrigatoria nao encontrada.")
-        if pagamento.get("reserva_id") and int(pagamento.get("reserva_id")) != reserva.pk:
+        if reserva.hub_id != hub.pk or reserva.venda_uuid != venda_uuid or reserva.operacao_uuid != operacao_uuid:
             raise CashbackErro("Reserva de Cashback pertence a outra operacao.")
         if reserva.empresa_id != venda.empresa_id or reserva.cliente_id != venda.cliente_id:
             raise CashbackErro("Reserva de Cashback nao pertence a esta venda.")
@@ -351,20 +364,8 @@ def consumir_reservas_cashback_venda(hub, venda_uuid, venda, pagamentos):
             continue
         if reserva.status != CashbackReserva.STATUS_RESERVADA:
             raise CashbackErro("Reserva de Cashback nao esta ativa.")
-        reservas_consumidas.append(reserva)
         reserva.status = CashbackReserva.STATUS_CONSUMIDA
         reserva.save(update_fields=["status", "atualizado_em"])
-    total = money(sum((reserva.valor for reserva in reservas_consumidas), ZERO))
-    if total > ZERO and not CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).exists():
-        CashbackMovimento.objects.create(
-            empresa=venda.empresa,
-            cliente=venda.cliente,
-            venda_uso=venda,
-            tipo=CashbackMovimento.TIPO_DEBITO,
-            valor=total,
-            observacao=f"Uso na venda Hub {venda_uuid}",
-            criado_por=venda.criado_por,
-        )
 
 
 def saldo_reservado_vale_troca(vale):

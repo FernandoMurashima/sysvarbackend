@@ -1007,6 +1007,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if not self._cliente_participa_cashback(venda, config):
             return "Cashback não pode ser usado para consumidor final."
 
+        Cliente.objects.select_for_update().filter(pk=venda.cliente_id, empresa=venda.empresa).exists()
         saldo = saldo_disponivel_cashback_cliente(
             venda.cliente_id,
             venda.empresa,

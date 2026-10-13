@@ -3579,7 +3579,13 @@ class SysvarHubSyncPushApiTests(TestCase):
             venda_uuid="61616161-6161-4161-8161-616161616161",
             total="100.00",
             valor_recebido="100.00",
-            pagamentos=[{"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback Hub", "valor": "100.00"}],
+            pagamentos=[{
+                "codigo": "CBK",
+                "tipo": "CASHBACK",
+                "descricao": "Cashback Hub",
+                "valor": "100.00",
+                "operacao_uuid": "62626262-6262-4262-8262-626262626262",
+            }],
         )
         payload["itens"][0]["preco_unitario"] = "100.00"
 
@@ -3588,7 +3594,8 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
         self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "CASHBACK")
-        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("100.00")).exists())
+        self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("100.00")).count(), 1)
+        self.assertFalse(CashbackReserva.objects.exists())
         self.assertFalse(Receber.objects.filter(pedido_venda=venda.pk).exists())
 
     def test_venda_hub_cashback_parcial_cria_recebivel_so_do_valor_financeiro(self):
@@ -3772,6 +3779,44 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
         self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("30.00")).count(), 1)
 
+    def test_venda_hub_cashback_reservado_e_local_registra_debito_unico_total(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        self._credito_cashback("100.00")
+        venda_uuid = "79797979-7979-4979-8979-797979797979"
+        operacao_reserva = "78787878-7878-4878-8878-787878787878"
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa,
+            hub=self.hub,
+            venda_uuid=venda_uuid,
+            operacao_uuid=operacao_reserva,
+            cliente=self.cliente,
+            valor=Decimal("30.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid=venda_uuid,
+            total="100.00",
+            valor_recebido="100.00",
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "valor": "30.00", "operacao_uuid": operacao_reserva, "cashback_reserva_id": reserva.pk},
+                {"codigo": "CBK", "tipo": "CASHBACK", "valor": "20.00", "operacao_uuid": "77777777-7777-4777-8777-777777777777"},
+                {"codigo": "DINHEIRO", "tipo": "DINHEIRO", "valor": "50.00"},
+            ],
+        )
+        payload["itens"][0]["preco_unitario"] = "100.00"
+        evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid="76767676-7676-4676-8676-767676767676", chave="venda-cashback-reserva-local")
+
+        response = self._push([evento])
+        retry = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
+        self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).count(), 1)
+        self.assertEqual(CashbackMovimento.objects.get(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).valor, Decimal("50.00"))
+
     def test_venda_hub_falha_na_sincronizacao_nao_consumir_reserva_cashback(self):
         self._hub_autenticado()
         self._cashback_config()
@@ -3827,6 +3872,40 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload["itens"][0]["preco_unitario"] = "100.00"
 
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-reserva-outro-hub")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertIn("Reserva de Cashback", response.data["resultados"][0]["mensagem"])
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+
+    def test_venda_hub_rejeita_reserva_cashback_de_outro_cliente(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        outro_cliente = Cliente.objects.create(empresa=self.empresa, tipo_pessoa="PF", documento="15350946056", cpf="15350946056", nome_cliente="Cliente Cashback Reserva")
+        self._credito_cashback("100.00")
+        self._credito_cashback("100.00", cliente=outro_cliente)
+        operacao_uuid = "74747474-7474-4747-8747-747474747474"
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa,
+            hub=self.hub,
+            venda_uuid="75757575-7575-4757-8757-757575757575",
+            operacao_uuid=operacao_uuid,
+            cliente=outro_cliente,
+            valor=Decimal("30.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid=str(reserva.venda_uuid),
+            cliente_retaguarda_id=self.cliente.pk,
+            total="100.00",
+            valor_recebido="100.00",
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "valor": "30.00", "operacao_uuid": operacao_uuid, "cashback_reserva_id": reserva.pk},
+                {"codigo": "DINHEIRO", "valor": "70.00"},
+            ],
+        )
+        payload["itens"][0]["preco_unitario"] = "100.00"
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-reserva-outro-cliente")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
         self.assertIn("Reserva de Cashback", response.data["resultados"][0]["mensagem"])
