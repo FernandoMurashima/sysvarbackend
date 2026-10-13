@@ -3647,6 +3647,55 @@ class SysvarHubSyncPushApiTests(TestCase):
         credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
         self.assertEqual(credito.valor, Decimal("10.00"))
 
+    def test_venda_hub_todos_itens_elegiveis_com_desconto_geral_usa_base_dos_itens(self):
+        self._hub_autenticado()
+        CashbackConfig.objects.create(
+            empresa=self.empresa,
+            ativo=True,
+            percentual=Decimal("10.0000"),
+            limite_uso_percentual=Decimal("100.0000"),
+        )
+        payload = self._payload_venda(
+            venda_uuid="78787878-7878-4878-8878-787878787878",
+            total="120.00",
+            valor_recebido="120.00",
+            desconto_geral="30.00",
+            itens=[
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "100.00",
+                    "desconto": "0.00",
+                    "promocao": None,
+                },
+                {
+                    "produto_retaguarda_id": self.produto.pk,
+                    "sku_retaguarda_id": self.sku.pk,
+                    "ean": self.sku.ean13,
+                    "quantidade": 1,
+                    "preco_unitario": "50.00",
+                    "desconto": "0.00",
+                    "promocao": {
+                        "id": 15,
+                        "nome": "Promocao elegivel",
+                        "tipo": "DESCONTO_PERCENTUAL",
+                        "valor": "10.0000",
+                        "acumula_cashback": True,
+                    },
+                },
+            ],
+            pagamentos=[{"codigo": "DINHEIRO", "descricao": "Dinheiro", "valor": "120.00"}],
+        )
+
+        response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-todos-elegiveis-desconto-geral")])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
+        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        credito = CashbackMovimento.objects.get(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO)
+        self.assertEqual(credito.valor, Decimal("15.00"))
+
     def test_venda_hub_com_promocao_que_acumula_gera_cashback_sobre_total(self):
         self._hub_autenticado()
         CashbackConfig.objects.create(

@@ -584,16 +584,15 @@ class HubSyncProcessor:
 
     def _base_cashback_venda_hub(self, venda: VendaPdv, cashback_usado: Decimal, itens_payload) -> Decimal:
         itens_payload = list(itens_payload or [])
-        possui_promocao_sem_acumulo = any(
-            item.get("promocao") and item["promocao"].get("acumula_cashback") is False
-            for item in itens_payload
-        )
-        if not possui_promocao_sem_acumulo:
-            return money(max(Decimal("0.00"), venda.total - cashback_usado))
-
         itens_central = list(venda.itens.order_by("id"))
+        if len(itens_central) != len(itens_payload):
+            raise HubSyncError("Itens da venda divergentes do snapshot recebido do Hub.")
+
         base_itens = Decimal("0.00")
         for venda_item, item_payload in zip(itens_central, itens_payload):
+            ean_payload = str(item_payload.get("ean") or "")
+            if ean_payload and ean_payload != str(venda_item.ean):
+                raise HubSyncError("Snapshot de item não corresponde ao item persistido na venda.")
             promocao = item_payload.get("promocao") or {}
             if promocao.get("acumula_cashback") is False:
                 continue
