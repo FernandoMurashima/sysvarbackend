@@ -33,6 +33,7 @@ from financeiro.services import (
     reservar_cashback_venda,
     reservar_faixa_documento,
     reservar_vales_troca_venda,
+    restaurar_cashback_utilizado_devolucao,
 )
 from financeiro.models import SequenciaDocumento
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaPdv
@@ -550,6 +551,8 @@ class HubDevolucaoFinalizarOnlineView(APIView):
         )
         for venda_item, quantidade, desconto in selecionados:
             view._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
+        restaurar_cashback_utilizado_devolucao(devolucao)
+        devolucao.refresh_from_db(fields=["credito_cliente"])
         view._registrar_credito_cliente(devolucao)
         view._estornar_financeiro(devolucao)
         view._estornar_cmv(devolucao)

@@ -17,7 +17,7 @@ from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet
 from financeiro.models import CashbackConfig, CashbackMovimento, ValeTroca, ValeTrocaMovimento
-from financeiro.services import consumir_reservas_cashback_venda, consumir_reservas_vale_troca_venda
+from financeiro.services import consumir_reservas_cashback_venda, consumir_reservas_vale_troca_venda, restaurar_cashback_utilizado_devolucao
 from financeiro.models import Caixa
 from produto.models import ProdutoDetalhe
 
@@ -439,6 +439,8 @@ class HubSyncProcessor:
         for venda_item, quantidade, desconto in selecionados:
             view._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
 
+        restaurar_cashback_utilizado_devolucao(devolucao)
+        devolucao.refresh_from_db(fields=["credito_cliente"])
         view._registrar_credito_cliente(devolucao)
         vale_payload = payload.get("vale_troca") or {}
         vale = ValeTroca.objects.filter(devolucao=devolucao).first()

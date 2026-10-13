@@ -300,6 +300,7 @@ class CashbackMovimento(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='cashback_movimentos', db_index=True)
     venda_origem = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_creditos')
     venda_uso = models.ForeignKey('fiscal.VendaPdv', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_usos')
+    devolucao = models.ForeignKey('fiscal.VendaDevolucao', on_delete=models.SET_NULL, null=True, blank=True, related_name='cashback_estornos')
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES, db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ATIVO, db_index=True)
     valor = models.DecimalField(max_digits=18, decimal_places=2)
@@ -314,6 +315,7 @@ class CashbackMovimento(models.Model):
         indexes = [
             models.Index(fields=['cliente', 'status'], name='ix_cashback_cliente_status'),
             models.Index(fields=['tipo', 'status'], name='ix_cashback_tipo_status'),
+            models.Index(fields=['devolucao', 'tipo'], name='ix_cashback_dev_tipo'),
         ]
 
     def __str__(self):

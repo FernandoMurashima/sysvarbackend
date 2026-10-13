@@ -233,6 +233,92 @@ def consultar_cashback_online_cliente(hub, cliente_id):
     return serializar_cashback_saldo_cliente(cliente, hub.loja.empresa)
 
 
+@transaction.atomic
+def restaurar_cashback_utilizado_devolucao(devolucao):
+    from fiscal.models import VendaDevolucao, VendaPdv
+
+    devolucao = (
+        VendaDevolucao.objects.select_for_update()
+        .select_related("venda", "cliente", "empresa")
+        .prefetch_related("itens", "venda__itens", "venda__devolucoes__itens")
+        .get(pk=devolucao.pk)
+    )
+    venda = VendaPdv.objects.select_for_update().get(pk=devolucao.venda_id)
+    Cliente.objects.select_for_update().filter(pk=devolucao.cliente_id).first()
+
+    estorno_existente = money(
+        CashbackMovimento.objects.select_for_update()
+        .filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO, status=CashbackMovimento.STATUS_ATIVO)
+        .aggregate(total=models.Sum("valor")).get("total")
+        or ZERO
+    )
+    if estorno_existente > ZERO:
+        credito = money(max(ZERO, money(devolucao.subtotal) - estorno_existente))
+        if money(devolucao.credito_cliente) != credito:
+            devolucao.credito_cliente = credito
+            devolucao.save(update_fields=["credito_cliente", "atualizado_em"])
+        return estorno_existente
+
+    cashback_usado = money(
+        CashbackMovimento.objects.select_for_update()
+        .filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, status=CashbackMovimento.STATUS_ATIVO)
+        .aggregate(total=models.Sum("valor")).get("total")
+        or ZERO
+    )
+    if cashback_usado <= ZERO:
+        devolucao.credito_cliente = money(devolucao.subtotal)
+        devolucao.save(update_fields=["credito_cliente", "atualizado_em"])
+        return ZERO
+
+    base_itens = money(sum((money(item.total_item) for item in venda.itens.all()), ZERO))
+    if base_itens <= ZERO:
+        devolucao.credito_cliente = money(devolucao.subtotal)
+        devolucao.save(update_fields=["credito_cliente", "atualizado_em"])
+        return ZERO
+
+    devolvido_acumulado = ZERO
+    for devolucao_venda in venda.devolucoes.all():
+        if devolucao_venda.pk and devolucao_venda.pk > devolucao.pk:
+            continue
+        if devolucao_venda.status == VendaDevolucao.Status.CANCELADA:
+            continue
+        devolvido_acumulado += sum((money(item.total_item) for item in devolucao_venda.itens.all()), ZERO)
+    devolvido_acumulado = money(devolvido_acumulado)
+
+    estornado_anterior = money(
+        CashbackMovimento.objects.select_for_update()
+        .filter(
+            devolucao__venda=venda,
+            tipo=CashbackMovimento.TIPO_ESTORNO,
+            status=CashbackMovimento.STATUS_ATIVO,
+        )
+        .exclude(devolucao=devolucao)
+        .aggregate(total=models.Sum("valor")).get("total")
+        or ZERO
+    )
+
+    if devolvido_acumulado >= base_itens:
+        estorno_alvo = cashback_usado
+    else:
+        estorno_alvo = money(cashback_usado * devolvido_acumulado / base_itens)
+    estorno_incremental = money(max(ZERO, min(cashback_usado, estorno_alvo) - estornado_anterior))
+
+    if estorno_incremental > ZERO:
+        CashbackMovimento.objects.create(
+            empresa=devolucao.empresa,
+            cliente=devolucao.cliente,
+            devolucao=devolucao,
+            tipo=CashbackMovimento.TIPO_ESTORNO,
+            valor=estorno_incremental,
+            observacao=f"Restituição do Cashback utilizado na devolução {devolucao.documento}",
+            criado_por=devolucao.criado_por,
+        )
+
+    devolucao.credito_cliente = money(max(ZERO, money(devolucao.subtotal) - estorno_incremental))
+    devolucao.save(update_fields=["credito_cliente", "atualizado_em"])
+    return estorno_incremental
+
+
 def serializar_cashback_reserva(reserva):
     return {
         "id": reserva.pk,

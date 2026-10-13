@@ -37,6 +37,7 @@ from financeiro.services import (
     gerar_lancamento_contabil_movimentacao,
     reservar_documento_vale_troca,
     reservar_numero_documento,
+    restaurar_cashback_utilizado_devolucao,
     saldo_disponivel_cashback_cliente,
 )
 from fiscal.models import (
@@ -2416,6 +2417,8 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
         for venda_item, quantidade, desconto in selecionados:
             self._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
 
+        restaurar_cashback_utilizado_devolucao(devolucao)
+        devolucao.refresh_from_db(fields=["credito_cliente"])
         self._registrar_credito_cliente(devolucao)
         self._estornar_financeiro(devolucao)
         self._estornar_cmv(devolucao)
@@ -2599,6 +2602,8 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
 
     def _registrar_credito_cliente(self, devolucao: VendaDevolucao):
         if ValeTroca.objects.filter(devolucao=devolucao).exists():
+            return
+        if money(devolucao.credito_cliente) <= 0:
             return
         documento_vale = reservar_documento_vale_troca(devolucao.empresa)
         vale, created = ValeTroca.objects.get_or_create(
