@@ -343,6 +343,42 @@ def saldo_cashback_cliente(cliente_id, ate=None, empresa=None):
     return saldo or 0
 
 
+class CashbackReserva(models.Model):
+    STATUS_RESERVADA = 'RESERVADA'
+    STATUS_CONSUMIDA = 'CONSUMIDA'
+    STATUS_CANCELADA = 'CANCELADA'
+    STATUS_CHOICES = [
+        (STATUS_RESERVADA, 'Reservada'),
+        (STATUS_CONSUMIDA, 'Consumida'),
+        (STATUS_CANCELADA, 'Cancelada'),
+    ]
+
+    Idcashbackreserva = models.BigAutoField(primary_key=True)
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.PROTECT, related_name='cashback_reservas', db_index=True)
+    hub = models.ForeignKey('hub.SysvarHub', on_delete=models.PROTECT, related_name='cashback_reservas', db_index=True)
+    venda_uuid = models.UUIDField(db_index=True)
+    operacao_uuid = models.UUIDField(db_index=True)
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='cashback_reservas', db_index=True)
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_RESERVADA, db_index=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_reserva'
+        ordering = ['-criado_em', '-Idcashbackreserva']
+        constraints = [
+            models.UniqueConstraint(fields=['hub', 'venda_uuid', 'operacao_uuid'], name='uq_cashback_reserva_operacao_hub'),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'cliente', 'status'], name='ix_cb_res_emp_cli_status'),
+            models.Index(fields=['hub', 'venda_uuid'], name='ix_cb_res_hub_venda'),
+        ]
+
+    def __str__(self):
+        return f'{self.cliente_id} - {self.venda_uuid} - {self.valor} - {self.status}'
+
+
 # =========================
 # Crédito de troca
 # =========================

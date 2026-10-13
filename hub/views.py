@@ -16,15 +16,21 @@ from accounts.models import CredencialPdvUsuario
 from cadastros.models import Cliente, Funcionarios, Loja
 from financeiro.models import Caixa, CashbackConfig, CashbackMovimento, CondicaoAdquirente, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca
 from financeiro.services import (
+    CashbackErro,
     DocumentoSequenciaErro,
     ValeTrocaErro,
+    cancelar_reserva_cashback,
     cancelar_reserva_vale_troca,
+    cancelar_reservas_cashback_venda,
     cancelar_reservas_vale_troca_venda,
+    consultar_cashback_online_cliente,
+    consultar_reservas_cashback_venda,
     consultar_reservas_vale_troca_venda,
     consultar_vale_troca_online,
     escopo_empresa,
     escopo_loja,
     listar_vales_troca_online_cliente,
+    reservar_cashback_venda,
     reservar_faixa_documento,
     reservar_vales_troca_venda,
 )
@@ -328,6 +334,81 @@ class HubDevolucaoClienteVendasView(APIView):
 
 def _vale_troca_error_response(exc):
     return Response({"detail": str(exc)}, status=getattr(exc, "status_code", status.HTTP_409_CONFLICT))
+
+
+def _cashback_error_response(exc):
+    return Response({"detail": str(exc)}, status=getattr(exc, "status_code", status.HTTP_409_CONFLICT))
+
+
+class HubCashbackSaldoView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            cashback = consultar_cashback_online_cliente(request.sysvar_hub, request.query_params.get("cliente_id"))
+        except CashbackErro as exc:
+            return _cashback_error_response(exc)
+        return Response({"cashback": cashback}, status=status.HTTP_200_OK)
+
+
+class HubCashbackReservarVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reserva = reservar_cashback_venda(
+                request.sysvar_hub,
+                request.data.get("venda_uuid"),
+                request.data.get("operacao_uuid"),
+                request.data.get("cliente_id") or request.data.get("cliente_retaguarda_id"),
+                request.data.get("valor"),
+            )
+        except CashbackErro as exc:
+            return _cashback_error_response(exc)
+        return Response({"reserva": reserva}, status=status.HTTP_200_OK)
+
+
+class HubCashbackReservasVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, venda_uuid):
+        try:
+            reservas = consultar_reservas_cashback_venda(request.sysvar_hub, venda_uuid)
+        except CashbackErro as exc:
+            return _cashback_error_response(exc)
+        return Response({"reservas": reservas}, status=status.HTTP_200_OK)
+
+
+class HubCashbackCancelarReservaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reserva = cancelar_reserva_cashback(
+                request.sysvar_hub,
+                reserva_id=request.data.get("reserva_id"),
+                venda_uuid=request.data.get("venda_uuid"),
+                operacao_uuid=request.data.get("operacao_uuid"),
+            )
+        except CashbackErro as exc:
+            return _cashback_error_response(exc)
+        return Response({"reserva": reserva}, status=status.HTTP_200_OK)
+
+
+class HubCashbackCancelarVendaView(APIView):
+    authentication_classes = [HubTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            reservas = cancelar_reservas_cashback_venda(request.sysvar_hub, request.data.get("venda_uuid"))
+        except CashbackErro as exc:
+            return _cashback_error_response(exc)
+        return Response({"reservas": reservas}, status=status.HTTP_200_OK)
 
 
 class HubValeTrocaConsultarView(APIView):

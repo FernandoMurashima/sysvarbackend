@@ -29,7 +29,6 @@ from financeiro.models import (
     SequenciaDocumento,
     ValeTroca,
     ValeTrocaMovimento,
-    saldo_cashback_cliente,
     saldo_vale_troca_cliente,
 )
 from financeiro.services import (
@@ -38,6 +37,7 @@ from financeiro.services import (
     gerar_lancamento_contabil_movimentacao,
     reservar_documento_vale_troca,
     reservar_numero_documento,
+    saldo_disponivel_cashback_cliente,
 )
 from fiscal.models import (
     Cfop,
@@ -986,6 +986,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
     def _cliente_participa_cashback(self, venda: VendaPdv, config: CashbackConfig) -> bool:
         return config.consumidor_final_participa or not self._cliente_padrao(venda)
 
+    def _reservas_cashback_pagamentos(self, pagamentos: List[Dict]) -> List[int]:
+        reservas = []
+        for pagamento in pagamentos:
+            if pagamento.get("forma") == "CASHBACK" and pagamento.get("reserva_id"):
+                try:
+                    reservas.append(int(pagamento["reserva_id"]))
+                except (TypeError, ValueError):
+                    continue
+        return reservas
+
     def _validar_cashback(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal) -> str:
         cashback_usado = self._total_cashback_usado(pagamentos)
         if cashback_usado <= 0:
@@ -997,7 +1007,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if not self._cliente_participa_cashback(venda, config):
             return "Cashback não pode ser usado para consumidor final."
 
-        saldo = money(saldo_cashback_cliente(venda.cliente_id, empresa=venda.empresa))
+        saldo = saldo_disponivel_cashback_cliente(
+            venda.cliente_id,
+            venda.empresa,
+            excluir_reserva_ids=self._reservas_cashback_pagamentos(pagamentos),
+        )
         if cashback_usado > saldo:
             return "O cashback informado é maior que o saldo disponível do cliente."
         if cashback_usado > total:

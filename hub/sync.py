@@ -17,7 +17,7 @@ from fiscal.models.venda_pdv import money
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet
 from financeiro.models import CashbackConfig, CashbackMovimento, ValeTroca, ValeTrocaMovimento
-from financeiro.services import consumir_reservas_vale_troca_venda
+from financeiro.services import consumir_reservas_cashback_venda, consumir_reservas_vale_troca_venda
 from financeiro.models import Caixa
 from produto.models import ProdutoDetalhe
 
@@ -313,6 +313,11 @@ class HubSyncProcessor:
             desconto_itens += money(venda_item.desconto)
         pagamentos_payload = [self._normalizar_pagamento(p) for p in payload.get("pagamentos") or []]
         pagamentos = view._normalizar_pagamentos({"pagamentos": pagamentos_payload, "valor_recebido": payload.get("valor_recebido") or payload.get("total")})
+        for normalizado, original in zip(pagamentos, pagamentos_payload):
+            if normalizado["forma"] == "CASHBACK":
+                normalizado["tipo"] = original.get("tipo") or "CASHBACK"
+                normalizado["operacao_uuid"] = original.get("operacao_uuid")
+                normalizado["reserva_id"] = original.get("reserva_id")
         pagamentos_reserva = []
         for normalizado, original in zip(pagamentos, pagamentos_payload):
             if normalizado["forma"] == "TROCA" and original.get("operacao_uuid"):
@@ -349,6 +354,7 @@ class HubSyncProcessor:
             consumir_reservas_vale_troca_venda(self.hub, venda_uuid, venda, pagamentos_reserva)
         else:
             view._registrar_uso_vale_troca(venda, pagamentos)
+        consumir_reservas_cashback_venda(self.hub, venda_uuid, venda, pagamentos)
         self._registrar_cashback_venda_hub(view, venda, pagamentos, payload.get("itens") or [])
         view._registrar_cmv(venda)
         view._registrar_impostos_venda(venda)
@@ -523,6 +529,9 @@ class HubSyncProcessor:
                 "descricao": pagamento.get("descricao") or "CASHBACK",
                 "valor": pagamento.get("valor"),
                 "autorizacao": pagamento.get("autorizacao") or "",
+                "tipo": "CASHBACK",
+                "operacao_uuid": pagamento.get("operacao_uuid"),
+                "reserva_id": pagamento.get("cashback_reserva_id") or pagamento.get("reserva_id"),
             }
         if tipo in ("TROCA", "VALE_TROCA"):
             return {
