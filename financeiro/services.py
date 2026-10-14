@@ -319,6 +319,7 @@ def cancelar_cashback_gerado_venda_devolvida(devolucao):
         devolucao=devolucao,
         tipo=CashbackMovimento.TIPO_DEBITO,
         valor=estorno_incremental,
+        validade=credito.validade,
         observacao=f"Cancelamento do Cashback gerado na venda {venda.documento} pela devolução {devolucao.documento}",
         criado_por=devolucao.criado_por,
     )

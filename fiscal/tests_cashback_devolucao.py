@@ -6,7 +6,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
-from financeiro.models import CashbackMovimento, ValeTroca
+from financeiro.models import CashbackMovimento, ValeTroca, saldo_cashback_cliente
 from financeiro.services import cancelar_cashback_gerado_venda_devolvida, restaurar_cashback_utilizado_devolucao
 from fiscal.models import VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet
@@ -172,12 +172,21 @@ class CashbackDevolucaoRestituicaoTests(TestCase):
 
     def test_estorna_cashback_gerado_em_devolucao_total(self):
         venda, item = self._venda("100.00")
-        self._cashback_gerado(venda, "10.00", validade=timezone.localdate() + timedelta(days=30))
+        validade = timezone.localdate() + timedelta(days=30)
+        self._cashback_gerado(venda, "10.00", validade=validade)
         devolucao = self._devolucao(venda, [(item, 1, "100.00")])
 
         estornado = cancelar_cashback_gerado_venda_devolvida(devolucao)
 
         self.assertEqual(estornado, Decimal("10.00"))
+        cancelamento = CashbackMovimento.objects.get(
+            venda_origem=venda,
+            devolucao=devolucao,
+            venda_uso__isnull=True,
+            tipo=CashbackMovimento.TIPO_DEBITO,
+            valor=Decimal("10.00"),
+        )
+        self.assertEqual(cancelamento.validade, validade)
         self.assertEqual(
             CashbackMovimento.objects.filter(
                 venda_origem=venda,
@@ -195,6 +204,21 @@ class CashbackDevolucaoRestituicaoTests(TestCase):
         devolucao = self._devolucao(venda, [(item, 1, "50.00")])
 
         self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("5.00"))
+
+    def test_cancelamento_vencido_nao_desconta_credito_futuro(self):
+        hoje = timezone.localdate()
+        vencimento = hoje + timedelta(days=1)
+        data_apos_vencimento = vencimento + timedelta(days=1)
+        venda, item = self._venda("100.00")
+        self._cashback_gerado(venda, "10.00", validade=vencimento)
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        cancelar_cashback_gerado_venda_devolvida(devolucao)
+        nova_venda, _outro_item = self._venda("200.00")
+        self._cashback_gerado(nova_venda, "20.00", validade=data_apos_vencimento + timedelta(days=30))
+
+        self.assertEqual(saldo_cashback_cliente(self.cliente.pk, ate=hoje, empresa=self.empresa), Decimal("20.00"))
+        self.assertEqual(saldo_cashback_cliente(self.cliente.pk, ate=data_apos_vencimento, empresa=self.empresa), Decimal("20.00"))
 
     def test_duas_parciais_estornam_cashback_gerado_incremental_sem_exceder_credito(self):
         venda, item = self._venda("100.00", quantidade=2)
