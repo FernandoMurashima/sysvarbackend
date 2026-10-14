@@ -16,6 +16,7 @@ from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from cadastros.services import ClientePadraoService
 from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CashbackReserva, CondicaoAdquirente, ContaBancaria, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
+from financeiro.services import CashbackErro, consumir_reservas_cashback_venda
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
@@ -3709,6 +3710,226 @@ class SysvarHubSyncPushApiTests(TestCase):
             tipo=CashbackMovimento.TIPO_CREDITO,
             valor=Decimal(valor),
         )
+
+    def test_cashback_online_reserva_respeita_minimo_configurado(self):
+        self._hub_autenticado()
+        config = self._cashback_config()
+        config.valor_minimo_uso = Decimal("10.00")
+        config.save(update_fields=["valor_minimo_uso"])
+        self._credito_cashback()
+        payload = {
+            "venda_uuid": str(uuid4()),
+            "operacao_uuid": str(uuid4()),
+            "cliente_id": self.cliente.pk,
+            "valor": "9.99",
+        }
+
+        rejeitada = self.client.post("/api/hub/cashback/reservar-venda/", payload, format="json")
+
+        self.assertEqual(rejeitada.status_code, 409, rejeitada.data)
+        self.assertIn("mínimo", str(rejeitada.data))
+        self.assertFalse(CashbackReserva.objects.exists())
+        aceita = self.client.post("/api/hub/cashback/reservar-venda/", {**payload, "valor": "10.00"}, format="json")
+        self.assertEqual(aceita.status_code, 200, aceita.data)
+        self.assertEqual(aceita.data["reserva"]["valor"], "10.00")
+        self.assertEqual(CashbackReserva.objects.count(), 1)
+
+    def test_cashback_online_retry_reserva_preservado_apos_mudanca_do_minimo(self):
+        self._hub_autenticado()
+        config = self._cashback_config()
+        self._credito_cashback()
+        payload = {
+            "venda_uuid": str(uuid4()),
+            "operacao_uuid": str(uuid4()),
+            "cliente_id": self.cliente.pk,
+            "valor": "10.00",
+        }
+        primeira = self.client.post("/api/hub/cashback/reservar-venda/", payload, format="json")
+        self.assertEqual(primeira.status_code, 200, primeira.data)
+        config.valor_minimo_uso = Decimal("20.00")
+        config.save(update_fields=["valor_minimo_uso"])
+
+        retry = self.client.post("/api/hub/cashback/reservar-venda/", payload, format="json")
+        nova = self.client.post("/api/hub/cashback/reservar-venda/", {**payload, "operacao_uuid": str(uuid4())}, format="json")
+
+        self.assertEqual(retry.status_code, 200, retry.data)
+        self.assertEqual(retry.data["reserva"]["id"], primeira.data["reserva"]["id"])
+        self.assertEqual(nova.status_code, 409, nova.data)
+        self.assertEqual(CashbackReserva.objects.count(), 1)
+
+    def test_cashback_online_cancelamento_com_id_valida_uuids_informados(self):
+        self._hub_autenticado()
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=uuid4(), operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        )
+        payload = {
+            "reserva_id": reserva.pk,
+            "venda_uuid": str(reserva.venda_uuid),
+            "operacao_uuid": str(reserva.operacao_uuid),
+        }
+        divergencias = (
+            {"venda_uuid": str(uuid4())},
+            {"operacao_uuid": str(uuid4())},
+            {"venda_uuid": str(uuid4()), "operacao_uuid": str(uuid4())},
+        )
+        for divergencia in divergencias:
+            with self.subTest(divergencia=divergencia):
+                response = self.client.post("/api/hub/cashback/cancelar-reserva/", {**payload, **divergencia}, format="json")
+                self.assertEqual(response.status_code, 409, response.data)
+                reserva.refresh_from_db()
+                self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+
+        for _ in range(2):
+            response = self.client.post("/api/hub/cashback/cancelar-reserva/", payload, format="json")
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data["reserva"]["status"], CashbackReserva.STATUS_CANCELADA)
+        divergente = self.client.post("/api/hub/cashback/cancelar-reserva/", {**payload, "operacao_uuid": str(uuid4())}, format="json")
+        self.assertEqual(divergente.status_code, 409, divergente.data)
+
+    def test_cashback_online_cancelamento_com_id_rejeita_uuid_invalido(self):
+        self._hub_autenticado()
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=uuid4(), operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        )
+        for campo in ("venda_uuid", "operacao_uuid"):
+            for valor in ("invalido", ""):
+                with self.subTest(campo=campo, valor=valor):
+                    response = self.client.post("/api/hub/cashback/cancelar-reserva/", {
+                        "reserva_id": reserva.pk, campo: valor,
+                    }, format="json")
+                    self.assertEqual(response.status_code, 409, response.data)
+                    reserva.refresh_from_db()
+                    self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+
+    def test_cashback_online_cancelamento_por_uuids_preserva_retry(self):
+        self._hub_autenticado()
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=uuid4(), operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        )
+        payload = {"venda_uuid": str(reserva.venda_uuid), "operacao_uuid": str(reserva.operacao_uuid)}
+        for _ in range(2):
+            response = self.client.post("/api/hub/cashback/cancelar-reserva/", payload, format="json")
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data["reserva"]["id"], reserva.pk)
+            self.assertEqual(response.data["reserva"]["status"], CashbackReserva.STATUS_CANCELADA)
+
+    def test_venda_hub_cashback_rejeita_reserva_repetida_em_pagamentos(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        self._credito_cashback()
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=uuid4(), operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        )
+        primeiro = {
+            "codigo": "CBK", "tipo": "CASHBACK", "valor": "30.00",
+            "operacao_uuid": str(reserva.operacao_uuid), "cashback_reserva_id": reserva.pk,
+        }
+        variantes = (
+            {"cashback_reserva_id": reserva.pk},
+            {"reserva_id": str(reserva.pk)},
+            {"cashback_reserva_id": reserva.pk, "operacao_uuid": str(uuid4())},
+        )
+        modelos = (VendaPdv, VendaPdvPagamento, Receber, ReceberItem, MovimentacaoFinanceira)
+        contagens = [modelo.objects.count() for modelo in modelos]
+        for variante in variantes:
+            with self.subTest(variante=variante):
+                segundo = {chave: valor for chave, valor in primeiro.items() if chave != "cashback_reserva_id"}
+                segundo.update(variante)
+                payload = self._payload_venda(
+                    venda_uuid=str(reserva.venda_uuid), total="100.00", valor_recebido="100.00",
+                    pagamentos=[primeiro, segundo, {"codigo": "DINHEIRO", "valor": "40.00"}],
+                )
+                payload["itens"][0]["preco_unitario"] = "100.00"
+                evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid=str(uuid4()), chave=str(uuid4()))
+                for _ in range(2):
+                    response = self._push([evento])
+                    resultado = response.data["resultados"][0]
+                    self.assertEqual(resultado["status"], HubEventoRecebido.STATUS_ERRO, response.data)
+                    self.assertIn("dois pagamentos", resultado["mensagem"])
+                    reserva.refresh_from_db()
+                    self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+                    self.assertEqual([modelo.objects.count() for modelo in modelos], contagens)
+                    self.assertFalse(HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=reserva.venda_uuid).exists())
+                    self.assertFalse(CashbackMovimento.objects.filter(tipo=CashbackMovimento.TIPO_DEBITO).exists())
+
+    def test_cashback_consumo_de_reservas_reverte_parcial_em_divergencia(self):
+        self._hub_autenticado()
+        venda_uuid = uuid4()
+        reservas = [CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=venda_uuid, operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        ) for _ in range(2)]
+        pagamentos = [{
+            "tipo": "CASHBACK", "reserva_id": reserva.pk,
+            "operacao_uuid": str(reserva.operacao_uuid), "valor": "30.00",
+        } for reserva in reservas]
+        pagamentos[1]["valor"] = "29.00"
+        venda = VendaPdv(empresa=self.empresa, cliente=self.cliente)
+
+        with self.assertRaisesMessage(CashbackErro, "Valor da reserva"):
+            consumir_reservas_cashback_venda(self.hub, venda_uuid, venda, pagamentos)
+
+        for reserva in reservas:
+            reserva.refresh_from_db()
+            self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+
+    def test_venda_hub_cashback_falha_apos_consumo_reverte_e_permite_retry(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        self._credito_cashback()
+        reserva = CashbackReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
+            venda_uuid=uuid4(), operacao_uuid=uuid4(), valor=Decimal("30.00"),
+        )
+        payload = self._payload_venda(
+            venda_uuid=str(reserva.venda_uuid), total="100.00", valor_recebido="100.00",
+            pagamentos=[{
+                "codigo": "CBK", "tipo": "CASHBACK", "valor": "30.00",
+                "operacao_uuid": str(reserva.operacao_uuid), "cashback_reserva_id": reserva.pk,
+            }, {"codigo": "DINHEIRO", "valor": "70.00"}],
+        )
+        payload["itens"][0]["preco_unitario"] = "100.00"
+        evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid=str(uuid4()), chave=str(uuid4()))
+        modelos = (VendaPdv, VendaPdvPagamento, Receber, ReceberItem, MovimentacaoFinanceira)
+        contagens = [modelo.objects.count() for modelo in modelos]
+        registrar_cashback = HubSyncProcessor._registrar_cashback_venda_hub
+
+        def falhar_apos_registro(processador, *args):
+            registrar_cashback(processador, *args)
+            reserva.refresh_from_db()
+            self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
+            raise CashbackErro("Falha simulada apos consumo e debito de Cashback.")
+
+        with patch.object(HubSyncProcessor, "_registrar_cashback_venda_hub", falhar_apos_registro):
+            falha = self._push([evento])
+
+        self.assertEqual(falha.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO, falha.data)
+        self.assertIn("Falha simulada", falha.data["resultados"][0]["mensagem"])
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+        self.assertEqual([modelo.objects.count() for modelo in modelos], contagens)
+        self.assertEqual(CashbackMovimento.objects.count(), 1)
+        self.assertFalse(HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=reserva.venda_uuid).exists())
+
+        sucesso = self._push([evento])
+        retry = self._push([evento])
+        self.assertEqual(sucesso.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, sucesso.data)
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO, retry.data)
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
+        venda = HubVendaMapeamento.objects.get(hub=self.hub, venda_uuid=reserva.venda_uuid).venda
+        pagamentos = [{
+            "tipo": "CASHBACK", "reserva_id": reserva.pk,
+            "operacao_uuid": str(reserva.operacao_uuid), "valor": "30.00",
+        }]
+        consumir_reservas_cashback_venda(self.hub, reserva.venda_uuid, venda, pagamentos)
+        self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).count(), 1)
+        self.assertEqual(CashbackMovimento.objects.get(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).valor, Decimal("30.00"))
+        self.assertEqual(VendaPdvPagamento.objects.filter(venda=venda, forma="CASHBACK").count(), 1)
 
     def test_cashback_online_consulta_saldo_disponivel_descontando_reservas(self):
         self._hub_autenticado()

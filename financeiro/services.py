@@ -511,6 +511,8 @@ def reservar_cashback_venda(hub, venda_uuid, operacao_uuid, cliente_id, valor):
         raise CashbackErro("Não existe regra de cashback ativa.")
     if not cliente_participa_cashback(cliente, config):
         raise CashbackErro("Cashback não pode ser usado para consumidor final.")
+    if valor < money(config.valor_minimo_uso):
+        raise CashbackErro("O valor de cashback usado é menor que o mínimo configurado.")
     disponivel = saldo_disponivel_cashback_cliente(cliente.pk, empresa)
     if valor > disponivel:
         raise CashbackErro("Saldo disponivel de Cashback insuficiente.")
@@ -543,6 +545,10 @@ def cancelar_reserva_cashback(hub, reserva_id=None, venda_uuid=None, operacao_uu
     reserva = qs.first()
     if not reserva:
         raise CashbackNaoEncontrado("Reserva de Cashback nao encontrada.")
+    if venda_uuid is not None and reserva.venda_uuid != _uuid_cashback(venda_uuid, "venda_uuid"):
+        raise CashbackErro("Reserva de Cashback pertence a outra venda.")
+    if operacao_uuid is not None and reserva.operacao_uuid != _uuid_cashback(operacao_uuid, "operacao_uuid"):
+        raise CashbackErro("Reserva de Cashback pertence a outra operacao.")
     if reserva.status == CashbackReserva.STATUS_CONSUMIDA:
         raise CashbackErro("Reserva consumida nao pode ser cancelada.")
     if reserva.status != CashbackReserva.STATUS_CANCELADA:
@@ -575,14 +581,22 @@ def _reserva_id_cashback_pagamento(pagamento):
     return reserva_id
 
 
+@transaction.atomic
 def consumir_reservas_cashback_venda(hub, venda_uuid, venda, pagamentos):
     venda_uuid = _uuid_cashback(venda_uuid, "venda_uuid")
+    reserva_ids = set()
+    pagamentos_reservados = []
     for pagamento in pagamentos:
         if str(pagamento.get("tipo") or "").upper() != "CASHBACK":
             continue
         reserva_id = _reserva_id_cashback_pagamento(pagamento)
         if not reserva_id:
             continue
+        if reserva_id in reserva_ids:
+            raise CashbackErro("Uma reserva de Cashback nao pode financiar dois pagamentos.")
+        reserva_ids.add(reserva_id)
+        pagamentos_reservados.append((pagamento, reserva_id))
+    for pagamento, reserva_id in pagamentos_reservados:
         operacao_uuid = _uuid_cashback(pagamento.get("operacao_uuid"), "operacao_uuid")
         reserva = (
             CashbackReserva.objects.select_for_update()
