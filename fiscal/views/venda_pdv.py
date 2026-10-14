@@ -36,6 +36,9 @@ from financeiro.services import (
     cancelar_cashback_gerado_venda_devolvida,
     escopo_loja,
     gerar_lancamento_contabil_movimentacao,
+    mensagem_cashback_vale_troca_exclusivos,
+    pagamento_e_cashback,
+    pagamento_e_vale_troca,
     reservar_documento_vale_troca,
     reservar_numero_documento,
     restaurar_cashback_utilizado_devolucao,
@@ -900,6 +903,10 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         if total_pago < total:
             transaction.set_rollback(True)
             return Response({"detail": "O total pago é menor que o total da venda."}, status=status.HTTP_400_BAD_REQUEST)
+        exclusividade_erro = self._validar_cashback_vale_troca_exclusivos(pagamentos_payload)
+        if exclusividade_erro:
+            transaction.set_rollback(True)
+            return Response({"detail": exclusividade_erro}, status=status.HTTP_400_BAD_REQUEST)
         cashback_erro = self._validar_cashback(venda, pagamentos_payload, total)
         if cashback_erro:
             transaction.set_rollback(True)
@@ -943,6 +950,11 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         normalizados = []
         for pagamento in pagamentos:
             forma = str(pagamento.get("forma") or pagamento.get("codigo") or "").strip().upper()
+            tipo = str(pagamento.get("tipo") or "").strip().upper()
+            if tipo == "CASHBACK":
+                forma = "CASHBACK"
+            elif tipo in ("TROCA", "VALE_TROCA") or forma == "VALE_TROCA":
+                forma = "TROCA"
             valor = money(pagamento.get("valor"))
             if not forma or valor <= 0:
                 continue
@@ -973,11 +985,14 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             dados = {campo: pagamento[campo] for campo in PAGAMENTO_PERSISTENCIA_CAMPOS if campo in pagamento}
             VendaPdvPagamento.objects.create(venda=venda, **dados)
 
+    def _validar_cashback_vale_troca_exclusivos(self, pagamentos: List[Dict]) -> str:
+        return mensagem_cashback_vale_troca_exclusivos(pagamentos)
+
     def _total_cashback_usado(self, pagamentos: List[Dict]) -> Decimal:
-        return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] == "CASHBACK"), Decimal("0")))
+        return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento_e_cashback(pagamento)), Decimal("0")))
 
     def _total_vale_troca_usado(self, pagamentos: List[Dict]) -> Decimal:
-        return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento["forma"] == "TROCA"), Decimal("0")))
+        return money(sum((pagamento["valor"] for pagamento in pagamentos if pagamento_e_vale_troca(pagamento)), Decimal("0")))
 
     def _cliente_padrao(self, venda: VendaPdv) -> bool:
         cliente = venda.cliente
@@ -1057,7 +1072,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         return ""
 
     def _registrar_uso_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict]):
-        pagamentos_troca = [pagamento for pagamento in pagamentos if pagamento["forma"] == "TROCA"]
+        pagamentos_troca = [pagamento for pagamento in pagamentos if pagamento_e_vale_troca(pagamento)]
         if not pagamentos_troca:
             return
         hoje = timezone.localdate()
@@ -1106,6 +1121,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             raise ValueError("Saldo de troca insuficiente para concluir a venda.")
 
     def _registrar_cashback(self, venda: VendaPdv, pagamentos: List[Dict]):
+        if self._total_vale_troca_usado(pagamentos) > 0:
+            return
         config = CashbackConfig.regra_ativa(venda.empresa)
         if not config or not self._cliente_participa_cashback(venda, config):
             return

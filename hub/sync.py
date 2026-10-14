@@ -335,6 +335,9 @@ class HubSyncProcessor:
         total_pago = money(sum((pagamento["valor"] for pagamento in pagamentos), Decimal("0")))
         if total_pago < total:
             raise HubSyncError("O total pago é menor que o total da venda.")
+        exclusividade_erro = view._validar_cashback_vale_troca_exclusivos(pagamentos)
+        if exclusividade_erro:
+            raise HubSyncError(exclusividade_erro)
         erro_cashback = view._validar_cashback(venda, pagamentos, total)
         if erro_cashback:
             raise HubSyncError(erro_cashback)
@@ -561,6 +564,8 @@ class HubSyncProcessor:
         return normalizado
 
     def _registrar_cashback_venda_hub(self, view: VendaPdvViewSet, venda: VendaPdv, pagamentos, itens_payload):
+        if view._total_vale_troca_usado(pagamentos) > 0:
+            return
         config = CashbackConfig.regra_ativa(venda.empresa)
         if not config or not view._cliente_participa_cashback(venda, config):
             return

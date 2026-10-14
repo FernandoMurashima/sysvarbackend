@@ -10,6 +10,11 @@ from .models import CashbackConfig, CashbackMovimento, CashbackReserva, Lancamen
 
 ZERO = Decimal("0.00")
 LIMITE_NUMERO_DOCUMENTO = 9999999
+ERRO_CASHBACK_VALE_TROCA = (
+    "Cashback não pode ser usado junto com Vale-Troca. "
+    "Realize a venda com Cashback separadamente da troca."
+)
+TIPOS_VALE_TROCA = {"TROCA", "VALE_TROCA"}
 
 
 class DocumentoSequenciaErro(Exception):
@@ -49,6 +54,35 @@ LIMITE_NUMERO_VALE_TROCA = LIMITE_NUMERO_DOCUMENTO
 
 def money(valor):
     return Decimal(valor or 0).quantize(Decimal("0.01"))
+
+
+def pagamento_e_cashback(pagamento):
+    forma = str(pagamento.get("forma") or pagamento.get("codigo") or "").upper()
+    tipo = str(pagamento.get("tipo") or "").upper()
+    return forma == "CASHBACK" or tipo == "CASHBACK"
+
+
+def pagamento_e_vale_troca(pagamento):
+    forma = str(pagamento.get("forma") or pagamento.get("codigo") or "").upper()
+    tipo = str(pagamento.get("tipo") or "").upper()
+    return (
+        forma in TIPOS_VALE_TROCA
+        or tipo in TIPOS_VALE_TROCA
+        or bool(pagamento.get("vale_troca_documento") or pagamento.get("vale_troca_reserva_id"))
+    )
+
+
+def mensagem_cashback_vale_troca_exclusivos(pagamentos):
+    pagamentos = list(pagamentos or [])
+    if any(pagamento_e_cashback(pagamento) for pagamento in pagamentos) and any(pagamento_e_vale_troca(pagamento) for pagamento in pagamentos):
+        return ERRO_CASHBACK_VALE_TROCA
+    return ""
+
+
+def validar_cashback_vale_troca_exclusivos(pagamentos):
+    mensagem = mensagem_cashback_vale_troca_exclusivos(pagamentos)
+    if mensagem:
+        raise ValueError(mensagem)
 
 
 def formatar_documento_vale_troca(numero):
