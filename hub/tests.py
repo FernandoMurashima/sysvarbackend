@@ -5043,3 +5043,86 @@ class SysvarHubSyncPushApiTests(TestCase):
 
         self.assertEqual(resultado["status"], HubEventoRecebido.STATUS_DUPLICADO)
         self.assertEqual(HubMovimentoCaixaRecebido.objects.count(), 0)
+
+    def test_devolucao_offline_cria_vale_integral_reserva_consumo_e_concilia_venda(self):
+        self._hub_autenticado()
+        venda_origem_uuid = "81818181-8181-4181-8181-818181818181"
+        venda_troca_uuid = "82828282-8282-4282-8282-828282828282"
+        operacao_uuid = "83838383-8383-4383-8383-838383838383"
+        self._push([self._evento("VENDA_FINALIZADA", self._payload_venda(venda_uuid=venda_origem_uuid, total="100.00", valor_recebido="100.00", itens=[{
+            "produto_retaguarda_id": self.produto.pk, "sku_retaguarda_id": self.sku.pk,
+            "ean": self.sku.ean13, "quantidade": 1, "preco_unitario": "100.00", "desconto": "0.00",
+        }], pagamentos=[{"codigo": "DINHEIRO", "valor": "100.00"}]), chave="t3-origem")])
+        devolucao_payload = {
+            "devolucao_uuid": "84848484-8484-4484-8484-848484848484",
+            "venda_uuid": venda_origem_uuid,
+            "venda_troca_uuid": venda_troca_uuid,
+            "operacao_uuid": operacao_uuid,
+            "valor_consumido_offline": "95.00",
+            "documento": "DEV-0000001",
+            "itens": [{"sku_retaguarda_id": self.sku.pk, "produto_retaguarda_id": self.produto.pk, "quantidade": 1}],
+        }
+        resposta = self._push([self._evento("DEVOLUCAO_FINALIZADA", devolucao_payload, evento_uuid="85858585-8585-4585-8585-858585858585", chave="t3-devolucao")])
+        resultado = resposta.data["resultados"][0]
+        self.assertEqual(resultado["status"], HubEventoRecebido.STATUS_PROCESSADO, resposta.data)
+        vale = ValeTroca.objects.get(devolucao__documento="DEV-0000001")
+        reserva = ValeTrocaReserva.objects.get(vale=vale)
+        self.assertEqual(vale.valor_original, Decimal("100.00"))
+        self.assertEqual(vale.saldo, Decimal("100.00"))
+        self.assertEqual(reserva.valor, Decimal("95.00"))
+        self.assertEqual(resultado["mapeamento"]["valor_consumido_offline"], "95.00")
+        self.assertEqual(resultado["mapeamento"]["vale_reserva_id"], reserva.pk)
+
+        venda_payload = self._payload_venda(venda_uuid=venda_troca_uuid, total="95.00", valor_recebido="95.00", itens=[{
+            "produto_retaguarda_id": self.produto.pk, "sku_retaguarda_id": self.sku.pk,
+            "ean": self.sku.ean13, "quantidade": 1, "preco_unitario": "95.00", "desconto": "0.00",
+        }], pagamentos=[{"codigo": "TRO", "tipo": "VALE_TROCA", "valor": "95.00", "vale_troca_documento": vale.documento,
+                         "operacao_uuid": operacao_uuid, "vale_troca_reserva_id": reserva.pk,
+                         "devolucao_uuid": devolucao_payload["devolucao_uuid"]}])
+        venda_resposta = self._push([self._evento("VENDA_FINALIZADA", venda_payload, evento_uuid="86868686-8686-4686-8686-868686868686", chave="t3-venda")])
+        self.assertEqual(venda_resposta.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, venda_resposta.data)
+        vale.refresh_from_db()
+        reserva.refresh_from_db()
+        self.assertEqual(vale.saldo, Decimal("5.00"))
+        self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_CONSUMIDA)
+        self.assertEqual(ValeTrocaMovimento.objects.filter(vale=vale, tipo=ValeTrocaMovimento.TIPO_USO).count(), 1)
+
+        retry = self._push([self._evento("VENDA_FINALIZADA", venda_payload, evento_uuid="86868686-8686-4686-8686-868686868686", chave="t3-venda")])
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(ValeTrocaMovimento.objects.filter(vale=vale, tipo=ValeTrocaMovimento.TIPO_USO).count(), 1)
+
+    def test_devolucao_offline_sem_consumo_disponibiliza_vale_integral(self):
+        self._hub_autenticado()
+        origem = self._payload_venda(venda_uuid="87878787-8787-4787-8787-878787878787", total="100.00", valor_recebido="100.00", itens=[{
+            "produto_retaguarda_id": self.produto.pk, "sku_retaguarda_id": self.sku.pk, "ean": self.sku.ean13,
+            "quantidade": 1, "preco_unitario": "100.00", "desconto": "0.00",
+        }], pagamentos=[{"codigo": "DINHEIRO", "valor": "100.00"}])
+        self._push([self._evento("VENDA_FINALIZADA", origem, chave="t3-sem-consumo-origem")])
+        payload = {"devolucao_uuid": "88888888-8888-4888-8888-888888888888", "venda_uuid": origem["venda_uuid"],
+                   "documento": "DEV-0000002", "itens": [{"sku_retaguarda_id": self.sku.pk, "produto_retaguarda_id": self.produto.pk, "quantidade": 1}]}
+        response = self._push([self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="89898989-8989-4898-8898-898989898989", chave="t3-sem-consumo")])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        vale = ValeTroca.objects.get(devolucao__documento="DEV-0000002")
+        self.assertEqual(vale.saldo, Decimal("100.00"))
+        self.assertFalse(ValeTrocaReserva.objects.filter(vale=vale).exists())
+
+    def test_venda_troca_rejeita_reserva_incompativel_ou_valor_maior(self):
+        self._hub_autenticado()
+        origem = self._payload_venda(venda_uuid="90909090-9090-4090-8090-909090909090", total="100.00", valor_recebido="100.00", itens=[{
+            "produto_retaguarda_id": self.produto.pk, "sku_retaguarda_id": self.sku.pk, "ean": self.sku.ean13,
+            "quantidade": 1, "preco_unitario": "100.00", "desconto": "0.00",
+        }], pagamentos=[{"codigo": "DINHEIRO", "valor": "100.00"}])
+        self._push([self._evento("VENDA_FINALIZADA", origem, chave="t3-invalida-origem")])
+        payload = {"devolucao_uuid": "91919191-9191-4191-8191-919191919191", "venda_uuid": origem["venda_uuid"],
+                   "venda_troca_uuid": "92929292-9292-4292-8292-929292929292", "operacao_uuid": "93939393-9393-4393-8393-939393939393",
+                   "valor_consumido_offline": "95.00", "documento": "DEV-0000003",
+                   "itens": [{"sku_retaguarda_id": self.sku.pk, "produto_retaguarda_id": self.produto.pk, "quantidade": 1}]}
+        self.assertEqual(self._push([self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="94949494-9494-4494-8494-949494949494", chave="t3-invalida-dev")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        vale = ValeTroca.objects.get(devolucao__documento="DEV-0000003")
+        reserva = ValeTrocaReserva.objects.get(vale=vale)
+        venda = self._payload_venda(venda_uuid=payload["venda_troca_uuid"], total="100.00", valor_recebido="100.00", pagamentos=[{"codigo": "TRO", "tipo": "VALE_TROCA", "valor": "100.00", "vale_troca_documento": vale.documento, "operacao_uuid": payload["operacao_uuid"], "vale_troca_reserva_id": reserva.pk, "devolucao_uuid": payload["devolucao_uuid"]}])
+        response = self._push([self._evento("VENDA_FINALIZADA", venda, evento_uuid="95959595-9595-4595-8595-959595959595", chave="t3-valor-maior")])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO)
+        self.assertFalse(VendaPdv.objects.filter(documento=venda["documento"]).exists())
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_RESERVADA)

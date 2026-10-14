@@ -309,6 +309,9 @@ class HubDevolucaoMapeamento(models.Model):
     venda_uuid = models.UUIDField()
     documento = models.CharField(max_length=50, db_index=True)
     vale_documento = models.CharField(max_length=80, blank=True, default="")
+    venda_troca_uuid = models.UUIDField(null=True, blank=True, db_index=True)
+    operacao_uuid = models.UUIDField(null=True, blank=True, db_index=True)
+    valor_consumido_offline = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
