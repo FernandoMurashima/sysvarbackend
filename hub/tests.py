@@ -4431,15 +4431,28 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(VendaDevolucaoItem.objects.count(), 1)
         self.assertEqual(HubDevolucaoMapeamento.objects.count(), 1)
         self.assertFalse(ValeTroca.objects.filter(documento="VT-HUB-TESTE").exists())
-        self.assertTrue(ValeTroca.objects.filter(documento="VT0000001", saldo=Decimal("10.00")).exists())
-        self.assertEqual(response.data["resultados"][0]["mapeamento"]["vale_documento"], "VT0000001")
+        vale = ValeTroca.objects.get(documento="VT0000001", saldo=Decimal("10.00"))
+        self.assertEqual(
+            response.data["resultados"][0]["mapeamento"],
+            {
+                "devolucao_retaguarda_id": VendaDevolucao.objects.get().pk,
+                "documento": "DEV-0000001",
+                "vale_documento": "VT0000001",
+                "vale_retaguarda_id": vale.pk,
+                "valor_total": "10.00",
+            },
+        )
         self.estoque.refresh_from_db()
         self.assertEqual(self.estoque.Estoque, Decimal("5.000"))
         self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
+        vale.saldo = Decimal("4.00")
+        vale.save(update_fields=["saldo", "atualizado_em"])
 
         retry = self._push([evento])
 
         self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(retry.data["resultados"][0]["mapeamento"]["valor_total"], "10.00")
+        self.assertEqual(retry.data["resultados"][0]["mapeamento"]["vale_retaguarda_id"], vale.pk)
         self.assertEqual(VendaDevolucao.objects.count(), 1)
         self.assertEqual(ValeTroca.objects.filter(documento="VT0000001").count(), 1)
         self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
@@ -4475,13 +4488,81 @@ class SysvarHubSyncPushApiTests(TestCase):
         devolucao = VendaDevolucao.objects.get(documento="DEV-0000002")
         self.assertEqual(devolucao.credito_cliente, Decimal("7.00"))
         self.assertEqual(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO, valor=Decimal("3.00")).count(), 1)
-        self.assertTrue(ValeTroca.objects.filter(devolucao=devolucao, saldo=Decimal("7.00")).exists())
+        vale = ValeTroca.objects.get(devolucao=devolucao, saldo=Decimal("7.00"))
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["valor_total"], "7.00")
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["vale_documento"], vale.documento)
+        self.assertEqual(response.data["resultados"][0]["mapeamento"]["vale_retaguarda_id"], vale.pk)
 
         retry = self._push([evento])
 
         self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(retry.data["resultados"][0]["mapeamento"], response.data["resultados"][0]["mapeamento"])
         self.assertEqual(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO).count(), 1)
         self.assertEqual(ValeTroca.objects.filter(devolucao=devolucao).count(), 1)
+
+    def test_devolucao_finalizada_credito_zero_retorna_contrato_sem_vale_e_retry_idempotente(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        self._credito_cashback("30.00")
+        payload_venda = self._payload_venda(
+            venda_uuid="56565656-5656-4656-8656-565656565656",
+            pagamentos=[
+                {"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback", "valor": "10.00", "operacao_uuid": "57575757-5757-4757-8757-575757575757"},
+            ],
+        )
+        self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-cbk-zero")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        payload = {
+            "devolucao_uuid": "58585858-5858-4858-8858-585858585858",
+            "venda_uuid": payload_venda["venda_uuid"],
+            "documento": "DEV-0000003",
+            "motivo": "Troca Hub Cashback",
+            "itens": [{
+                "sku_retaguarda_id": self.sku.pk,
+                "produto_retaguarda_id": self.produto.pk,
+                "quantidade": 1,
+            }],
+        }
+        evento = self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="59595959-5959-4959-8959-595959595959", chave="dev-cbk-zero")
+
+        response = self._push([evento])
+        retry = self._push([evento])
+        devolucao = VendaDevolucao.objects.get(documento="DEV-0000003")
+
+        esperado = {
+            "devolucao_retaguarda_id": devolucao.pk,
+            "documento": "DEV-0000003",
+            "vale_documento": "",
+            "vale_retaguarda_id": None,
+            "valor_total": "0.00",
+        }
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertEqual(response.data["resultados"][0]["mapeamento"], esperado)
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(retry.data["resultados"][0]["mapeamento"], esperado)
+        self.assertEqual(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO).count(), 1)
+        self.assertFalse(ValeTroca.objects.filter(devolucao=devolucao).exists())
+
+    def test_mapeamento_existente_de_devolucao_respeita_hub_empresa_e_loja(self):
+        hub = self._hub_autenticado()
+        payload_venda = self._payload_venda(venda_uuid="60606060-6060-4060-8060-606060606060")
+        self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-isolamento")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        payload = {
+            "devolucao_uuid": "61616161-6161-4161-8161-616161616161",
+            "venda_uuid": payload_venda["venda_uuid"],
+            "documento": "DEV-0000004",
+            "motivo": "Troca Hub",
+            "itens": [{
+                "sku_retaguarda_id": self.sku.pk,
+                "produto_retaguarda_id": self.produto.pk,
+                "quantidade": 1,
+            }],
+        }
+        response = self._push([self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="62626262-6262-4262-8262-626262626262", chave="dev-isolamento")])
+        outro_hub = SysvarHub.objects.create(loja=self.outra_loja, hub_uuid="63636363-6363-4363-8363-636363636363", ativo=True)
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        self.assertNotEqual(hub.pk, outro_hub.pk)
+        self.assertEqual(HubSyncProcessor(outro_hub)._mapeamento_existente("DEVOLUCAO_FINALIZADA", payload), {})
 
     def test_devolucao_quantidade_acima_do_disponivel_falha(self):
         self._hub_autenticado()

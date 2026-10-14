@@ -382,13 +382,13 @@ class HubSyncProcessor:
     def _devolucao_finalizada(self, payload):
         devolucao_uuid = uuid_value(payload.get("devolucao_uuid"), "devolucao_uuid")
         venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid") if payload.get("venda_uuid") else None
-        existente = HubDevolucaoMapeamento.objects.filter(hub=self.hub, devolucao_uuid=devolucao_uuid).first()
+        existente = (
+            HubDevolucaoMapeamento.objects.select_related("devolucao")
+            .filter(hub=self.hub, devolucao_uuid=devolucao_uuid, devolucao__empresa=self.empresa, devolucao__loja=self.loja)
+            .first()
+        )
         if existente:
-            return {
-                "devolucao_retaguarda_id": existente.devolucao_id,
-                "documento": existente.documento,
-                "vale_documento": existente.vale_documento,
-            }
+            return self._resultado_devolucao_hub(existente)
         venda = self._venda_origem_devolucao(payload, venda_uuid)
         if not venda:
             raise HubSyncError("Venda origem da devolução não encontrada para validação.")
@@ -448,7 +448,7 @@ class HubSyncProcessor:
         view._estornar_financeiro(devolucao)
         view._estornar_cmv(devolucao)
         view._registrar_nfe_devolucao(devolucao)
-        HubDevolucaoMapeamento.objects.create(
+        mapeamento = HubDevolucaoMapeamento.objects.create(
             hub=self.hub,
             devolucao_uuid=devolucao_uuid,
             devolucao=devolucao,
@@ -456,12 +456,17 @@ class HubSyncProcessor:
             documento=documento,
             vale_documento=vale_documento,
         )
+        return self._resultado_devolucao_hub(mapeamento)
+
+    def _resultado_devolucao_hub(self, mapeamento):
+        devolucao = mapeamento.devolucao
+        vale = ValeTroca.objects.filter(devolucao=devolucao, empresa=self.empresa).first()
         return {
             "devolucao_retaguarda_id": devolucao.pk,
-            "documento": documento,
-            "vale_documento": vale_documento,
+            "documento": mapeamento.documento or devolucao.documento,
+            "vale_documento": vale.documento if vale else "",
             "vale_retaguarda_id": vale.pk if vale else None,
-            "valor_total": str(devolucao.credito_cliente),
+            "valor_total": str(money(devolucao.credito_cliente)),
         }
 
     def _validar_documento_devolucao_hub(self, documento):
@@ -867,6 +872,18 @@ class HubSyncProcessor:
         if tipo == "VENDA_FINALIZADA" and payload.get("venda_uuid"):
             obj = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=payload.get("venda_uuid")).first()
             return {"venda_retaguarda_id": obj.venda_id, "documento": obj.documento} if obj else {}
+        if tipo == "DEVOLUCAO_FINALIZADA" and payload.get("devolucao_uuid"):
+            obj = (
+                HubDevolucaoMapeamento.objects.select_related("devolucao")
+                .filter(
+                    hub=self.hub,
+                    devolucao_uuid=payload.get("devolucao_uuid"),
+                    devolucao__empresa=self.empresa,
+                    devolucao__loja=self.loja,
+                )
+                .first()
+            )
+            return self._resultado_devolucao_hub(obj) if obj else {}
         if tipo == "NFCE_ATUALIZADA" and payload.get("nfce_uuid"):
             obj = HubNFCeMapeamento.objects.filter(hub=self.hub, nfce_uuid=payload.get("nfce_uuid")).select_related("nfce").first()
             return self._resultado_nfce(obj) if obj else {}
