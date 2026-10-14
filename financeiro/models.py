@@ -345,6 +345,49 @@ def saldo_cashback_cliente(cliente_id, ate=None, empresa=None):
     return saldo or 0
 
 
+# Nas referências a tabelas legadas, DO_NOTHING evita consultas ORM às tabelas
+# novas antes da migration. As foreign keys no banco protegem os vínculos depois.
+class CashbackConsumo(models.Model):
+    empresa = models.ForeignKey('cadastros.Empresa', on_delete=models.DO_NOTHING, related_name='cashback_consumos')
+    operacao_uuid = models.UUIDField()
+    movimento = models.OneToOneField(CashbackMovimento, on_delete=models.DO_NOTHING, related_name='consumo_rastreavel')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_consumo'
+        constraints = [
+            models.UniqueConstraint(fields=['empresa', 'operacao_uuid'], name='uq_cb_consumo_empresa_operacao'),
+        ]
+
+
+class CashbackConsumoCredito(models.Model):
+    consumo = models.ForeignKey(CashbackConsumo, on_delete=models.PROTECT, related_name='alocacoes')
+    credito = models.ForeignKey(CashbackMovimento, on_delete=models.DO_NOTHING, related_name='alocacoes_consumo')
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_consumo_credito'
+        constraints = [
+            models.UniqueConstraint(fields=['consumo', 'credito'], name='uq_cb_consumo_credito'),
+            models.CheckConstraint(check=models.Q(valor__gt=0), name='ck_cb_consumo_credito_positivo'),
+        ]
+
+
+class CashbackEstornoCredito(models.Model):
+    estorno = models.ForeignKey(CashbackMovimento, on_delete=models.DO_NOTHING, related_name='alocacoes_restituicao')
+    consumo_credito = models.ForeignKey(CashbackConsumoCredito, on_delete=models.PROTECT, related_name='estornos')
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_estorno_credito'
+        constraints = [
+            models.UniqueConstraint(fields=['estorno', 'consumo_credito'], name='uq_cb_estorno_credito'),
+            models.CheckConstraint(check=models.Q(valor__gt=0), name='ck_cb_estorno_credito_positivo'),
+        ]
+
+
 class CashbackReserva(models.Model):
     STATUS_RESERVADA = 'RESERVADA'
     STATUS_CONSUMIDA = 'CONSUMIDA'
