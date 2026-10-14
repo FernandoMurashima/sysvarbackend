@@ -209,6 +209,122 @@ def saldo_disponivel_cashback_cliente(cliente_id, empresa, excluir_reserva_ids=N
     return money(max(ZERO, saldo - reservado))
 
 
+def _cashback_devolucao_gerado_qs(venda, devolucao=None):
+    qs = CashbackMovimento.objects.filter(
+        venda_origem=venda,
+        venda_uso__isnull=True,
+        devolucao__isnull=False,
+        tipo=CashbackMovimento.TIPO_DEBITO,
+        status=CashbackMovimento.STATUS_ATIVO,
+    )
+    if devolucao is not None:
+        qs = qs.filter(devolucao=devolucao)
+    return qs
+
+
+def _cashback_possui_consumo_apos_credito(credito):
+    consumo = CashbackMovimento.objects.filter(
+        empresa=credito.empresa,
+        cliente=credito.cliente,
+        venda_uso__isnull=False,
+        tipo=CashbackMovimento.TIPO_DEBITO,
+        status=CashbackMovimento.STATUS_ATIVO,
+        Idcashbackmovimento__gt=credito.pk,
+    ).exists()
+    if consumo:
+        return True
+    return CashbackReserva.objects.filter(
+        empresa=credito.empresa,
+        cliente=credito.cliente,
+        criado_em__gt=credito.criado_em,
+    ).exclude(status=CashbackReserva.STATUS_CANCELADA).exists()
+
+
+@transaction.atomic
+def cancelar_cashback_gerado_venda_devolvida(devolucao):
+    from fiscal.models import VendaDevolucao, VendaPdv
+
+    devolucao = (
+        VendaDevolucao.objects.select_for_update()
+        .select_related("venda", "cliente", "empresa")
+        .prefetch_related("itens", "venda__itens", "venda__devolucoes__itens")
+        .get(pk=devolucao.pk)
+    )
+    venda = VendaPdv.objects.select_for_update().get(pk=devolucao.venda_id)
+    Cliente.objects.select_for_update().filter(pk=devolucao.cliente_id).first()
+
+    estorno_existente = money(
+        _cashback_devolucao_gerado_qs(venda, devolucao)
+        .select_for_update()
+        .aggregate(total=models.Sum("valor")).get("total")
+        or ZERO
+    )
+    if estorno_existente > ZERO:
+        return estorno_existente
+
+    credito = (
+        CashbackMovimento.objects.select_for_update()
+        .filter(
+            empresa=devolucao.empresa,
+            cliente=devolucao.cliente,
+            venda_origem=venda,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            status=CashbackMovimento.STATUS_ATIVO,
+        )
+        .order_by("Idcashbackmovimento")
+        .first()
+    )
+    if not credito or money(credito.valor) <= ZERO:
+        return ZERO
+    if credito.validade and credito.validade < timezone.localdate():
+        return ZERO
+    if _cashback_possui_consumo_apos_credito(credito):
+        return ZERO
+
+    base_itens = money(sum((money(item.total_item) for item in venda.itens.all()), ZERO))
+    if base_itens <= ZERO:
+        return ZERO
+
+    devolvido_acumulado = ZERO
+    for devolucao_venda in venda.devolucoes.all():
+        if devolucao_venda.pk and devolucao_venda.pk > devolucao.pk:
+            continue
+        if devolucao_venda.status == VendaDevolucao.Status.CANCELADA:
+            continue
+        devolvido_acumulado += sum((money(item.total_item) for item in devolucao_venda.itens.all()), ZERO)
+    devolvido_acumulado = money(devolvido_acumulado)
+
+    estornado_anterior = money(
+        _cashback_devolucao_gerado_qs(venda)
+        .select_for_update()
+        .exclude(devolucao=devolucao)
+        .aggregate(total=models.Sum("valor")).get("total")
+        or ZERO
+    )
+
+    if devolvido_acumulado >= base_itens:
+        estorno_alvo = money(credito.valor)
+    else:
+        estorno_alvo = money(money(credito.valor) * devolvido_acumulado / base_itens)
+    estorno_incremental = money(max(ZERO, min(money(credito.valor), estorno_alvo) - estornado_anterior))
+    disponivel_credito = money(max(ZERO, money(credito.valor) - estornado_anterior))
+    estorno_incremental = money(min(estorno_incremental, disponivel_credito))
+    if estorno_incremental <= ZERO:
+        return ZERO
+
+    CashbackMovimento.objects.create(
+        empresa=devolucao.empresa,
+        cliente=devolucao.cliente,
+        venda_origem=venda,
+        devolucao=devolucao,
+        tipo=CashbackMovimento.TIPO_DEBITO,
+        valor=estorno_incremental,
+        observacao=f"Cancelamento do Cashback gerado na venda {venda.documento} pela devolução {devolucao.documento}",
+        criado_por=devolucao.criado_por,
+    )
+    return estorno_incremental
+
+
 def serializar_cashback_saldo_cliente(cliente, empresa):
     saldo = money(saldo_cashback_cliente(cliente.pk, empresa=empresa))
     reservado = saldo_reservado_cashback_cliente(cliente.pk, empresa)

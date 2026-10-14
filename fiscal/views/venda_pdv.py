@@ -33,6 +33,7 @@ from financeiro.models import (
 )
 from financeiro.services import (
     DocumentoSequenciaErro,
+    cancelar_cashback_gerado_venda_devolvida,
     escopo_loja,
     gerar_lancamento_contabil_movimentacao,
     reservar_documento_vale_troca,
@@ -2419,6 +2420,7 @@ class VendaDevolucaoViewSet(viewsets.ModelViewSet):
 
         restaurar_cashback_utilizado_devolucao(devolucao)
         devolucao.refresh_from_db(fields=["credito_cliente"])
+        cancelar_cashback_gerado_venda_devolvida(devolucao)
         self._registrar_credito_cliente(devolucao)
         self._estornar_financeiro(devolucao)
         self._estornar_cmv(devolucao)

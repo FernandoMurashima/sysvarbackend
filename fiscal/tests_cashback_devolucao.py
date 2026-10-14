@@ -1,11 +1,13 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.test import TestCase
 from django.db.models import Sum
+from django.utils import timezone
 
 from cadastros.models import Cliente, Empresa, Funcionarios, Loja
 from financeiro.models import CashbackMovimento, ValeTroca
-from financeiro.services import restaurar_cashback_utilizado_devolucao
+from financeiro.services import cancelar_cashback_gerado_venda_devolvida, restaurar_cashback_utilizado_devolucao
 from fiscal.models import VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem
 from fiscal.views.venda_pdv import VendaDevolucaoViewSet
 from produto.models import ConfigEan, Cor, Grade, Produto, ProdutoDetalhe, Tamanho, Unidade
@@ -58,6 +60,17 @@ class CashbackDevolucaoRestituicaoTests(TestCase):
             tipo=CashbackMovimento.TIPO_DEBITO,
             valor=Decimal(valor),
             observacao=f"Uso na venda {venda.documento}",
+        )
+
+    def _cashback_gerado(self, venda, valor="10.00", validade=None):
+        return CashbackMovimento.objects.create(
+            empresa=self.empresa,
+            cliente=self.cliente,
+            venda_origem=venda,
+            tipo=CashbackMovimento.TIPO_CREDITO,
+            valor=Decimal(valor),
+            validade=validade,
+            observacao=f"Cashback gerado pela venda {venda.documento}",
         )
 
     def _devolucao(self, venda, itens, documento=None):
@@ -156,3 +169,139 @@ class CashbackDevolucaoRestituicaoTests(TestCase):
         self.assertEqual(restaurar_cashback_utilizado_devolucao(devolucao), Decimal("30.00"))
 
         self.assertEqual(CashbackMovimento.objects.filter(tipo=CashbackMovimento.TIPO_ESTORNO, devolucao=devolucao).count(), 1)
+
+    def test_estorna_cashback_gerado_em_devolucao_total(self):
+        venda, item = self._venda("100.00")
+        self._cashback_gerado(venda, "10.00", validade=timezone.localdate() + timedelta(days=30))
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        estornado = cancelar_cashback_gerado_venda_devolvida(devolucao)
+
+        self.assertEqual(estornado, Decimal("10.00"))
+        self.assertEqual(
+            CashbackMovimento.objects.filter(
+                venda_origem=venda,
+                devolucao=devolucao,
+                venda_uso__isnull=True,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+                valor=Decimal("10.00"),
+            ).count(),
+            1,
+        )
+
+    def test_estorna_cashback_gerado_proporcional_em_devolucao_parcial(self):
+        venda, item = self._venda("100.00", quantidade=2)
+        self._cashback_gerado(venda, "10.00")
+        devolucao = self._devolucao(venda, [(item, 1, "50.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("5.00"))
+
+    def test_duas_parciais_estornam_cashback_gerado_incremental_sem_exceder_credito(self):
+        venda, item = self._venda("100.00", quantidade=2)
+        self._cashback_gerado(venda, "10.00")
+        primeira = self._devolucao(venda, [(item, 1, "50.00")], documento="DEV-CBK-G1")
+        segunda = self._devolucao(venda, [(item, 1, "50.00")], documento="DEV-CBK-G2")
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(primeira), Decimal("5.00"))
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(segunda), Decimal("5.00"))
+
+        total = CashbackMovimento.objects.filter(
+            venda_origem=venda,
+            tipo=CashbackMovimento.TIPO_DEBITO,
+            venda_uso__isnull=True,
+            devolucao__isnull=False,
+        ).aggregate(total=Sum("valor"))["total"]
+        self.assertEqual(total, Decimal("10.00"))
+
+    def test_retry_do_estorno_do_cashback_gerado_nao_duplica_movimento(self):
+        venda, item = self._venda("100.00")
+        self._cashback_gerado(venda, "10.00")
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("10.00"))
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("10.00"))
+
+        self.assertEqual(
+            CashbackMovimento.objects.filter(
+                venda_origem=venda,
+                devolucao=devolucao,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+                venda_uso__isnull=True,
+            ).count(),
+            1,
+        )
+
+    def test_credito_gerado_ja_consumido_nao_estorna_saldo_global(self):
+        venda, item = self._venda("100.00")
+        self._cashback_gerado(venda, "10.00")
+        outra_venda, _outro_item = self._venda("20.00")
+        self._uso_cashback(outra_venda, "10.00")
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("0.00"))
+        self.assertFalse(
+            CashbackMovimento.objects.filter(
+                venda_origem=venda,
+                devolucao=devolucao,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+                venda_uso__isnull=True,
+            ).exists()
+        )
+
+    def test_credito_expirado_nao_estorna_cashback_gerado(self):
+        venda, item = self._venda("100.00")
+        self._cashback_gerado(venda, "10.00", validade=timezone.localdate() - timedelta(days=1))
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("0.00"))
+        self.assertFalse(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_DEBITO).exists())
+
+    def test_devolucao_sem_cashback_gerado_nao_cria_estorno(self):
+        venda, item = self._venda("100.00")
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("0.00"))
+        self.assertFalse(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_DEBITO).exists())
+
+    def test_estorno_do_cashback_gerado_nao_afeta_creditos_de_outras_vendas(self):
+        venda, item = self._venda("100.00")
+        outra_venda, _outro_item = self._venda("200.00")
+        self._cashback_gerado(venda, "10.00")
+        outro_credito = self._cashback_gerado(outra_venda, "20.00")
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        self.assertEqual(cancelar_cashback_gerado_venda_devolvida(devolucao), Decimal("10.00"))
+        self.assertFalse(
+            CashbackMovimento.objects.filter(
+                venda_origem=outra_venda,
+                devolucao__isnull=False,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+            ).exists()
+        )
+        outro_credito.refresh_from_db()
+        self.assertEqual(outro_credito.valor, Decimal("20.00"))
+
+    def test_restituicao_do_cashback_usado_e_estorno_do_gerado_coexistem(self):
+        venda, item = self._venda("100.00")
+        self._uso_cashback(venda, "30.00")
+        self._cashback_gerado(venda, "10.00")
+        devolucao = self._devolucao(venda, [(item, 1, "100.00")])
+
+        restaurar_cashback_utilizado_devolucao(devolucao)
+        devolucao.refresh_from_db()
+        estorno_gerado = cancelar_cashback_gerado_venda_devolvida(devolucao)
+        VendaDevolucaoViewSet()._registrar_credito_cliente(devolucao)
+
+        self.assertEqual(estorno_gerado, Decimal("10.00"))
+        self.assertEqual(devolucao.credito_cliente, Decimal("70.00"))
+        self.assertEqual(ValeTroca.objects.get(devolucao=devolucao).saldo, Decimal("70.00"))
+        self.assertEqual(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO).count(), 1)
+        self.assertEqual(
+            CashbackMovimento.objects.filter(
+                devolucao=devolucao,
+                venda_origem=venda,
+                tipo=CashbackMovimento.TIPO_DEBITO,
+                venda_uso__isnull=True,
+            ).count(),
+            1,
+        )

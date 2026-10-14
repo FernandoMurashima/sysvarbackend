@@ -4457,6 +4457,36 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(ValeTroca.objects.filter(documento="VT0000001").count(), 1)
         self.assertEqual(EstoqueMovimentacao.objects.filter(origem=EstoqueMovimentacao.ORIGEM_DEVOLUCAO).count(), 1)
 
+    def test_devolucao_finalizada_estorna_cashback_gerado_no_hub_e_retry_nao_duplica(self):
+        self._hub_autenticado()
+        self._cashback_config()
+        payload_venda = self._payload_venda(venda_uuid="90909090-9090-4090-8090-909090909090")
+        self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-cbk-gerado")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        venda = VendaPdv.objects.get(documento=payload_venda["documento"])
+        self.assertEqual(CashbackMovimento.objects.filter(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO, valor=Decimal("1.00")).count(), 1)
+        payload = {
+            "devolucao_uuid": "91919191-9191-4191-8191-919191919191",
+            "venda_uuid": payload_venda["venda_uuid"],
+            "documento": "DEV-0000005",
+            "motivo": "Troca Hub Cashback Gerado",
+            "itens": [{
+                "sku_retaguarda_id": self.sku.pk,
+                "produto_retaguarda_id": self.produto.pk,
+                "quantidade": 1,
+            }],
+        }
+        evento = self._evento("DEVOLUCAO_FINALIZADA", payload, evento_uuid="92929292-9292-4292-8292-929292929292", chave="dev-cbk-gerado")
+
+        response = self._push([evento])
+        retry = self._push([evento])
+
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
+        devolucao = VendaDevolucao.objects.get(documento="DEV-0000005")
+        self.assertEqual(CashbackMovimento.objects.filter(venda_origem=venda, devolucao=devolucao, venda_uso__isnull=True, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("1.00")).count(), 1)
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
+        self.assertEqual(retry.data["resultados"][0]["mapeamento"], response.data["resultados"][0]["mapeamento"])
+        self.assertEqual(CashbackMovimento.objects.filter(venda_origem=venda, devolucao=devolucao, venda_uso__isnull=True, tipo=CashbackMovimento.TIPO_DEBITO).count(), 1)
+
     def test_devolucao_finalizada_restaura_cashback_utilizado_e_retry_nao_duplica_estorno(self):
         self._hub_autenticado()
         self._cashback_config()

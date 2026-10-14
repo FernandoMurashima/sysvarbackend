@@ -21,6 +21,7 @@ from financeiro.services import (
     ValeTrocaErro,
     cancelar_reserva_cashback,
     cancelar_reserva_vale_troca,
+    cancelar_cashback_gerado_venda_devolvida,
     cancelar_reservas_cashback_venda,
     cancelar_reservas_vale_troca_venda,
     consultar_cashback_online_cliente,
@@ -553,6 +554,7 @@ class HubDevolucaoFinalizarOnlineView(APIView):
             view._registrar_item_devolucao(devolucao, venda_item, quantidade, desconto)
         restaurar_cashback_utilizado_devolucao(devolucao)
         devolucao.refresh_from_db(fields=["credito_cliente"])
+        cancelar_cashback_gerado_venda_devolvida(devolucao)
         view._registrar_credito_cliente(devolucao)
         view._estornar_financeiro(devolucao)
         view._estornar_cmv(devolucao)
