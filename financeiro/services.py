@@ -605,14 +605,18 @@ def consumir_reservas_cashback_venda(hub, venda_uuid, venda, pagamentos):
         reserva.save(update_fields=["status", "atualizado_em"])
 
 
-def saldo_reservado_vale_troca(vale):
+def saldo_reservado_vale_troca(vale, excluir_reserva_ids=None):
     return money(
         ValeTrocaReserva.objects.filter(
             vale=vale,
             status=ValeTrocaReserva.STATUS_RESERVADA,
-        ).aggregate(total=models.Sum("valor")).get("total")
+        ).exclude(pk__in=excluir_reserva_ids or []).aggregate(total=models.Sum("valor")).get("total")
         or ZERO
     )
+
+
+def saldo_disponivel_vale_troca(vale, excluir_reserva_ids=None):
+    return money(max(ZERO, money(vale.saldo) - saldo_reservado_vale_troca(vale, excluir_reserva_ids)))
 
 
 def serializar_vale_troca_online(vale):
@@ -786,6 +790,7 @@ def cancelar_reservas_vale_troca_venda(hub, venda_uuid):
     return [serializar_vale_troca_reserva(reserva) for reserva in reservas]
 
 
+@transaction.atomic
 def consumir_reservas_vale_troca_venda(hub, venda_uuid, venda, pagamentos):
     venda_uuid = _uuid(venda_uuid, "venda_uuid")
     for pagamento in pagamentos:
@@ -805,7 +810,7 @@ def consumir_reservas_vale_troca_venda(hub, venda_uuid, venda, pagamentos):
         if reserva.status != ValeTrocaReserva.STATUS_RESERVADA:
             raise ValeTrocaErro("Reserva de Vale-Troca nao esta ativa.")
         vale = ValeTroca.objects.select_for_update().get(pk=reserva.vale_id)
-        if money(vale.saldo) < money(reserva.valor):
+        if saldo_disponivel_vale_troca(vale, excluir_reserva_ids=[reserva.pk]) < money(reserva.valor):
             raise ValeTrocaErro("Saldo contabil do Vale-Troca insuficiente.")
         vale.saldo = money(vale.saldo - reserva.valor)
         vale.status = ValeTroca.STATUS_ABERTO if vale.saldo > ZERO else ValeTroca.STATUS_USADO

@@ -43,6 +43,7 @@ from financeiro.services import (
     reservar_numero_documento,
     restaurar_cashback_utilizado_devolucao,
     saldo_disponivel_cashback_cliente,
+    saldo_disponivel_vale_troca,
 )
 from fiscal.models import (
     Cfop,
@@ -1045,7 +1046,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return "O cashback usado ultrapassa o limite permitido para a venda."
         return ""
 
-    def _validar_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal) -> str:
+    def _validar_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal, excluir_reserva_ids=None) -> str:
         vale_usado = self._total_vale_troca_usado(pagamentos)
         if vale_usado <= 0:
             return ""
@@ -1054,6 +1055,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
         saldo = money(saldo_vale_troca_cliente(venda.cliente_id, empresa=venda.empresa))
         if vale_usado > saldo:
             return "O valor de troca informado é maior que o saldo disponível do cliente."
+        valores_por_vale = defaultdict(Decimal)
         for pagamento in pagamentos:
             if pagamento["forma"] != "TROCA":
                 continue
@@ -1062,7 +1064,8 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             vale = self._vale_troca_por_documento(venda, pagamento["autorizacao"])
             if not vale:
                 return "Cupom de troca inválido para este cliente."
-            if money(pagamento["valor"]) > money(vale.saldo):
+            valores_por_vale[vale.pk] += money(pagamento["valor"])
+            if money(valores_por_vale[vale.pk]) > saldo_disponivel_vale_troca(vale, excluir_reserva_ids):
                 return "O valor informado é maior que o saldo do cupom de troca selecionado."
         if vale_usado > total:
             return "Troca não pode gerar troco; use apenas o saldo pendente da venda."
@@ -1071,6 +1074,7 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             return "Troca não pode gerar troco; use apenas o saldo pendente da venda."
         return ""
 
+    @transaction.atomic
     def _registrar_uso_vale_troca(self, venda: VendaPdv, pagamentos: List[Dict]):
         pagamentos_troca = [pagamento for pagamento in pagamentos if pagamento_e_vale_troca(pagamento)]
         if not pagamentos_troca:
@@ -1096,13 +1100,16 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
             .first()
         )
 
+    @transaction.atomic
     def _consumir_vales_troca(self, venda: VendaPdv, vales, valor: Decimal):
         restante = money(valor)
-        for vale in vales:
+        for vale in vales.select_for_update():
             if restante <= 0:
                 break
             saldo_atual = money(vale.saldo)
-            uso = money(min(saldo_atual, restante))
+            uso = money(min(saldo_disponivel_vale_troca(vale), restante))
+            if uso <= 0:
+                continue
             vale.saldo = money(saldo_atual - uso)
             if vale.saldo <= 0:
                 vale.status = ValeTroca.STATUS_USADO

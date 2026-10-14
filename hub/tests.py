@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from copy import deepcopy
+from uuid import uuid4
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -4551,6 +4553,19 @@ class SysvarHubSyncPushApiTests(TestCase):
         )
         venda_uuid = "67676767-6767-4767-8767-676767676767"
         operacao_uuid = "68686868-6868-4868-8868-686868686868"
+        venda_offline_uuid = uuid4()
+        operacao_offline_uuid = uuid4()
+        HubDevolucaoMapeamento.objects.create(
+            hub=self.hub, devolucao=devolucao, devolucao_uuid=uuid4(), venda_uuid=uuid4(),
+            documento=devolucao.documento, vale_documento=vale.documento,
+            venda_troca_uuid=venda_offline_uuid, operacao_uuid=operacao_offline_uuid,
+            valor_consumido_offline=Decimal("95.00"),
+        )
+        reserva_offline = ValeTrocaReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, vale=vale,
+            venda_uuid=venda_offline_uuid, operacao_uuid=operacao_offline_uuid,
+            valor=Decimal("95.00"),
+        )
         reserva = ValeTrocaReserva.objects.create(
             empresa=self.empresa,
             hub=self.hub,
@@ -4591,6 +4606,8 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_CONSUMIDA)
         self.assertEqual(vale.saldo, Decimal("100.00"))
         self.assertEqual(vale.status, ValeTroca.STATUS_ABERTO)
+        reserva_offline.refresh_from_db()
+        self.assertEqual(reserva_offline.status, ValeTrocaReserva.STATUS_RESERVADA)
         self.assertEqual(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, tipo=ValeTrocaMovimento.TIPO_USO).count(), 1)
         self.assertEqual(ValeTrocaMovimento.objects.get(vale=vale, venda_uso=venda, tipo=ValeTrocaMovimento.TIPO_USO).valor, Decimal("119.90"))
 
@@ -5079,6 +5096,31 @@ class SysvarHubSyncPushApiTests(TestCase):
         }], pagamentos=[{"codigo": "TRO", "tipo": "VALE_TROCA", "valor": "95.00", "vale_troca_documento": vale.documento,
                          "operacao_uuid": operacao_uuid, "vale_troca_reserva_id": reserva.pk,
                          "devolucao_uuid": devolucao_payload["devolucao_uuid"]}])
+        alteracoes = [
+            {"devolucao_uuid": None},
+            {"operacao_uuid": None},
+            {"devolucao_uuid": str(uuid4())},
+            {"operacao_uuid": str(uuid4())},
+            {"vale_troca_reserva_id": reserva.pk + 999},
+            {"vale_troca_documento": "VT-INEXISTENTE"},
+        ]
+        efeitos = (VendaPdv.objects.count(), EstoqueMovimentacao.objects.count(), MovimentacaoFinanceira.objects.count())
+        for alteracao in alteracoes:
+            with self.subTest(alteracao=alteracao):
+                invalido = deepcopy(venda_payload)
+                invalido["pagamentos"][0].update(alteracao)
+                response = self._push([self._evento("VENDA_FINALIZADA", invalido, evento_uuid=str(uuid4()), chave=str(uuid4()))])
+                self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO, response.data)
+                self.assertEqual((VendaPdv.objects.count(), EstoqueMovimentacao.objects.count(), MovimentacaoFinanceira.objects.count()), efeitos)
+                vale.refresh_from_db()
+                reserva.refresh_from_db()
+                self.assertEqual(vale.saldo, Decimal("100.00"))
+                self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_RESERVADA)
+                self.assertFalse(ValeTrocaMovimento.objects.filter(vale=vale, tipo=ValeTrocaMovimento.TIPO_USO).exists())
+        invalido = deepcopy(venda_payload)
+        invalido["venda_uuid"] = str(uuid4())
+        response = self._push([self._evento("VENDA_FINALIZADA", invalido, evento_uuid=str(uuid4()), chave=str(uuid4()))])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO, response.data)
         venda_resposta = self._push([self._evento("VENDA_FINALIZADA", venda_payload, evento_uuid="86868686-8686-4686-8686-868686868686", chave="t3-venda")])
         self.assertEqual(venda_resposta.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, venda_resposta.data)
         vale.refresh_from_db()
@@ -5105,6 +5147,43 @@ class SysvarHubSyncPushApiTests(TestCase):
         vale = ValeTroca.objects.get(devolucao__documento="DEV-0000002")
         self.assertEqual(vale.saldo, Decimal("100.00"))
         self.assertFalse(ValeTrocaReserva.objects.filter(vale=vale).exists())
+
+    def test_venda_central_respeita_saldo_reservado_na_validacao_e_baixa(self):
+        self._hub_autenticado()
+        venda = VendaPdv.objects.create(
+            empresa=self.empresa, loja=self.loja, caixa=self.caixa,
+            cliente=self.cliente, vendedor=self.vendedor,
+            documento="VD-T3A", forma_pagamento="TROCA", total=Decimal("100.00"),
+        )
+        devolucao = VendaDevolucao.objects.create(
+            empresa=self.empresa, venda=venda, loja=self.loja, cliente=self.cliente,
+            documento="DEV-T3A", credito_cliente=Decimal("100.00"),
+        )
+        vale = ValeTroca.objects.create(
+            empresa=self.empresa, loja=self.loja, cliente=self.cliente, devolucao=devolucao,
+            documento="VT-T3A", valor_original=Decimal("100.00"), saldo=Decimal("100.00"),
+        )
+        reserva = ValeTrocaReserva.objects.create(
+            empresa=self.empresa, hub=self.hub, venda_uuid=uuid4(), operacao_uuid=uuid4(),
+            vale=vale, valor=Decimal("95.00"),
+        )
+        view = VendaPdvViewSet()
+        pagamentos = [{"forma": "TROCA", "autorizacao": vale.documento, "valor": Decimal("95.00")}]
+        self.assertTrue(view._validar_vale_troca(venda, pagamentos, Decimal("100.00")))
+        with self.assertRaisesMessage(ValueError, "Saldo de troca insuficiente"):
+            view._registrar_uso_vale_troca(venda, pagamentos)
+        vale.refresh_from_db()
+        self.assertEqual(vale.saldo, Decimal("100.00"))
+        self.assertFalse(ValeTrocaMovimento.objects.filter(vale=vale).exists())
+        pagamentos[0]["valor"] = Decimal("5.00")
+        self.assertEqual(view._validar_vale_troca(venda, pagamentos, Decimal("100.00")), "")
+        view._registrar_uso_vale_troca(venda, pagamentos)
+        vale.refresh_from_db()
+        reserva.refresh_from_db()
+        self.assertEqual(vale.saldo, Decimal("95.00"))
+        self.assertEqual(reserva.status, ValeTrocaReserva.STATUS_RESERVADA)
+        self.assertEqual(ValeTrocaMovimento.objects.get(vale=vale).valor, Decimal("5.00"))
+        self.assertTrue(view._validar_vale_troca(venda, pagamentos, Decimal("100.00")))
 
     def test_venda_troca_rejeita_reserva_incompativel_ou_valor_maior(self):
         self._hub_autenticado()

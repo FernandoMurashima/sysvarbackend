@@ -313,14 +313,6 @@ class HubSyncProcessor:
             desconto_itens += money(venda_item.desconto)
         pagamentos_payload = [self._normalizar_pagamento(p) for p in payload.get("pagamentos") or []]
         pagamentos = view._normalizar_pagamentos({"pagamentos": pagamentos_payload, "valor_recebido": payload.get("valor_recebido") or payload.get("total")})
-        for pagamento in pagamentos:
-            if (
-                pagamento.get("forma") == "TROCA"
-                and str(pagamento.get("autorizacao") or "").upper().startswith("VT-HUB-")
-                and (pagamento.get("reserva_id") or pagamento.get("devolucao_uuid"))
-                and not pagamento.get("operacao_uuid")
-            ):
-                raise HubSyncError("Crédito provisório exige operacao_uuid e reserva oficial.")
         for normalizado, original in zip(pagamentos, pagamentos_payload):
             if normalizado["forma"] == "CASHBACK":
                 normalizado["tipo"] = original.get("tipo") or "CASHBACK"
@@ -329,6 +321,8 @@ class HubSyncProcessor:
         for normalizado, original in zip(pagamentos, pagamentos_payload):
             if normalizado["forma"] == "TROCA":
                 normalizado["devolucao_uuid"] = original.get("devolucao_uuid")
+                normalizado["operacao_uuid"] = original.get("operacao_uuid")
+                normalizado["reserva_id"] = original.get("reserva_id")
         pagamentos_reserva = []
         for normalizado, original in zip(pagamentos, pagamentos_payload):
             if normalizado["forma"] == "TROCA" and original.get("operacao_uuid"):
@@ -353,7 +347,8 @@ class HubSyncProcessor:
         erro_cashback = view._validar_cashback(venda, pagamentos, total)
         if erro_cashback:
             raise HubSyncError(erro_cashback)
-        erro_vale = view._validar_vale_troca(venda, pagamentos, total)
+        reserva_ids = self._validar_conciliacao_vale_troca(pagamentos, venda, venda_uuid)
+        erro_vale = view._validar_vale_troca(venda, pagamentos, total, excluir_reserva_ids=reserva_ids)
         if erro_vale:
             raise HubSyncError(erro_vale)
         venda.subtotal = money(subtotal)
@@ -363,8 +358,6 @@ class HubSyncProcessor:
         venda.troco = money(total_pago - total) if total_pago > total else Decimal("0.00")
         venda.forma_pagamento = view._forma_resumo(pagamentos)
         venda.save(update_fields=["subtotal", "desconto_itens", "total", "valor_recebido", "troco", "forma_pagamento", "atualizado_em"])
-        if pagamentos_reserva:
-            self._validar_conciliacao_vale_troca(payload, pagamentos_reserva, venda, venda_uuid)
         view._registrar_pagamentos(venda, self._pagamentos_persistencia(pagamentos))
         view._registrar_financeiro(venda, pagamentos_metadados=pagamentos)
         if pagamentos_reserva:
@@ -598,7 +591,7 @@ class HubSyncProcessor:
                 "operacao_uuid": pagamento.get("operacao_uuid"),
                 "reserva_id": pagamento.get("cashback_reserva_id") or pagamento.get("reserva_id"),
             }
-        if tipo in ("TROCA", "VALE_TROCA"):
+        if tipo in ("TROCA", "VALE_TROCA") or str(codigo).upper() in ("TROCA", "VALE_TROCA"):
             return {
                 "forma": "TROCA",
                 "descricao": pagamento.get("descricao") or "TROCA",
@@ -698,35 +691,57 @@ class HubSyncProcessor:
             if pagamento.get("forma") == "TROCA" and pagamento.get("operacao_uuid")
         ]
 
-    def _validar_conciliacao_vale_troca(self, payload, pagamentos, venda, venda_uuid):
+    def _validar_conciliacao_vale_troca(self, pagamentos, venda, venda_uuid):
+        reserva_ids = []
         for pagamento in pagamentos:
-            reserva_id = pagamento.get("reserva_id")
-            if not reserva_id:
+            if pagamento.get("forma") != "TROCA":
                 continue
+            documento = str(pagamento.get("autorizacao") or "").strip()
+            vale = ValeTroca.objects.select_for_update().filter(empresa=self.empresa, documento=documento).first()
+            mapeamento = HubDevolucaoMapeamento.objects.filter(devolucao_id=vale.devolucao_id).first() if vale else None
+            devolucao_uuid = pagamento.get("devolucao_uuid")
+            operacao = pagamento.get("operacao_uuid")
+            reserva_id = pagamento.get("reserva_id")
+            credito_offline = bool(
+                mapeamento and mapeamento.venda_troca_uuid
+                and (
+                    mapeamento.venda_troca_uuid == uuid_value(venda_uuid, "venda_uuid")
+                    or str(mapeamento.operacao_uuid) == str(operacao)
+                )
+            )
+            if credito_offline and not devolucao_uuid:
+                raise HubSyncError("Crédito provisório exige devolucao_uuid.")
+            if not (credito_offline or devolucao_uuid or operacao or reserva_id):
+                continue
+            operacao_uuid = uuid_value(operacao, "operacao_uuid")
+            venda_id = uuid_value(venda_uuid, "venda_uuid")
             reserva = (
                 ValeTrocaReserva.objects.select_for_update()
                 .select_related("vale", "vale__devolucao")
-                .filter(pk=reserva_id)
+                .filter(hub=self.hub, venda_uuid=venda_id, operacao_uuid=operacao_uuid)
                 .first()
             )
             if not reserva or reserva.hub_id != self.hub.pk or reserva.empresa_id != self.empresa.pk:
                 raise HubSyncError("Reserva de Vale-Troca não pertence ao Hub/empresa do evento.")
-            if reserva.venda_uuid != uuid_value(venda_uuid, "venda_uuid") or money(reserva.valor) != money(pagamento["valor"]):
+            if reserva_id and str(reserva.pk) != str(reserva_id):
+                raise HubSyncError("Identificador da reserva de Vale-Troca divergente.")
+            if not vale or reserva.vale_id != vale.pk or reserva.vale.documento != documento:
+                raise HubSyncError("Documento oficial diverge da reserva de Vale-Troca.")
+            if reserva.status != ValeTrocaReserva.STATUS_RESERVADA:
+                raise HubSyncError("Reserva de Vale-Troca não está ativa.")
+            if money(reserva.valor) != money(pagamento["valor"]) or reserva.pk in reserva_ids:
                 raise HubSyncError("Reserva de Vale-Troca diverge da venda sincronizada.")
-            mapeamento = HubDevolucaoMapeamento.objects.filter(
-                hub=self.hub, devolucao=reserva.vale.devolucao,
-            ).first()
-            devolucao_uuid = pagamento.get("devolucao_uuid")
-            if not devolucao_uuid:
-                continue
-            if not mapeamento or not devolucao_uuid or mapeamento.devolucao_uuid != uuid_value(devolucao_uuid, "devolucao_uuid"):
-                raise HubSyncError("Venda não está vinculada à devolução que originou o crédito.")
-            if mapeamento.venda_troca_uuid != uuid_value(venda_uuid, "venda_uuid") or mapeamento.operacao_uuid != uuid_value(pagamento.get("operacao_uuid"), "operacao_uuid"):
-                raise HubSyncError("Vínculo da troca diverge da reserva de Vale-Troca.")
-            if mapeamento.valor_consumido_offline is None or money(mapeamento.valor_consumido_offline) != money(pagamento["valor"]):
-                raise HubSyncError("Valor consumido da troca diverge do crédito reconhecido.")
             if reserva.vale.empresa_id != venda.empresa_id or reserva.vale.cliente_id != venda.cliente_id:
                 raise HubSyncError("Vale-Troca não pertence ao cliente/empresa da venda.")
+            if credito_offline or devolucao_uuid:
+                if not mapeamento or mapeamento.hub_id != self.hub.pk or not devolucao_uuid or mapeamento.devolucao_uuid != uuid_value(devolucao_uuid, "devolucao_uuid"):
+                    raise HubSyncError("Venda não está vinculada à devolução que originou o crédito.")
+                if mapeamento.venda_troca_uuid != venda_id or mapeamento.operacao_uuid != operacao_uuid:
+                    raise HubSyncError("Vínculo da troca diverge da reserva de Vale-Troca.")
+                if mapeamento.valor_consumido_offline is None or money(mapeamento.valor_consumido_offline) != money(pagamento["valor"]):
+                    raise HubSyncError("Valor consumido da troca diverge do crédito reconhecido.")
+            reserva_ids.append(reserva.pk)
+        return reserva_ids
 
     def _caixa(self, caixa_id):
         caixa = Caixa.objects.select_for_update().filter(pk=caixa_id, empresa=self.empresa, idloja=self.loja, ativo=True, tipo_caixa=Caixa.TIPO_LOJA).first()
