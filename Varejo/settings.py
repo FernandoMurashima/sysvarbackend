@@ -195,3 +195,11 @@ SESSION_IDLE_TIMEOUT_MINUTES = config('SESSION_IDLE_TIMEOUT_MINUTES', cast=int, 
 
 # Ativar somente após migrations e atualização do contrato do Hub.
 CASHBACK_CENTRAL_FEFO_ATIVO = config("CASHBACK_CENTRAL_FEFO_ATIVO", default=False, cast=bool)
+
+# Controle de backups Hub: privado e fora de qualquer storage publico. Sem mkdir.
+# Registrar em HUB_BACKUP_PUBLIC_ROOTS eventuais raizes adicionais servidas pelo Nginx.
+HUB_BACKUP_ROOT = config(
+    'HUB_BACKUP_ROOT',
+    default=r'C:\ProgramData\SysvarCentral\backups\hub' if os.name == 'nt' else '/var/lib/sysvar/hub-backups',
+)
+HUB_BACKUP_PUBLIC_ROOTS = config('HUB_BACKUP_PUBLIC_ROOTS', cast=Csv(), default='')
