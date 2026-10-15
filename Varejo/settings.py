@@ -203,3 +203,14 @@ HUB_BACKUP_ROOT = config(
     default=r'C:\ProgramData\SysvarCentral\backups\hub' if os.name == 'nt' else '/var/lib/sysvar/hub-backups',
 )
 HUB_BACKUP_PUBLIC_ROOTS = config('HUB_BACKUP_PUBLIC_ROOTS', cast=Csv(), default='')
+
+# Recebimento somente apos implantacao autorizada: TLS, migrations, storage e chaves.
+HUB_BACKUP_RECEBIMENTO_ATIVO = config('HUB_BACKUP_RECEBIMENTO_ATIVO', default=False, cast=bool)
+HUB_BACKUP_ENCRYPTION_KEYS = config('HUB_BACKUP_ENCRYPTION_KEYS', default='')
+HUB_BACKUP_ACTIVE_KEY_ID = config('HUB_BACKUP_ACTIVE_KEY_ID', default='')
+HUB_BACKUP_MAX_FILE_BYTES = config('HUB_BACKUP_MAX_FILE_BYTES', default=512 * 1024**3, cast=int)
+HUB_BACKUP_PART_BYTES = config('HUB_BACKUP_PART_BYTES', default=4 * 1024**2, cast=int)
+HUB_BACKUP_MAX_MANIFEST_BYTES = config('HUB_BACKUP_MAX_MANIFEST_BYTES', default=1024**2, cast=int)
+HUB_BACKUP_MIN_FREE_BYTES = config('HUB_BACKUP_MIN_FREE_BYTES', default=512 * 1024**2, cast=int)
+HUB_BACKUP_IDLE_SECONDS = config('HUB_BACKUP_IDLE_SECONDS', default=86400, cast=int)
+HUB_BACKUP_FINALIZE_SECONDS = config('HUB_BACKUP_FINALIZE_SECONDS', default=3600, cast=int)

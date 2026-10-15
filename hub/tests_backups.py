@@ -357,11 +357,45 @@ class HubBackupMigrationTests(TransactionTestCase):
         targets.append(("hub", "0011_hubdevolucaomapeamento_conciliacao"))
         before = loader.project_state(targets)
         migration = loader.disk_migrations[("hub", "0012_hub_backup_control")]
+        before13 = loader.project_state([node for node in targets if node[0] != "hub"] + [("hub", "0012_hub_backup_control")])
+        migration13 = loader.disk_migrations[("hub", "0013_backup_recebimento_seguro")]
+        with connection.schema_editor() as editor:
+            migration13.unapply(before13, editor)
         self.assertTrue(all(operation.__class__.__name__ in {"CreateModel", "AddConstraint"} for operation in migration.operations))
         with connection.schema_editor() as editor:
             migration.unapply(before, editor)
         self.assertNotIn(HubBackup._meta.db_table, connection.introspection.table_names())
         with connection.schema_editor() as editor:
             migration.apply(before, editor)
+        with connection.schema_editor() as editor:
+            migration13.apply(before13, editor)
         self.assertIn(HubBackup._meta.db_table, connection.introspection.table_names())
         self.assertEqual(HubBackup.objects.count(), 0)
+
+    def test_migration_0013_preserva_chaves_e_bloqueia_truncamento(self):
+        from importlib import import_module
+        from hub.backups import registrar_metadados_backup
+        empresa = Empresa.objects.create(nome="Migration backup", documento="91222333000181")
+        loja = Loja.objects.create(empresa=empresa, nome_loja="Migration", apelido_loja="M", cnpj="91222333000181", estado="SP")
+        hub = SysvarHub.objects.create(loja=loja)
+        backup, _ = registrar_metadados_backup(hub=hub, backup_uuid=uuid4(), instalacao_uuid=hub.hub_uuid,
+            servidor_mysql_uuid=uuid4(), tipo="FULL", gerado_em=timezone.now(), binlog_inicio_arquivo="bin.000001",
+            binlog_inicio_posicao=100, tamanho_bytes=100, sha256="a"*64, manifesto_sha256="b"*64, formato=HubBackup.FORMATO_FULL)
+        loader = MigrationLoader(connection)
+        targets = [node for node in loader.graph.leaf_nodes() if node[0] != "hub"] + [("hub", "0012_hub_backup_control")]
+        before = loader.project_state(targets)
+        migration = loader.disk_migrations[("hub", "0013_backup_recebimento_seguro")]
+        with connection.schema_editor() as editor:
+            migration.unapply(before, editor)
+        HistoricalBackup = before.apps.get_model("hub", "HubBackup")
+        HistoricalBackup.objects.filter(pk=backup.pk).update(chave_armazenamento="x"*300)
+        module = import_module("hub.migrations.0013_backup_recebimento_seguro")
+        with connection.schema_editor() as editor:
+            with self.assertRaises(RuntimeError):
+                module.validar_tamanho_chaves(before.apps, editor)
+        self.assertEqual(HistoricalBackup.objects.get(pk=backup.pk).chave_armazenamento, "x"*300)
+        HistoricalBackup.objects.filter(pk=backup.pk).update(chave_armazenamento="x"*249)
+        with connection.schema_editor() as editor:
+            migration.apply(before, editor)
+        backup.refresh_from_db()
+        self.assertEqual(backup.chave_armazenamento, "x"*249)

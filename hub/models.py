@@ -477,7 +477,7 @@ class HubBackup(models.Model):
     compressao = models.CharField(max_length=10, choices=[("gzip", "gzip")], default="gzip")
     estado_recebimento = models.CharField(max_length=10, default=PENDENTE, choices=[(PENDENTE, "Pendente"), (RECEBIDO, "Recebido"), (FALHA, "Falha")])
     estado_validacao = models.CharField(max_length=20, default=PENDENTE, choices=[(PENDENTE, "Pendente"), (VALIDO, "Valido"), (INVALIDO, "Invalido"), (CADEIA_INTERROMPIDA, "Cadeia interrompida")])
-    chave_armazenamento = models.CharField(max_length=512, unique=True, editable=False)
+    chave_armazenamento = models.CharField(max_length=255, unique=True, editable=False)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
     objects = HubBackupQuerySet.as_manager()
@@ -609,3 +609,41 @@ class HubBackup(models.Model):
                 return self.PENDENTE if pending else self.VALIDO
             current = type(self).objects.filter(pk=current.predecessor_id).first()
         return self.CADEIA_INTERROMPIDA
+
+
+class HubBackupUpload(models.Model):
+    """Tentativas preservadas; nenhum conteudo ou chave criptografica em texto puro."""
+    backup = models.ForeignKey(HubBackup, on_delete=models.PROTECT, related_name="uploads")
+    upload_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    tentativa = models.PositiveIntegerField()
+    estado = models.CharField(max_length=12, choices=[("ABERTO", "Aberto"), ("RECEBIDO", "Recebido"), ("ERRO", "Erro")], default="ABERTO")
+    chave_id = models.CharField(max_length=40)
+    sal = models.CharField(max_length=44)
+    criptografia = models.CharField(max_length=30, default="AES256_GCM_CHUNKS_V1", editable=False)
+    tamanho_parte = models.PositiveIntegerField()
+    manifesto_tamanho = models.PositiveIntegerField()
+    bytes_recebidos = models.PositiveBigIntegerField(default=0)
+    partes_recebidas = models.PositiveIntegerField(default=0)
+    offset_arquivo = models.PositiveBigIntegerField(default=0)
+    codigo_erro = models.CharField(max_length=40, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    expira_em = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["backup", "tentativa"], name="uq_hub_backup_upload_tentativa")]
+        ordering = ["-tentativa"]
+
+
+class HubBackupParte(models.Model):
+    upload = models.ForeignKey(HubBackupUpload, on_delete=models.PROTECT, related_name="partes")
+    indice = models.PositiveIntegerField()
+    offset = models.PositiveBigIntegerField()
+    tamanho = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64, validators=[HubBackup.SHA256])
+    offset_arquivo = models.PositiveBigIntegerField()
+    fim_arquivo = models.PositiveBigIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["upload", "indice"], name="uq_hub_backup_upload_parte")]
+        ordering = ["indice"]

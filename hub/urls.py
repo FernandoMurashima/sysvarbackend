@@ -1,3 +1,4 @@
+from hub.backup_views import BackupIniciarView, BackupParteView, BackupProgressoView, BackupFinalizarView
 from django.urls import path
 
 from hub.views import (
@@ -49,6 +50,10 @@ from hub.views import (
 )
 
 urlpatterns = [
+    path("backups/iniciar/", BackupIniciarView.as_view(), name="hub-backup-iniciar"),
+    path("backups/<uuid:backup_uuid>/partes/<int:indice>/", BackupParteView.as_view(), name="hub-backup-parte"),
+    path("backups/<uuid:backup_uuid>/progresso/", BackupProgressoView.as_view(), name="hub-backup-progresso"),
+    path("backups/<uuid:backup_uuid>/finalizar/", BackupFinalizarView.as_view(), name="hub-backup-finalizar"),
     path("administracao/", HubAdministracaoView.as_view(), name="hub-administracao"),
     path(
         "administracao/<int:hub_id>/desativar/",

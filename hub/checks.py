@@ -15,3 +15,16 @@ def check_hub_backup_storage(app_configs, **kwargs):
             id="hub.E001",
         )]
     return []
+
+
+@register(Tags.security)
+def check_hub_backup_receiving(app_configs, **kwargs):
+    from django.conf import settings
+    if not settings.HUB_BACKUP_RECEBIMENTO_ATIVO:
+        return []
+    from .backup_uploads import configuracao_recebimento
+    try:
+        configuracao_recebimento()
+    except Exception:
+        return [Error("Recebimento de backups exige criptografia, limites e storage privado provisionados.", id="hub.E002")]
+    return []
