@@ -8,7 +8,7 @@ from unittest.mock import patch
 from django.db import IntegrityError, close_old_connections, connection, models, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models.deletion import ProtectedError
-from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature, override_settings
 from django.utils import timezone
 
 from cadastros.models import Cliente, Empresa, Loja
@@ -307,7 +307,7 @@ class CashbackCreditoSchemaAnteriorTests(CashbackCreditoMixin, TransactionTestCa
         # Apenas o banco isolado criado pelo runner pode ser revertido neste teste.
         self.assertIn("test", str(connection.settings_dict["NAME"]).lower())
         anterior = ("financeiro", "0037_cashbackmovimento_devolucao")
-        atual = ("financeiro", "0038_controle_creditos_cashback")
+        atual = ("financeiro", "0039_autorizacao_cashback_online")
         try:
             MigrationExecutor(connection).migrate([anterior])
             self.assertNotIn(CashbackConsumo._meta.db_table, connection.introspection.table_names())
@@ -321,8 +321,11 @@ class CashbackCreditoSchemaAnteriorTests(CashbackCreditoMixin, TransactionTestCa
             loja = Loja.objects.create(empresa=self.empresa, nome_loja="Loja Schema", apelido_loja="SCHEMA", cnpj="31222333000180")
             hub = SysvarHub.objects.create(loja=loja)
             self.assertEqual(saldo_cashback_cliente(self.cliente.pk, empresa=self.empresa), Decimal("100.00"))
-            reserva = reservar_cashback_venda(hub, uuid.uuid4(), uuid.uuid4(), self.cliente.pk, "30.00")
-            self.assertEqual(reserva["status"], CashbackReserva.STATUS_RESERVADA)
-            self.assertEqual(reserva["valor"], "30.00")
+            with self.assertRaisesMessage(CashbackErro, "ativação explícita"):
+                reservar_cashback_venda(hub, uuid.uuid4(), uuid.uuid4(), self.cliente.pk, "30.00", total_venda="100.00")
+            with override_settings(CASHBACK_CENTRAL_FEFO_ATIVO=True):
+                with self.assertRaisesMessage(CashbackErro, "migrations 0038 e 0039"):
+                    reservar_cashback_venda(hub, uuid.uuid4(), uuid.uuid4(), self.cliente.pk, "30.00", total_venda="100.00")
+            self.assertFalse(CashbackReserva.objects.exists())
         finally:
             MigrationExecutor(connection).migrate([atual])

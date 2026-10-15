@@ -269,6 +269,14 @@ class HubSyncProcessor:
         venda_uuid = uuid_value(payload.get("venda_uuid"), "venda_uuid")
         existente = HubVendaMapeamento.objects.filter(hub=self.hub, venda_uuid=venda_uuid).first()
         if existente:
+            from financeiro.services import pagamento_e_cashback
+            tem_cashback = (any(pagamento_e_cashback(p) for p in payload.get("pagamentos") or [])
+                            or existente.venda.pagamentos.filter(forma="CASHBACK").exists())
+            if tem_cashback and not HubEventoRecebido.objects.filter(
+                hub=self.hub, tipo="VENDA_FINALIZADA", status=HubEventoRecebido.STATUS_PROCESSADO,
+                payload_hash=payload_hash(payload),
+            ).exists():
+                raise HubSyncError("Venda com Cashback já mapeada; payload divergente do histórico processado na Central.")
             return {"venda_retaguarda_id": existente.venda_id, "documento": existente.documento}
         deps = ((payload.get("dependencias") or {}).get("devolucoes_uuid") or [])
         for dep in deps:
@@ -344,7 +352,7 @@ class HubSyncProcessor:
         exclusividade_erro = view._validar_cashback_vale_troca_exclusivos(pagamentos)
         if exclusividade_erro:
             raise HubSyncError(exclusividade_erro)
-        erro_cashback = view._validar_cashback(venda, pagamentos, total)
+        erro_cashback = view._validar_cashback(venda, pagamentos, total, autorizacao_hub=True)
         if erro_cashback:
             raise HubSyncError(erro_cashback)
         reserva_ids = self._validar_conciliacao_vale_troca(pagamentos, venda, venda_uuid)

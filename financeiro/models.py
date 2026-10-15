@@ -323,6 +323,16 @@ class CashbackMovimento(models.Model):
 
 
 def saldo_cashback_cliente(cliente_id, ate=None, empresa=None):
+    from django.conf import settings
+    if getattr(settings, 'CASHBACK_CENTRAL_FEFO_ATIVO', False):
+        from .cashback_online import exigir_controle_creditos
+        from .cashback_creditos import saldo_cashback_alocado
+        exigir_controle_creditos()
+        cliente = Cliente.objects.filter(pk=cliente_id, empresa=empresa).first()
+        if not cliente:
+            from .services import CashbackNaoEncontrado
+            raise CashbackNaoEncontrado('Cliente não encontrado para Cashback.')
+        return saldo_cashback_alocado(cliente, cliente.empresa, data=ate)
     hoje = ate or timezone.localdate()
     qs = CashbackMovimento.objects.filter(cliente_id=cliente_id, status=CashbackMovimento.STATUS_ATIVO)
     if empresa is not None:
@@ -422,6 +432,29 @@ class CashbackReserva(models.Model):
 
     def __str__(self):
         return f'{self.cliente_id} - {self.venda_uuid} - {self.valor} - {self.status}'
+
+
+class CashbackAutorizacao(models.Model):
+    reserva = models.OneToOneField(CashbackReserva, on_delete=models.DO_NOTHING, related_name='autorizacao_oficial')
+    total_venda = models.DecimalField(max_digits=18, decimal_places=2)
+    limite_uso = models.DecimalField(max_digits=18, decimal_places=2)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'financeiro_cashback_autorizacao'
+
+
+class CashbackReservaCredito(models.Model):
+    autorizacao = models.ForeignKey(CashbackAutorizacao, on_delete=models.PROTECT, related_name='creditos')
+    credito = models.ForeignKey(CashbackMovimento, on_delete=models.DO_NOTHING, related_name='alocacoes_reserva')
+    valor = models.DecimalField(max_digits=18, decimal_places=2)
+
+    class Meta:
+        db_table = 'financeiro_cashback_reserva_credito'
+        constraints = [
+            models.UniqueConstraint(fields=['autorizacao', 'credito'], name='uq_cb_reserva_credito'),
+            models.CheckConstraint(check=models.Q(valor__gt=0), name='ck_cb_reserva_credito_positivo'),
+        ]
 
 
 # =========================

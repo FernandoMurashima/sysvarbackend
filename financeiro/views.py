@@ -480,7 +480,12 @@ class CashbackMovimentoViewSet(BaseViewSet):
         if not cliente:
             return Response({'detail': 'Informe o cliente.'}, status=status.HTTP_400_BAD_REQUEST)
         empresa_id = self._empresa_id_usuario()
-        return Response({'cliente': int(cliente), 'saldo': str(saldo_cashback_cliente(cliente, empresa=empresa_id))})
+        from .services import CashbackErro
+        try:
+            saldo = saldo_cashback_cliente(cliente, empresa=empresa_id)
+        except CashbackErro as exc:
+            return Response({'detail': str(exc)}, status=exc.status_code)
+        return Response({'cliente': int(cliente), 'saldo': str(saldo)})
 
 
 class ValeTrocaViewSet(BaseViewSet):

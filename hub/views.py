@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 
+from django.conf import settings
 from django.http import FileResponse, Http404
 from django.db import IntegrityError, models, transaction
 from django.db.models import Prefetch
@@ -366,6 +367,7 @@ class HubCashbackReservarVendaView(APIView):
                 request.data.get("operacao_uuid"),
                 request.data.get("cliente_id") or request.data.get("cliente_retaguarda_id"),
                 request.data.get("valor"),
+                total_venda=request.data.get("total_venda"),
             )
         except CashbackErro as exc:
             return _cashback_error_response(exc)
@@ -1512,6 +1514,13 @@ class HubClientesView(APIView):
             item = dict(cliente)
             item["vales_troca"] = vales_por_cliente.get(cliente["id"], [])
             item["cashback_saldo_retaguarda"] = cashback_por_cliente.get(cliente["id"], 0)
+            if getattr(settings, "CASHBACK_CENTRAL_FEFO_ATIVO", False):
+                try:
+                    item["cashback_saldo_retaguarda"] = consultar_cashback_online_cliente(hub, cliente["id"])["saldo_oficial"]
+                    item["cashback_consulta_online_obrigatoria"] = True
+                except CashbackErro as exc:
+                    item["cashback_saldo_retaguarda"] = "0.00"
+                    item["cashback_indisponivel"] = str(exc)
             clientes_payload.append(item)
 
         return Response(

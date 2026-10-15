@@ -54,7 +54,15 @@ def _validar_historico(empresa, cliente):
     )
     if movimentos.filter(valor__lte=ZERO).exists():
         raise CashbackHistoricoPendente('Cashback possui movimentos não positivos; conciliação explícita necessária.')
-    debitos = movimentos.filter(tipo=CashbackMovimento.TIPO_DEBITO).annotate(
+    # Cancelamento de crédito gerado tem origem explícita na venda e devolução.
+    # Débitos LOCAL sem esses vínculos continuam exigindo conciliação.
+    cancelamentos = []
+    for debito in movimentos.filter(tipo=CashbackMovimento.TIPO_DEBITO, venda_uso__isnull=True,
+                                    venda_origem__isnull=False, devolucao__isnull=False):
+        origens = movimentos.filter(tipo=CashbackMovimento.TIPO_CREDITO, venda_origem_id=debito.venda_origem_id)
+        if origens.count() == 1:
+            cancelamentos.append(debito.pk)
+    debitos = movimentos.filter(tipo=CashbackMovimento.TIPO_DEBITO).exclude(pk__in=cancelamentos).annotate(
         valor_alocado=models.Sum('consumo_rastreavel__alocacoes__valor'),
     )
     if (movimentos.filter(tipo=CashbackMovimento.TIPO_EXPIRACAO).exists()
@@ -78,11 +86,17 @@ def _creditos(empresa, cliente, data):
         consumo_credito__consumo__movimento__status=CashbackMovimento.STATUS_ATIVO,
         estorno__status=CashbackMovimento.STATUS_ATIVO,
     ).values('consumo_credito__credito_id').annotate(total=models.Sum('valor')).values('total')
+    cancelado = CashbackMovimento.objects.filter(
+        empresa=empresa, cliente=cliente, tipo=CashbackMovimento.TIPO_DEBITO,
+        status=CashbackMovimento.STATUS_ATIVO, venda_uso__isnull=True,
+        venda_origem_id=models.OuterRef('venda_origem_id'), devolucao__isnull=False,
+    ).values('venda_origem_id').annotate(total=models.Sum('valor')).values('total')
     campo = models.DecimalField(max_digits=18, decimal_places=2)
     return CashbackMovimento.objects.filter(
         empresa=empresa, cliente=cliente, tipo=CashbackMovimento.TIPO_CREDITO,
         status=CashbackMovimento.STATUS_ATIVO,
     ).filter(models.Q(validade__isnull=True) | models.Q(validade__gte=data)).annotate(
+        cancelado=Coalesce(models.Subquery(cancelado, output_field=campo), models.Value(ZERO), output_field=campo),
         consumido=Coalesce(models.Subquery(consumido, output_field=campo), models.Value(ZERO), output_field=campo),
         restituido=Coalesce(models.Subquery(restituido, output_field=campo), models.Value(ZERO), output_field=campo),
     ).order_by(models.F('validade').asc(nulls_last=True), 'criado_em', 'pk')
@@ -96,7 +110,7 @@ def saldo_cashback_alocado(cliente, empresa, data=None):
     """
     cliente = _cliente(empresa, cliente)
     _validar_historico(empresa, cliente)
-    return sum((max(ZERO, c.valor - c.consumido + c.restituido)
+    return sum((max(ZERO, c.valor - c.consumido + c.restituido - c.cancelado)
                 for c in _creditos(empresa, cliente, data or timezone.localdate())), ZERO)
 
 
@@ -130,7 +144,7 @@ def consumir_cashback_fefo(*, empresa, cliente, operacao_uuid, valor, venda=None
     restante = valor
     parcelas = []
     for credito in creditos:
-        parcela = min(restante, max(ZERO, credito.valor - credito.consumido + credito.restituido))
+        parcela = min(restante, max(ZERO, credito.valor - credito.consumido + credito.restituido - credito.cancelado))
         if parcela > ZERO:
             parcelas.append((credito, parcela))
             restante -= parcela
@@ -203,3 +217,31 @@ def vincular_estorno_cashback(*, empresa, estorno, parcelas):
         registros.append(CashbackEstornoCredito(estorno=movimento, consumo_credito=origem, valor=valores[origem.pk]))
     CashbackEstornoCredito.objects.bulk_create(registros)
     return list(CashbackEstornoCredito.objects.filter(estorno=movimento).order_by('consumo_credito_id'))
+
+
+@transaction.atomic
+def vincular_restituicao_venda(estorno, venda):
+    """Rastreia a restituição existente apenas quando seus consumos são comprovados."""
+    origens = list(CashbackConsumoCredito.objects.select_related('consumo__movimento').filter(
+        consumo__movimento__venda_uso=venda, consumo__movimento__status=CashbackMovimento.STATUS_ATIVO,
+    ).order_by('pk'))
+    debitos = CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO,
+                                               status=CashbackMovimento.STATUS_ATIVO)
+    if not origens or sum((o.valor for o in origens), ZERO) != sum(debitos.values_list('valor', flat=True), ZERO):
+        return  # Histórico permanece íntegro e indisponível para novos usos até conciliação.
+    if estorno.alocacoes_restituicao.exists():
+        return
+    restante = _valor(estorno.valor)
+    parcelas = []
+    # O vínculo é com consumos comprovados desta venda; nunca com créditos de outra venda.
+    for origem in origens:
+        devolvido = origem.estornos.filter(estorno__status=CashbackMovimento.STATUS_ATIVO).aggregate(total=models.Sum('valor'))['total'] or ZERO
+        parcela = min(restante, origem.valor - devolvido)
+        if parcela > ZERO:
+            parcelas.append((origem.pk, parcela))
+            restante -= parcela
+        if restante == ZERO:
+            break
+    if restante > ZERO:
+        raise CashbackErro('Restituição excede os consumos comprovados da venda.')
+    vincular_estorno_cashback(empresa=estorno.empresa, estorno=estorno, parcelas=parcelas)

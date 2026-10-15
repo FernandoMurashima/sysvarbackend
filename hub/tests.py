@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -16,7 +16,7 @@ from accounts.models import CredencialPdvUsuario, PerfilAcesso
 from cadastros.models import Cargo, Cliente, Empresa, Funcionarios, Loja, Nat_Lancamento
 from cadastros.services import ClientePadraoService
 from financeiro.models import Adquirente, Caixa, CashbackConfig, CashbackMovimento, CashbackReserva, CondicaoAdquirente, ContaBancaria, FormaPagamento, FormaPagamentoCondicao, PrazoPagamento, PrazoPagamentoParcela, TipoDespesaPdv, ValeTroca, ValeTrocaMovimento, ValeTrocaReserva
-from financeiro.services import CashbackErro, consumir_reservas_cashback_venda
+from financeiro.services import CashbackErro, consumir_reservas_cashback_venda, reservar_cashback_venda
 from fiscal.models import FormaPagamentoFiscalMap, NFCe, VendaDevolucao, VendaDevolucaoItem, VendaPdv, VendaPdvItem, VendaPdvPagamento
 from fiscal.views.venda_pdv import VendaPdvViewSet
 from financeiro.models import MovimentacaoFinanceira, Receber, ReceberItem
@@ -2736,6 +2736,7 @@ class SysvarHubTiposDespesaPdvApiTests(TestCase):
         self.assertEqual(len(response.data["tipos_despesa_pdv"]), 3)
 
 
+@override_settings(CASHBACK_CENTRAL_FEFO_ATIVO=True)
 class SysvarHubSyncPushApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -3478,6 +3479,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         )
         payload["itens"][0]["preco_unitario"] = "300.00"
 
+        self._autorizar_cashback_payload(payload)
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-mista-snapshot")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
@@ -3653,13 +3655,14 @@ class SysvarHubSyncPushApiTests(TestCase):
         )
         payload["itens"][0]["preco_unitario"] = "100.00"
 
+        self._autorizar_cashback_payload(payload)
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
         self.assertEqual(VendaPdvPagamento.objects.get(venda=venda).forma, "CASHBACK")
         self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("100.00")).count(), 1)
-        self.assertFalse(CashbackReserva.objects.exists())
+        self.assertEqual(CashbackReserva.objects.get().status, CashbackReserva.STATUS_CONSUMIDA)
         self.assertFalse(Receber.objects.filter(pedido_venda=venda.pk).exists())
 
     def test_venda_hub_cashback_parcial_cria_recebivel_so_do_valor_financeiro(self):
@@ -3687,6 +3690,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         )
         payload["itens"][0]["preco_unitario"] = "100.00"
 
+        self._autorizar_cashback_payload(payload)
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-parcial")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
@@ -3694,6 +3698,18 @@ class SysvarHubSyncPushApiTests(TestCase):
         receber = Receber.objects.get(pedido_venda=venda.pk)
         self.assertEqual(receber.Valor_total, Decimal("90.00"))
         self.assertEqual(sum(ReceberItem.objects.filter(Idreceber=receber).values_list("valor_parcela", flat=True), Decimal("0.00")), Decimal("90.00"))
+
+    def _autorizar_cashback_payload(self, payload):
+        for pagamento in payload["pagamentos"]:
+            if pagamento.get("tipo") != "CASHBACK":
+                continue
+            operacao = pagamento.get("operacao_uuid") or str(uuid4())
+            reserva = reservar_cashback_venda(
+                self.hub, payload["venda_uuid"], operacao, self.cliente.pk,
+                pagamento["valor"], total_venda=payload["total"],
+            )
+            pagamento["operacao_uuid"] = operacao
+            pagamento["cashback_reserva_id"] = reserva["id"]
 
     def _cashback_config(self):
         return CashbackConfig.objects.create(
@@ -3720,7 +3736,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload = {
             "venda_uuid": str(uuid4()),
             "operacao_uuid": str(uuid4()),
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "9.99",
         }
 
@@ -3741,7 +3757,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload = {
             "venda_uuid": str(uuid4()),
             "operacao_uuid": str(uuid4()),
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "10.00",
         }
         primeira = self.client.post("/api/hub/cashback/reservar-venda/", payload, format="json")
@@ -3858,17 +3874,20 @@ class SysvarHubSyncPushApiTests(TestCase):
 
     def test_cashback_consumo_de_reservas_reverte_parcial_em_divergencia(self):
         self._hub_autenticado()
+        self._cashback_config()
+        self._credito_cashback()
         venda_uuid = uuid4()
-        reservas = [CashbackReserva.objects.create(
-            empresa=self.empresa, hub=self.hub, cliente=self.cliente,
-            venda_uuid=venda_uuid, operacao_uuid=uuid4(), valor=Decimal("30.00"),
-        ) for _ in range(2)]
+        reservas = [CashbackReserva.objects.get(pk=reservar_cashback_venda(
+            self.hub, venda_uuid, uuid4(), self.cliente.pk, "30.00", total_venda="100.00",
+        )["id"]) for _ in range(2)]
         pagamentos = [{
             "tipo": "CASHBACK", "reserva_id": reserva.pk,
             "operacao_uuid": str(reserva.operacao_uuid), "valor": "30.00",
         } for reserva in reservas]
         pagamentos[1]["valor"] = "29.00"
-        venda = VendaPdv(empresa=self.empresa, cliente=self.cliente)
+        venda = VendaPdv.objects.create(empresa=self.empresa, loja=self.loja, caixa=self.caixa,
+            cliente=self.cliente, vendedor=self.vendedor, total=Decimal("100.00"),
+            documento="VE-CBK-ROLLBACK", forma_pagamento="CASHBACK")
 
         with self.assertRaisesMessage(CashbackErro, "Valor da reserva"):
             consumir_reservas_cashback_venda(self.hub, venda_uuid, venda, pagamentos)
@@ -3876,6 +3895,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         for reserva in reservas:
             reserva.refresh_from_db()
             self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+        self.assertFalse(CashbackMovimento.objects.filter(tipo=CashbackMovimento.TIPO_DEBITO).exists())
 
     def test_venda_hub_cashback_falha_apos_consumo_reverte_e_permite_retry(self):
         self._hub_autenticado()
@@ -3893,6 +3913,7 @@ class SysvarHubSyncPushApiTests(TestCase):
             }, {"codigo": "DINHEIRO", "valor": "70.00"}],
         )
         payload["itens"][0]["preco_unitario"] = "100.00"
+        self._autorizar_cashback_payload(payload)
         evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid=str(uuid4()), chave=str(uuid4()))
         modelos = (VendaPdv, VendaPdvPagamento, Receber, ReceberItem, MovimentacaoFinanceira)
         contagens = [modelo.objects.count() for modelo in modelos]
@@ -3944,6 +3965,8 @@ class SysvarHubSyncPushApiTests(TestCase):
             valor=Decimal("25.00"),
         )
 
+        reserva = CashbackReserva.objects.get()
+        reservar_cashback_venda(self.hub, reserva.venda_uuid, reserva.operacao_uuid, self.cliente.pk, "25.00", total_venda="100.00")
         response = self.client.get("/api/hub/cashback/saldo/", {"cliente_id": self.cliente.pk})
 
         self.assertEqual(response.status_code, 200, response.data)
@@ -3958,7 +3981,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         payload = {
             "venda_uuid": "82828282-8282-4282-8282-828282828282",
             "operacao_uuid": "83838383-8383-4383-8383-838383838383",
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "60.00",
         }
 
@@ -3970,7 +3993,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         excedente = self.client.post("/api/hub/cashback/reservar-venda/", {
             "venda_uuid": "84848484-8484-4484-8484-848484848484",
             "operacao_uuid": "85858585-8585-4585-8585-858585858585",
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "50.00",
         }, format="json")
 
@@ -3995,13 +4018,13 @@ class SysvarHubSyncPushApiTests(TestCase):
         primeira = self.client.post("/api/hub/cashback/reservar-venda/", {
             "venda_uuid": "86868686-8686-4686-8686-868686868686",
             "operacao_uuid": "87878787-8787-4787-8787-878787878787",
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "80.00",
         }, format="json")
         segunda = cliente_2.post("/api/hub/cashback/reservar-venda/", {
             "venda_uuid": "88888888-8888-4888-8888-888888888888",
             "operacao_uuid": "89898989-8989-4989-8989-898989898989",
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "30.00",
         }, format="json")
 
@@ -4016,7 +4039,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         reserva = self.client.post("/api/hub/cashback/reservar-venda/", {
             "venda_uuid": "90909090-9090-4090-9090-909090909090",
             "operacao_uuid": "91919191-9191-4191-9191-919191919191",
-            "cliente_id": self.cliente.pk,
+            "cliente_id": self.cliente.pk, "total_venda": "100.00",
             "valor": "40.00",
         }, format="json").data["reserva"]
 
@@ -4051,6 +4074,7 @@ class SysvarHubSyncPushApiTests(TestCase):
             ],
         )
         payload["itens"][0]["preco_unitario"] = "100.00"
+        self._autorizar_cashback_payload(payload)
         evento = self._evento("VENDA_FINALIZADA", payload, evento_uuid="94949494-9494-4494-9494-949494949494", chave="venda-cashback-reservado")
 
         response = self._push([evento])
@@ -4063,7 +4087,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
         self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("30.00")).count(), 1)
 
-    def test_venda_hub_cashback_reservado_e_local_registra_debito_unico_total(self):
+    def test_venda_hub_cashback_reservado_com_local_desconhecido_e_rejeitado(self):
         self._hub_autenticado()
         self._cashback_config()
         self._credito_cashback("100.00")
@@ -4093,13 +4117,13 @@ class SysvarHubSyncPushApiTests(TestCase):
         response = self._push([evento])
         retry = self._push([evento])
 
-        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
-        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_DUPLICADO)
-        venda = VendaPdv.objects.get(documento=response.data["resultados"][0]["mapeamento"]["documento"])
+        self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO, response.data)
+        self.assertEqual(retry.data["resultados"][0]["status"], HubEventoRecebido.STATUS_ERRO, retry.data)
+        self.assertIn("reserva oficial", response.data["resultados"][0]["mensagem"])
         reserva.refresh_from_db()
-        self.assertEqual(reserva.status, CashbackReserva.STATUS_CONSUMIDA)
-        self.assertEqual(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).count(), 1)
-        self.assertEqual(CashbackMovimento.objects.get(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO).valor, Decimal("50.00"))
+        self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
+        self.assertFalse(CashbackMovimento.objects.filter(tipo=CashbackMovimento.TIPO_DEBITO).exists())
+        self.assertFalse(VendaPdv.objects.filter(documento=payload["documento"]).exists())
 
     def test_venda_hub_falha_na_sincronizacao_nao_consumir_reserva_cashback(self):
         self._hub_autenticado()
@@ -4196,7 +4220,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         reserva.refresh_from_db()
         self.assertEqual(reserva.status, CashbackReserva.STATUS_RESERVADA)
 
-    def test_pdv_central_respeita_reservas_ativas_de_cashback(self):
+    def test_pdv_central_cashback_exige_reserva_oficial_sem_contornar_reservas_ativas(self):
         self._hub_autenticado()
         self._cashback_config()
         self._credito_cashback("100.00")
@@ -4222,7 +4246,7 @@ class SysvarHubSyncPushApiTests(TestCase):
 
         erro = VendaPdvViewSet()._validar_cashback(venda, [{"forma": "CASHBACK", "valor": Decimal("30.00")}], Decimal("30.00"))
 
-        self.assertEqual(erro, "O cashback informado é maior que o saldo disponível do cliente.")
+        self.assertIn("reserva oficial", erro)
 
     def test_venda_hub_sem_promocao_gera_cashback_sobre_total(self):
         self._hub_autenticado()
@@ -4512,6 +4536,7 @@ class SysvarHubSyncPushApiTests(TestCase):
             ],
         )
 
+        self._autorizar_cashback_payload(payload)
         response = self._push([self._evento("VENDA_FINALIZADA", payload, chave="venda-cashback-base-menos-uso")])
 
         self.assertEqual(response.data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO, response.data)
@@ -4587,7 +4612,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(vale.saldo, Decimal("0.00"))
         self.assertTrue(ValeTrocaMovimento.objects.filter(vale=vale, venda_uso=venda, valor=Decimal("40.00")).exists())
 
-    def test_pdv_central_venda_nova_com_cashback_continua_funcionando(self):
+    def test_pdv_central_cashback_venda_nova_sem_reserva_oficial_e_bloqueada(self):
         self._autenticar_central()
         self._cashback_config()
         self._credito_cashback("30.00")
@@ -4600,10 +4625,10 @@ class SysvarHubSyncPushApiTests(TestCase):
 
         response = self.client.post("/api/fiscal/vendas-pdv/finalizar/", payload, format="json")
 
-        self.assertEqual(response.status_code, 201, response.data)
-        venda = VendaPdv.objects.get(pk=response.data["id"])
-        self.assertTrue(CashbackMovimento.objects.filter(venda_uso=venda, tipo=CashbackMovimento.TIPO_DEBITO, valor=Decimal("20.00")).exists())
-        self.assertTrue(CashbackMovimento.objects.filter(venda_origem=venda, tipo=CashbackMovimento.TIPO_CREDITO, valor=Decimal("8.00")).exists())
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("reserva oficial", str(response.data))
+        self.assertFalse(CashbackMovimento.objects.filter(tipo=CashbackMovimento.TIPO_DEBITO).exists())
+        self.assertFalse(VendaPdv.objects.filter(cliente=self.cliente).exists())
 
     def test_venda_hub_rejeita_cashback_com_vale_troca_sem_materializar_ou_consumir_reservas(self):
         self._hub_autenticado()
@@ -4947,6 +4972,7 @@ class SysvarHubSyncPushApiTests(TestCase):
                 {"codigo": "PIX", "tipo": "PIX", "descricao": "Pix", "valor": "7.00"},
             ],
         )
+        self._autorizar_cashback_payload(payload_venda)
         self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-cbk")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         payload = {
             "devolucao_uuid": "53535353-5353-4353-8353-535353535353",
@@ -4979,7 +5005,7 @@ class SysvarHubSyncPushApiTests(TestCase):
         self.assertEqual(CashbackMovimento.objects.filter(devolucao=devolucao, tipo=CashbackMovimento.TIPO_ESTORNO).count(), 1)
         self.assertEqual(ValeTroca.objects.filter(devolucao=devolucao).count(), 1)
 
-    def test_devolucao_finalizada_credito_zero_retorna_contrato_sem_vale_e_retry_idempotente(self):
+    def test_devolucao_finalizada_cashback_credito_zero_retorna_contrato_sem_vale_e_retry_idempotente(self):
         self._hub_autenticado()
         self._cashback_config()
         self._credito_cashback("30.00")
@@ -4989,6 +5015,7 @@ class SysvarHubSyncPushApiTests(TestCase):
                 {"codigo": "CBK", "tipo": "CASHBACK", "descricao": "Cashback", "valor": "10.00", "operacao_uuid": "57575757-5757-4757-8757-575757575757"},
             ],
         )
+        self._autorizar_cashback_payload(payload_venda)
         self.assertEqual(self._push([self._evento("VENDA_FINALIZADA", payload_venda, chave="venda-dev-cbk-zero")]).data["resultados"][0]["status"], HubEventoRecebido.STATUS_PROCESSADO)
         payload = {
             "devolucao_uuid": "58585858-5858-4858-8858-585858585858",

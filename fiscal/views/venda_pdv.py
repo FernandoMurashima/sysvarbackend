@@ -1014,11 +1014,19 @@ class VendaPdvViewSet(viewsets.ModelViewSet):
                     continue
         return reservas
 
-    def _validar_cashback(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal) -> str:
+    def _validar_cashback(self, venda: VendaPdv, pagamentos: List[Dict], total: Decimal, *, autorizacao_hub=False) -> str:
         cashback_usado = self._total_cashback_usado(pagamentos)
         if cashback_usado <= 0:
             return ""
 
+        from financeiro.cashback_online import exigir_controle_creditos
+        from financeiro.services import CashbackErro
+        try:
+            exigir_controle_creditos()
+        except CashbackErro as exc:
+            return str(exc)
+        if not autorizacao_hub or any(pagamento_e_cashback(p) and not p.get("reserva_id") for p in pagamentos):
+            return "Todo novo pagamento Cashback exige reserva oficial online; evento LOCAL desconhecido não autorizado."
         config = CashbackConfig.regra_ativa(venda.empresa)
         if not config:
             return "Não existe regra de cashback ativa."

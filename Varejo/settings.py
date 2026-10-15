@@ -192,3 +192,6 @@ LOGGING = {
 
 AUTH_USER_MODEL = 'accounts.User'
 SESSION_IDLE_TIMEOUT_MINUTES = config('SESSION_IDLE_TIMEOUT_MINUTES', cast=int, default=30)
+
+# Ativar somente após migrations e atualização do contrato do Hub.
+CASHBACK_CENTRAL_FEFO_ATIVO = config("CASHBACK_CENTRAL_FEFO_ATIVO", default=False, cast=bool)
