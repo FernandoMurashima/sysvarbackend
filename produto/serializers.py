@@ -1178,6 +1178,35 @@ class PromocaoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, attrs):
+        user = getattr(self.context.get('request'), 'user', None)
+        empresa_usuario = _empresa_request(self)
+        if user is not None and not user.is_superuser:
+            if empresa_usuario is None:
+                raise serializers.ValidationError({'empresa': 'Usuário sem empresa vinculada.'})
+            informada = attrs.get('empresa')
+            if informada and informada.pk != empresa_usuario.pk:
+                raise serializers.ValidationError({'empresa': 'O cadastro pertence a outra empresa.'})
+            if self.instance and self.instance.empresa_id != empresa_usuario.pk:
+                raise serializers.ValidationError({'empresa': 'A promoção pertence a outra empresa.'})
+            empresa = empresa_usuario
+        else:
+            empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        if empresa is None:
+            raise serializers.ValidationError({'empresa': 'Informe a empresa da promoção.'})
+
+        erros = {}
+        for campo in ('lojas', 'produtos', 'colecoes', 'grupos', 'subgrupos'):
+            if campo in attrs:
+                inconsistente = any(vinculo.empresa_id != empresa.pk for vinculo in attrs[campo])
+            elif self.instance:
+                inconsistente = getattr(self.instance, campo).exclude(empresa_id=empresa.pk).exists()
+            else:
+                inconsistente = False
+            if inconsistente:
+                erros[campo] = 'Todos os vínculos devem pertencer à empresa da promoção.'
+        if erros:
+            raise serializers.ValidationError(erros)
+
         data_inicio = attrs.get('data_inicio', getattr(self.instance, 'data_inicio', None))
         data_fim = attrs.get('data_fim', getattr(self.instance, 'data_fim', None))
         valor = attrs.get('valor', getattr(self.instance, 'valor', None))
