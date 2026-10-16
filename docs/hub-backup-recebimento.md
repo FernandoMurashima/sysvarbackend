@@ -223,3 +223,97 @@ Politica temporal:
 significa restauracao homologada.** `restauracao_homologada` permanece falso no
 relatorio; nenhuma politica de exclusao efetiva foi implementada. Homologacao de
 restauracao, carga e infraestrutura continua pendente para as etapas autorizadas.
+
+
+## Prompt 10 — selecao e pacote privado de recuperacao
+
+Preparado e **desativado por padrao**, sem downloads operacionais, restauracao ou
+exclusao. Nao executa SQL e nao modifica o Hub. Integridade revalidada nao significa
+restauracao homologada. A listagem/seleção e o download sao exclusivamente
+administrativos: nao usam HubTokenAuthentication nem dependem de notebook/Hub ativo.
+
+### Configuracao futura autorizada
+
+- Manter implantadas as migrations anteriores do controle/recebimento (nenhuma
+  migration nova nesta etapa); nao foram aplicadas operacionalmente aqui.
+- Provisionar o storage privado e todas as chaves historicas segundo as secoes
+  anteriores. A recuperacao nao exige ativar recebimento ou transmissao.
+- Usar SECRET_KEY forte da Central para assinar autorizacoes temporarias. Nao ha
+  chave fixa adicional; o segredo de assinatura nao e enviado ao suporte.
+- Autorizar os usuarios de suporte pelo controle existente: administrador do Hub
+  (superusuario ou papeis Admin/Diretor), permissao Django `hub.view_hubbackup`
+  para consultar, e tambem `hub.change_hubbackup` para autorizar/baixar. As
+  permissoes padrao do model ja existem; nao ha novo papel ou concessao automatica.
+  Escopo de empresa/loja e perfis existentes continuam valendo. Superusuario
+  vinculado a empresa tambem respeita a restricao existente do administrador Hub.
+- Os pontos e todos os ancestrais precisam estar RECEBIDO **e** registrados VALIDO
+  pela validacao independente do Prompt 9. Este fluxo nao promove PENDENTE por
+  simples recebimento, nem altera estados silenciosamente.
+- Configurar HTTPS valido e proxy confiavel com `request.is_secure()` verdadeiro.
+  Nao registrar Authorization, X-Backup-Recovery-Token, corpos ou respostas dessas
+  rotas. No proxy, desabilitar cache/buffering de resposta e transformacoes dos
+  arquivos gzip (`proxy_cache off`, `proxy_buffering off`, gzip/gunzip desativados
+  nessas rotas); nao criar alias publico de backup. Preservar Content-Length.
+- Ajustar timeout de proxy/WSGI e `HUB_BACKUP_FINALIZE_SECONDS` ao volume: autorizacao
+  e cada download fazem revalidacao fisica de toda a ancestralidade selecionada.
+  Isso pode exigir I/O significativo; homologacao de carga/infraestrutura e futura.
+- Somente depois da revisao autorizada, configurar `HUB_BACKUP_RECOVERY_ATIVO=True`.
+  Sem isso as rotas retornam 503. `HUB_BACKUP_RECOVERY_AUTH_SECONDS` padrao 900
+  segundos, configuravel de 60 ate 86400, e a janela para admitir downloads.
+  `manage.py check` falha com hub.E004 se a configuracao habilitada estiver invalida.
+
+### API administrativa
+
+Base `/api/hub/backups/recuperacao/<empresa_id>/<loja_id>/`.
+Autenticacao **Authorization: Token <sessao administrativa vigente>**, a mesma da
+Central; tokens Hub nao sao aceitos. Escopo e permissoes sao conferidos no servidor
+em cada requisicao, inclusive depois de emitir autorizacao.
+
+1. `GET pontos/`: lista data/hora ISO com fuso, tipo, sequencia, instalacao, MySQL,
+   recebimento e validacao. Filtros opcionais instalacao_uuid/servidor_mysql_uuid;
+   paginacao `offset` (padrao 0) e `limit` (padrao 100, maximo 200). `selecionavel`
+   avalia os metadados, com `revalidacao_obrigatoria=true`; nao atesta leitura fisica.
+2. `POST autorizar/`: JSON somente com `ponto_uuid`, `instalacao_uuid`,
+   `servidor_mysql_uuid`, `autorizar: true` e `motivo` nao vazio (ate 500 caracteres).
+   Revalida fisicamente o FULL e exatamente os predecessores ate o ponto escolhido.
+   Corrupcao de um incremental posterior nao impede selecionar um ponto anterior.
+   Retorna manifesto do pacote, seu SHA-256, `autorizacao_token` assinado e validade.
+   Auditoria duravel e obrigatoria antes de liberar; registra operador/escopo/ponto e
+   hash do motivo, sem texto livre, token, chaves, manifesto SQL ou conteudo do backup.
+3. `GET arquivos/<backup_uuid>/`: requer tambem header **X-Backup-Recovery-Token**
+   com a autorizacao emitida. Nao colocar esse valor em URL/query string. Somente
+   arquivos do pacote autorizado podem ser baixados. A autorizacao e vinculada ao
+   usuario, empresa, loja, Hub, instalacao, MySQL, ponto e SHA do manifesto completo;
+   nao funciona sozinha, para outro usuario ou em outro escopo.
+
+O pacote e um manifesto JSON mais seus arquivos individuais, evitando ZIP gigante
+ou spool em disco. O manifesto informa FULL, incrementais e ordem de aplicacao
+(0=FULL), nomes seguros, UUIDs, datas, formatos, compressao, tamanhos, SHA-256 dos
+gzip e dos manifestos originais, predecessores e coordenadas/ancoras inicial/final.
+`download_url` e caminho relativo privado, sem token. O SHA do pacote usa JSON ASCII
+com chaves ordenadas e separadores `,` e `:` (sem espacos); o token assinado vincula
+o hash, identificador e data do pacote.
+
+Downloads retornam gzip SQL original descriptografado por streaming, Content-Length,
+X-Backup-SHA256 e Content-Disposition attachment. Dados nao sao executados nem
+escritos em temporarios em claro na Central. Os containers AES-GCM originais sao
+preservados. Partes criptografadas tem ate 16 MiB, com buffers associados; a resposta
+entrega blocos de ate 64 KiB. AES-GCM e SHA sao verificados novamente no fluxo; a
+ultima parte so e liberada depois do SHA global e fim do arquivo. Alteracoes do
+arquivo durante a transmissao interrompem o fluxo. A trava e liberada mesmo se a
+conexao fechar sem consumir a resposta.
+
+As respostas, inclusive erros, usam no-store/no-cache, Vary por autenticacao e
+header de autorizacao, e nosniff; downloads sinalizam X-Accel-Buffering=no. Interrupcao
+nao altera originais nem marca pacote restaurado. Nao ha Range/retomada parcial
+(416): repetir o arquivo completo com a mesma autorizacao enquanto valida, ou obter
+nova autorizacao explicita. A expiracao e conferida antes/depois da revalidacao para
+admitir o download; um fluxo ja admitido pode terminar alem da janela do token,
+sujeito aos timeouts de verificacao/transporte. Auditoria distingue inicio, fim do
+fluxo no servidor e interrupcao; nao representa confirmacao do cliente. O suporte
+deve conferir tamanho e SHA de **todos** os arquivos contra o manifesto antes de
+considerar o pacote completo. A homologacao real de restauracao continua pendente.
+
+Nenhuma rota publica, servico, agendamento, exclusao ou habilitacao operacional
+foi criada/executada. A implementacao foi testada apenas com banco isolado e
+containers/arquivos ficticios, incluindo permissoes, corrupcao e interrupcoes.

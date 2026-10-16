@@ -216,3 +216,7 @@ HUB_BACKUP_IDLE_SECONDS = config('HUB_BACKUP_IDLE_SECONDS', default=86400, cast=
 HUB_BACKUP_FINALIZE_SECONDS = config('HUB_BACKUP_FINALIZE_SECONDS', default=3600, cast=int)
 # Dias civis da politica de retencao; nao usa o fuso do processo/operador.
 HUB_BACKUP_RETENTION_TIME_ZONE = config('HUB_BACKUP_RETENTION_TIME_ZONE', default=TIME_ZONE)
+
+# Recuperacao administrativa: habilitacao futura explicita, independente do recebimento.
+HUB_BACKUP_RECOVERY_ATIVO = config('HUB_BACKUP_RECOVERY_ATIVO', default=False, cast=bool)
+HUB_BACKUP_RECOVERY_AUTH_SECONDS = config('HUB_BACKUP_RECOVERY_AUTH_SECONDS', default=900, cast=int)

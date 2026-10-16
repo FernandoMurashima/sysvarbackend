@@ -115,8 +115,9 @@ def _result(backup, integrity, code):
                 integridade=integrity, codigo=code)
 
 
-def _assert_snapshot(hub, rows, files, uploads):
-    current = _rows(hub)
+def _assert_snapshot(hub, rows, files, uploads, *, selected=False):
+    current = (list(HubBackup.objects.do_hub(hub).filter(pk__in=[b.pk for b in rows]))
+               if selected else _rows(hub))
     if {row.pk: _fingerprint(row) for row in current} != {row.pk: _fingerprint(row) for row in rows}:
         raise IntegrityError("CONCURRENT_METADATA_CHANGE")
     for path, fingerprint in files.values():
@@ -252,3 +253,24 @@ def auditar_backups_hub(*, empresa_id, loja_id, hub_id, registrar=False, agora=N
     return dict(dry_run=not registrar, retencao_dry_run=True, restauracao_homologada=False,
                 empresa_id=hub.loja.empresa_id, loja_id=hub.loja_id, hub_id=hub.pk,
                 fuso=tz.key, referencia=now.isoformat(), backups=list(results.values()))
+
+
+def verificar_ponto_backup(hub, rows):
+    """Fresh physical proof of exactly the selected ancestry; never promotes RECEBIDO."""
+    keys = configuracao_criptografia()
+    by_pk = {b.pk: b for b in rows}
+    points, starts, results, files, uploads = {}, {}, {}, {}, {}
+    for backup in rows:
+        if (backup.hub_id != hub.pk or backup.loja_id != hub.loja_id or backup.empresa_id != hub.loja.empresa_id
+                or backup.estado_recebimento != HubBackup.RECEBIDO or backup.estado_validacao != HubBackup.VALIDO
+                or backup.verificado_em is None):
+            raise IntegrityError("VALIDATED_CHAIN_REQUIRED")
+        _relations(backup, by_pk)
+        document, file_identity, upload_identity = _verify(backup, hub, keys)
+        _chain(backup, document, by_pk, points, results)
+        starts[backup.pk] = document["binlog"] if backup.tipo == HubBackup.FULL else document["start"]
+        points[backup.pk] = document["binlog"] if backup.tipo == HubBackup.FULL else document["end"]
+        results[backup.pk] = {"integridade": "VALIDO"}
+        files[backup.pk], uploads[backup.pk] = file_identity, upload_identity
+    _assert_snapshot(hub, rows, files, uploads, selected=True)
+    return dict(points=points, starts=starts, files=files, uploads=uploads)

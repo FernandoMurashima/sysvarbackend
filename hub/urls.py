@@ -1,3 +1,4 @@
+from hub.backup_recovery_views import RecoveryPointsView, RecoveryAuthorizeView, RecoveryFileView
 from hub.backup_views import BackupIniciarView, BackupParteView, BackupProgressoView, BackupFinalizarView
 from django.urls import path
 
@@ -50,6 +51,9 @@ from hub.views import (
 )
 
 urlpatterns = [
+    path("backups/recuperacao/<int:empresa_id>/<int:loja_id>/pontos/", RecoveryPointsView.as_view(), name="hub-backup-recovery-points"),
+    path("backups/recuperacao/<int:empresa_id>/<int:loja_id>/autorizar/", RecoveryAuthorizeView.as_view(), name="hub-backup-recovery-authorize"),
+    path("backups/recuperacao/<int:empresa_id>/<int:loja_id>/arquivos/<uuid:backup_uuid>/", RecoveryFileView.as_view(), name="hub-backup-recovery-file"),
     path("backups/iniciar/", BackupIniciarView.as_view(), name="hub-backup-iniciar"),
     path("backups/<uuid:backup_uuid>/partes/<int:indice>/", BackupParteView.as_view(), name="hub-backup-parte"),
     path("backups/<uuid:backup_uuid>/progresso/", BackupProgressoView.as_view(), name="hub-backup-progresso"),

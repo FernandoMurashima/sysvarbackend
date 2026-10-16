@@ -312,7 +312,7 @@ def _parts_bounded(upload):
         next_index = batch[-1].indice + 1
 
 
-def _verify_file(upload, keys, path):
+def iter_verified_file(upload, keys, path):
     header, digest, count, total = header_upload(upload), hashlib.sha256(), 0, 0
     deadline = time.monotonic() + settings.HUB_BACKUP_FINALIZE_SECONDS
     cipher = cipher_upload(upload, keys)
@@ -321,6 +321,8 @@ def _verify_file(upload, keys, path):
         manifest = ler_registro(stream, cipher, header, -1, upload.manifesto_tamanho)
         if hashlib.sha256(manifest).hexdigest() != upload.backup.manifesto_sha256:
             raise RecebimentoErro("MANIFEST_CONFLICT", 409, True)
+        yield manifest
+        last = None
         for part in _parts_bounded(upload):
             if time.monotonic() > deadline:
                 raise RecebimentoErro("FINALIZE_TIMEOUT", 408)
@@ -331,10 +333,24 @@ def _verify_file(upload, keys, path):
             if stream.tell() != part.fim_arquivo or hashlib.sha256(data).hexdigest() != part.sha256:
                 raise RecebimentoErro("PART_CHECKSUM_MISMATCH", 422, True)
             digest.update(data); total += len(data); count += 1
+            if total == upload.backup.tamanho_bytes:
+                last = data  # Withhold final bytes until global SHA and EOF are checked.
+            else:
+                yield data
         if stream.read(1) or count != upload.partes_recebidas or total != upload.backup.tamanho_bytes or total != upload.bytes_recebidos or stream.tell() != upload.offset_arquivo:
             raise RecebimentoErro("FILE_INCOMPLETE", 409, True)
     if not hmac.compare_digest(digest.hexdigest(), upload.backup.sha256):
         raise RecebimentoErro("FILE_CHECKSUM_MISMATCH", 422, True)
+    if last is not None:
+        yield last
+
+
+def _verify_file(upload, keys, path):
+    # Same verifier for receipt, independent integrity and recovery streaming.
+    with contextlib.closing(iter_verified_file(upload, keys, path)) as records:
+        manifest = next(records)
+        for _ in records:
+            pass
     return manifest
 
 

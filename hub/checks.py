@@ -38,3 +38,16 @@ def check_hub_backup_retention_timezone(app_configs, **kwargs):
     except ImproperlyConfigured:
         return [Error("Fuso de retencao de backups invalido.", id="hub.E003")]
     return []
+
+
+@register(Tags.security)
+def check_hub_backup_recovery(app_configs, **kwargs):
+    from django.conf import settings
+    if not settings.HUB_BACKUP_RECOVERY_ATIVO:
+        return []
+    from .backup_recovery import recovery_configuration
+    try:
+        recovery_configuration()
+    except Exception:
+        return [Error("Recuperacao de backups exige chaves, segredo de assinatura, limites e storage privado.", id="hub.E004")]
+    return []
