@@ -148,3 +148,78 @@ em diretorios temporarios com ACL privada. O bootstrap ignora migrations legadas
 exclusivas de MySQL; 0012/0013 sao aplicadas e revertidas no banco isolado. Testes do
 verificador MySQL confirmam ausencia do W003 sem conectar ao MySQL operacional.
 Homologacao de infraestrutura, volume/latencia e recuperacao real permanece futura.
+
+
+## Prompt 9 — integridade independente e retencao DRY-RUN
+
+Implementacao preparada, sem execucao contra backups operacionais, sem exclusao e
+sem agendamento. A API de recebimento continua desativada por padrao. Nenhuma
+migration nova e necessaria para esta etapa; a estrutura dos Prompts 6/7 e reutilizada.
+
+Comando futuro do suporte, sempre somente diagnostico (IDs do escopo autorizado):
+
+```powershell
+.\venv\Scripts\python.exe manage.py auditar_backups_hub --empresa 1 --loja 1 --hub 1 --dry-run
+```
+
+`--empresa`, `--loja` e `--hub` sao obrigatorios e devem corresponder ao cadastro
+oficial. Nao existe enumeracao global, parametro de caminho, exclusao, `--apply` ou
+registro de validacao pelo comando. `--dry-run` e explicito opcional: o comando
+permanece DRY-RUN quando omitido. Requer as migrations anteriores ja implantadas,
+storage privado e chaves historicas disponiveis; nao exige ativar recebimento.
+
+A auditoria reutiliza o verificador do container: header, AES-GCM/HKDF, manifesto
+UTF-8 original, hashes das partes, SHA-256 global, tamanho, ordem e fim do arquivo.
+Confere metadados imutaveis, empresa/loja/Hub/instalacao/MySQL, FULL, predecessor,
+sequencia, coordenadas e ancoras autenticadas. Processa uma parte de ate 16 MiB por
+vez, com buffers criptograficos associados; manifesto ate 1 MiB. Metadados do plano
+crescem com a quantidade de backups, e somente a ancora de cada ponto e retida para
+conferir sucessores. Nao descompacta/executa SQL nem realiza restauracao.
+
+Usa a trava de upload existente sem criar diretorios ou novos arquivos de trava.
+Recebimento em andamento, trava ausente/ocupada, chave historica ausente, erro de
+storage ou alteracao concorrente impedem aprovar integridade/retencao. Chave ausente
+produz INCONCLUSIVO, sem declarar corrupcao comprovada. Um trecho anterior integro
+pode continuar valido quando um incremental posterior estiver corrompido, mas os
+sucessores ficam bloqueados e a cadeia inteira e preservada pelo plano.
+Instalacoes antigas sao conferidas contra sua identidade imutavel registrada na
+Central, mesmo apos novo pareamento; nunca sao misturadas com a instalacao nova.
+
+O resultado JSON distingue `integridade` (resultado desta leitura) de
+`estado_validacao` (estado persistido). Assim, um recebido PENDENTE pode ter prova
+fisica VALIDO no DRY-RUN, mas continua PENDENTE no banco e e preservado. Tambem
+inclui UUID, chave logica do arquivo, geracao, sequencia, motivo, bloqueio da cadeia
+e acao MANTER/ELEGIVEL_REMOCAO. ELEGIVEL_REMOCAO e exclusivamente uma simulacao:
+nenhum arquivo, tentativa ou registro e removido.
+
+O servico interno `auditar_backups_hub(..., registrar=True)` prepara o registro
+explicito de VALIDO/INVALIDO/CADEIA_INTERROMPIDA e `verificado_em`, somente apos
+verificar os arquivos e todos os ancestrais do ponto. Nao e acionado pela API,
+comando ou agendador. Seu uso operacional exige autorizacao especifica futura.
+Antes do commit dos estados, trava o Hub e confere novamente cadastro, metadados,
+tentativas e identidade dos arquivos. Divergencia aborta a transacao inteira.
+Nesta implementacao esse caminho foi exercitado somente em banco isolado de testes.
+
+Politica temporal:
+
+- `HUB_BACKUP_RETENTION_TIME_ZONE` usa por padrao `TIME_ZONE`, atualmente
+  `America/Sao_Paulo`. Valor IANA invalido falha fechado (`hub.E003`).
+- A janela usa dias civis do instante da auditoria nesse fuso, comparando a data
+  de geracao do manifesto: dia atual e anterior, com todos os pontos desses dias.
+- FULLs e incrementais anteriores necessarios a esses pontos sao preservados por
+  dependencia, inclusive quando o FULL tem mais de uma semana.
+- Datas futuras tambem sao preservadas: relogio divergente nao autoriza remocao.
+  Uma cadeia que contem ponto protegido e mantida inteira, inclusive se o relogio
+  retroceder num incremental posterior; nao se planeja remocao de seu sufixo.
+- A ultima cadeia integralmente verificada e registrada VALIDO de **cada
+  instalacao/MySQL** e mantida, mesmo antiga ou apos renovacao semanal/pareamento.
+- Pendentes (de recebimento ou validacao), incompletos e qualquer cadeia com duvida
+  de validade ficam integralmente preservados. O plano nao considera somente
+  estados VALIDO antigos: exige nova conferencia fisica nesta execucao.
+- Somente cadeias antigas independentes, fora da janela, inteiramente recebidas e
+  validas, e com alternativa integra preservada podem aparecer como elegiveis.
+
+**VALIDO significa integridade criptografica e continuidade verificadas. Nao
+significa restauracao homologada.** `restauracao_homologada` permanece falso no
+relatorio; nenhuma politica de exclusao efetiva foi implementada. Homologacao de
+restauracao, carga e infraestrutura continua pendente para as etapas autorizadas.

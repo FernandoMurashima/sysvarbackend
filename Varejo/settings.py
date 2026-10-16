@@ -214,3 +214,5 @@ HUB_BACKUP_MAX_MANIFEST_BYTES = config('HUB_BACKUP_MAX_MANIFEST_BYTES', default=
 HUB_BACKUP_MIN_FREE_BYTES = config('HUB_BACKUP_MIN_FREE_BYTES', default=512 * 1024**2, cast=int)
 HUB_BACKUP_IDLE_SECONDS = config('HUB_BACKUP_IDLE_SECONDS', default=86400, cast=int)
 HUB_BACKUP_FINALIZE_SECONDS = config('HUB_BACKUP_FINALIZE_SECONDS', default=3600, cast=int)
+# Dias civis da politica de retencao; nao usa o fuso do processo/operador.
+HUB_BACKUP_RETENTION_TIME_ZONE = config('HUB_BACKUP_RETENTION_TIME_ZONE', default=TIME_ZONE)

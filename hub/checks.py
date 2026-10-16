@@ -28,3 +28,13 @@ def check_hub_backup_receiving(app_configs, **kwargs):
     except Exception:
         return [Error("Recebimento de backups exige criptografia, limites e storage privado provisionados.", id="hub.E002")]
     return []
+
+
+@register(Tags.security)
+def check_hub_backup_retention_timezone(app_configs, **kwargs):
+    from .backup_integrity import retention_timezone
+    try:
+        retention_timezone()
+    except ImproperlyConfigured:
+        return [Error("Fuso de retencao de backups invalido.", id="hub.E003")]
+    return []

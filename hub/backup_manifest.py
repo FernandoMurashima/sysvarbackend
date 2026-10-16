@@ -47,7 +47,7 @@ def _coordinate(value):
     return name, position
 
 
-def ler_manifesto(raw, hub, limit):
+def ler_manifesto(raw, hub, limit, *, verificar_estados=True):
     try:
         if not isinstance(raw, str) or not 1 <= len(raw.encode("utf-8")) <= limit:
             raise ValueError
@@ -110,7 +110,7 @@ def ler_manifesto(raw, hub, limit):
             previous = scope.filter(backup_uuid=previous_uuid).first()
             if not full or not previous or full.manifesto_sha256 != _hash(doc["full_manifest_sha256"]) or previous.manifesto_sha256 != _hash(doc["previous_manifest_sha256"]):
                 raise ValueError
-            if any(item.estado_recebimento != "RECEBIDO" or item.estado_validacao in ("INVALIDO", "CADEIA_INTERROMPIDA") for item in (full, previous)):
+            if verificar_estados and any(item.estado_recebimento != "RECEBIDO" or item.estado_validacao in ("INVALIDO", "CADEIA_INTERROMPIDA") for item in (full, previous)):
                 raise ValueError
             sources = doc["sources"]
             if not isinstance(sources, list) or not 1 <= len(sources) <= 4096:

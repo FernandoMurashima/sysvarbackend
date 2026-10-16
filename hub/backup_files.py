@@ -171,15 +171,16 @@ def open_private(path, *, create=False, writable=False):
 
 
 @contextlib.contextmanager
-def backup_lock(backup):
+def backup_lock(backup, *, existing_only=False):
     final = destination(backup)
-    ensure_parent(final)
     path = final.with_name(".backup-" + backup.backup_uuid.hex + ".lock")
-    try:
-        with open_private(path, create=True, writable=True) as stream:
-            stream.write(b"\x00"); stream.flush()
-    except FileExistsError:
-        pass
+    if not existing_only:
+        ensure_parent(final)
+        try:
+            with open_private(path, create=True, writable=True) as stream:
+                stream.write(b"\x00"); stream.flush()
+        except FileExistsError:
+            pass
     with open_private(path, writable=True) as stream:
         try:
             if os.name == "nt":
